@@ -188,6 +188,23 @@ impl KeyCode {
         *self as u16
     }
 
+    /// Convert a numeric keycode to its digit value
+    pub fn to_digit(&self) -> Option<u32> {
+        match self {
+            Self::Num0 => Some(0),
+            Self::Num1 => Some(1),
+            Self::Num2 => Some(2),
+            Self::Num3 => Some(3),
+            Self::Num4 => Some(4),
+            Self::Num5 => Some(5),
+            Self::Num6 => Some(6),
+            Self::Num7 => Some(7),
+            Self::Num8 => Some(8),
+            Self::Num9 => Some(9),
+            _ => None,
+        }
+    }
+
     /// Convert a character to its keycode (lowercase)
     pub fn from_char(c: char) -> Option<Self> {
         match c.to_ascii_lowercase() {

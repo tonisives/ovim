@@ -7,20 +7,17 @@ mod window;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
-use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture};
-use keyboard::KeyCode;
+use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture, KeyCode, KeyEvent};
 use vim::{ProcessResult, VimAction, VimMode, VimState};
 use window::setup_indicator_window;
 
 /// Execute a VimAction on a separate thread with a small delay
-/// This ensures the key event is suppressed before the action executes
 fn execute_action_async(action: VimAction) {
     thread::spawn(move || {
-        // Small delay to ensure the original key event is fully suppressed
         thread::sleep(Duration::from_micros(500));
         if let Err(e) = action.execute() {
             log::error!("Failed to execute vim action: {}", e);
@@ -35,33 +32,30 @@ pub struct AppState {
     keyboard_capture: KeyboardCapture,
 }
 
-/// Check if accessibility permission is granted
+// Tauri commands
+
 #[tauri::command]
 fn check_permission() -> bool {
     check_accessibility_permission()
 }
 
-/// Request accessibility permission (shows system dialog)
 #[tauri::command]
 fn request_permission() -> bool {
     request_accessibility_permission()
 }
 
-/// Get current vim mode
 #[tauri::command]
 fn get_vim_mode(state: State<AppState>) -> String {
     let vim_state = state.vim_state.lock().unwrap();
     vim_state.mode().as_str().to_string()
 }
 
-/// Get current settings
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> Settings {
     let settings = state.settings.lock().unwrap();
     settings.clone()
 }
 
-/// Update settings
 #[tauri::command]
 fn set_settings(state: State<AppState>, new_settings: Settings) -> Result<(), String> {
     let mut settings = state.settings.lock().unwrap();
@@ -69,38 +63,27 @@ fn set_settings(state: State<AppState>, new_settings: Settings) -> Result<(), St
     settings.save()
 }
 
-/// Start keyboard capture
 #[tauri::command]
 fn start_capture(state: State<AppState>) -> Result<(), String> {
     state.keyboard_capture.start()
 }
 
-/// Stop keyboard capture
 #[tauri::command]
 fn stop_capture(state: State<AppState>) {
     state.keyboard_capture.stop()
 }
 
-/// Check if keyboard capture is running
 #[tauri::command]
 fn is_capture_running(state: State<AppState>) -> bool {
     state.keyboard_capture.is_running()
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    env_logger::init();
+// Helper functions
 
-    // Create vim state and mode receiver
-    let (vim_state, mode_rx) = VimState::new();
-    let vim_state = Arc::new(Mutex::new(vim_state));
-    let vim_state_for_callback = Arc::clone(&vim_state);
-
-    // Create keyboard capture
-    let keyboard_capture = KeyboardCapture::new();
-
-    // Set up the callback
-    keyboard_capture.set_callback(move |event| {
+fn create_keyboard_callback(
+    vim_state: Arc<Mutex<VimState>>,
+) -> impl Fn(KeyEvent) -> Option<KeyEvent> + Send + 'static {
+    move |event| {
         // Check for hyper+0 (Cmd+Ctrl+Option+Shift+0) to toggle vim mode
         if event.is_key_down {
             let is_hyper = event.modifiers.command
@@ -109,17 +92,15 @@ pub fn run() {
                 && event.modifiers.shift;
 
             if is_hyper && event.keycode() == Some(KeyCode::Num0) {
-                let mut state = vim_state_for_callback.lock().unwrap();
+                let mut state = vim_state.lock().unwrap();
                 let new_mode = state.toggle_mode();
                 log::info!("Hyper+0: toggled vim mode to {:?}", new_mode);
-                return None; // Suppress the key event
+                return None;
             }
         }
 
-        // Process the key and get the result
-        // Release the lock before executing any action
         let result = {
-            let mut state = vim_state_for_callback.lock().unwrap();
+            let mut state = vim_state.lock().unwrap();
             state.process_key(event)
         };
 
@@ -130,7 +111,6 @@ pub fn run() {
             }
             ProcessResult::SuppressWithAction(ref action) => {
                 log::debug!("SuppressWithAction: keycode={}, action={:?}", event.code, action);
-                // Execute action asynchronously after suppressing the key
                 execute_action_async(action.clone());
                 None
             }
@@ -140,26 +120,88 @@ pub fn run() {
             }
             ProcessResult::ModeChanged(_mode, action) => {
                 log::debug!("ModeChanged: keycode={}", event.code);
-                // Execute action asynchronously if present
                 if let Some(action) = action {
                     execute_action_async(action);
                 }
                 None
             }
         }
-    });
+    }
+}
 
-    // Load settings
+fn handle_ipc_command(
+    state: &mut VimState,
+    app_handle: &AppHandle,
+    cmd: IpcCommand,
+) -> IpcResponse {
+    match cmd {
+        IpcCommand::GetMode => {
+            IpcResponse::Mode(state.mode().as_str().to_string())
+        }
+        IpcCommand::Toggle => {
+            let new_mode = state.toggle_mode();
+            let _ = app_handle.emit("mode-change", new_mode.as_str());
+            IpcResponse::Mode(new_mode.as_str().to_string())
+        }
+        IpcCommand::Insert => {
+            state.set_mode_external(VimMode::Insert);
+            let _ = app_handle.emit("mode-change", "insert");
+            IpcResponse::Ok
+        }
+        IpcCommand::Normal => {
+            state.set_mode_external(VimMode::Normal);
+            let _ = app_handle.emit("mode-change", "normal");
+            IpcResponse::Ok
+        }
+        IpcCommand::Visual => {
+            state.set_mode_external(VimMode::Visual);
+            let _ = app_handle.emit("mode-change", "visual");
+            IpcResponse::Ok
+        }
+        IpcCommand::SetMode(mode_str) => {
+            handle_set_mode(state, app_handle, &mode_str)
+        }
+    }
+}
+
+fn handle_set_mode(state: &mut VimState, app_handle: &AppHandle, mode_str: &str) -> IpcResponse {
+    match mode_str.to_lowercase().as_str() {
+        "insert" | "i" => {
+            state.set_mode_external(VimMode::Insert);
+            let _ = app_handle.emit("mode-change", "insert");
+            IpcResponse::Ok
+        }
+        "normal" | "n" => {
+            state.set_mode_external(VimMode::Normal);
+            let _ = app_handle.emit("mode-change", "normal");
+            IpcResponse::Ok
+        }
+        "visual" | "v" => {
+            state.set_mode_external(VimMode::Visual);
+            let _ = app_handle.emit("mode-change", "visual");
+            IpcResponse::Ok
+        }
+        _ => IpcResponse::Error(format!("Unknown mode: {}", mode_str)),
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    env_logger::init();
+
+    let (vim_state, mode_rx) = VimState::new();
+    let vim_state = Arc::new(Mutex::new(vim_state));
+
+    let keyboard_capture = KeyboardCapture::new();
+    keyboard_capture.set_callback(create_keyboard_callback(Arc::clone(&vim_state)));
+
     let settings = Settings::load();
-
-    // Create app state with shared vim state
     let app_state = AppState {
         settings: Mutex::new(settings),
         vim_state: Arc::clone(&vim_state),
         keyboard_capture,
     };
 
-    // Store mode receiver for setup
     let mode_rx = Arc::new(Mutex::new(mode_rx));
 
     tauri::Builder::default()
@@ -176,18 +218,15 @@ pub fn run() {
             is_capture_running,
         ])
         .setup(move |app| {
-            // Get the indicator window and configure it
             if let Some(indicator_window) = app.get_webview_window("indicator") {
                 if let Err(e) = setup_indicator_window(&indicator_window) {
                     log::error!("Failed to setup indicator window: {}", e);
                 }
             }
 
-            // Set up mode change event emission
             let app_handle = app.handle().clone();
             let mut rx = mode_rx.lock().unwrap().resubscribe();
 
-            // Spawn task to forward mode changes to frontend
             tauri::async_runtime::spawn(async move {
                 while let Ok(mode) = rx.recv().await {
                     log::info!("Mode changed to: {:?}", mode);
@@ -195,7 +234,6 @@ pub fn run() {
                 }
             });
 
-            // Auto-start keyboard capture if permission is granted
             if check_accessibility_permission() {
                 let state: State<AppState> = app.state();
                 if let Err(e) = state.keyboard_capture.start() {
@@ -205,61 +243,15 @@ pub fn run() {
                 }
             } else {
                 log::warn!("Accessibility permission not granted, requesting...");
-                // Request permission - this will show the system dialog
                 request_accessibility_permission();
             }
 
-            // Start IPC server for CLI control
             let vim_state_for_ipc = Arc::clone(&vim_state);
             let app_handle_for_ipc = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let handler = move |cmd: IpcCommand| -> IpcResponse {
                     let mut state = vim_state_for_ipc.lock().unwrap();
-                    match cmd {
-                        IpcCommand::GetMode => {
-                            IpcResponse::Mode(state.mode().as_str().to_string())
-                        }
-                        IpcCommand::Toggle => {
-                            let new_mode = state.toggle_mode();
-                            let _ = app_handle_for_ipc.emit("mode-change", new_mode.as_str());
-                            IpcResponse::Mode(new_mode.as_str().to_string())
-                        }
-                        IpcCommand::Insert => {
-                            state.set_mode_external(VimMode::Insert);
-                            let _ = app_handle_for_ipc.emit("mode-change", "insert");
-                            IpcResponse::Ok
-                        }
-                        IpcCommand::Normal => {
-                            state.set_mode_external(VimMode::Normal);
-                            let _ = app_handle_for_ipc.emit("mode-change", "normal");
-                            IpcResponse::Ok
-                        }
-                        IpcCommand::Visual => {
-                            state.set_mode_external(VimMode::Visual);
-                            let _ = app_handle_for_ipc.emit("mode-change", "visual");
-                            IpcResponse::Ok
-                        }
-                        IpcCommand::SetMode(mode_str) => {
-                            match mode_str.to_lowercase().as_str() {
-                                "insert" | "i" => {
-                                    state.set_mode_external(VimMode::Insert);
-                                    let _ = app_handle_for_ipc.emit("mode-change", "insert");
-                                    IpcResponse::Ok
-                                }
-                                "normal" | "n" => {
-                                    state.set_mode_external(VimMode::Normal);
-                                    let _ = app_handle_for_ipc.emit("mode-change", "normal");
-                                    IpcResponse::Ok
-                                }
-                                "visual" | "v" => {
-                                    state.set_mode_external(VimMode::Visual);
-                                    let _ = app_handle_for_ipc.emit("mode-change", "visual");
-                                    IpcResponse::Ok
-                                }
-                                _ => IpcResponse::Error(format!("Unknown mode: {}", mode_str)),
-                            }
-                        }
-                    }
+                    handle_ipc_command(&mut state, &app_handle_for_ipc, cmd)
                 };
 
                 if let Err(e) = ipc::start_ipc_server(handler).await {
