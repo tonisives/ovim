@@ -65,7 +65,6 @@ fn set_settings(app: AppHandle, state: State<AppState>, new_settings: Settings) 
     *settings = new_settings.clone();
     settings.save()?;
 
-    // Emit settings-changed event so windows can update
     let _ = app.emit("settings-changed", new_settings);
     Ok(())
 }
@@ -313,6 +312,17 @@ pub fn run() {
                 if let Err(e) = setup_indicator_window(&indicator_window) {
                     log::error!("Failed to setup indicator window: {}", e);
                 }
+            }
+
+            // Prevent settings window from being destroyed on close - just hide it
+            if let Some(settings_window) = app.get_webview_window("settings") {
+                let window = settings_window.clone();
+                settings_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                });
             }
 
             let app_handle = app.handle().clone();

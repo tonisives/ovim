@@ -39,7 +39,7 @@ export function SettingsApp() {
     setSaving(true);
 
     try {
-      await invoke("set_settings", { new_settings: newSettings });
+      await invoke("set_settings", { newSettings });
     } catch (e) {
       console.error("Failed to save settings:", e);
     } finally {
