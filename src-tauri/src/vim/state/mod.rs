@@ -117,6 +117,40 @@ impl VimState {
         self.pending_count.unwrap_or(1)
     }
 
+    /// Get a string representation of pending keys for display
+    pub fn get_pending_keys(&self) -> String {
+        let mut buf = String::new();
+        if let Some(count) = self.pending_count {
+            buf.push_str(&count.to_string());
+        }
+        if let Some(ref op) = self.pending_operator {
+            buf.push(match op {
+                Operator::Delete => 'd',
+                Operator::Yank => 'y',
+                Operator::Change => 'c',
+            });
+        }
+        if self.pending_g {
+            buf.push('g');
+        }
+        if self.pending_r {
+            buf.push('r');
+        }
+        if let Some(ref modifier) = self.pending_text_object {
+            buf.push(match modifier {
+                TextObjectModifier::Inner => 'i',
+                TextObjectModifier::Around => 'a',
+            });
+        }
+        if let Some(ref dir) = self.pending_indent {
+            buf.push(match dir {
+                IndentDirection::Indent => '>',
+                IndentDirection::Outdent => '<',
+            });
+        }
+        buf
+    }
+
     /// Process a key event and return what to do with it
     pub fn process_key(&mut self, event: KeyEvent) -> ProcessResult {
         // For key up events in Normal/Visual mode, suppress keys that we would suppress on key down

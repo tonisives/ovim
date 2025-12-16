@@ -10,7 +10,7 @@ import {
 } from "@tauri-apps/api/window"
 
 type VimMode = "insert" | "normal" | "visual"
-type WidgetType = "None" | "Time" | "CharacterCount" | "LineCount" | "CharacterAndLineCount"
+type WidgetType = "None" | "Time" | "Date" | "CharacterCount" | "LineCount" | "CharacterAndLineCount" | "Battery" | "CapsLock" | "KeystrokeBuffer"
 
 interface Settings {
   indicator_position: number
@@ -29,17 +29,122 @@ function formatTime(): string {
   return `${hours}:${minutes}`
 }
 
+function formatDate(): string {
+  const now = new Date()
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+  const day = days[now.getDay()]
+  const date = now.getDate()
+  return `${day} ${date}`
+}
+
+interface SelectionInfo {
+  char_count: number
+  line_count: number
+}
+
+interface BatteryInfo {
+  percentage: number
+  is_charging: boolean
+}
+
 function Widget({ type }: { type: WidgetType }) {
   const [time, setTime] = useState(formatTime)
+  const [date, setDate] = useState(formatDate)
+  const [selection, setSelection] = useState<SelectionInfo | null>(null)
+  const [battery, setBattery] = useState<BatteryInfo | null>(null)
+  const [capsLock, setCapsLock] = useState(false)
+  const [pendingKeys, setPendingKeys] = useState("")
 
+  // Time effect
   useEffect(() => {
     if (type !== "Time") return
-
-    const interval = setInterval(() => {
-      setTime(formatTime())
-    }, 1000)
-
+    const interval = setInterval(() => setTime(formatTime()), 1000)
     return () => clearInterval(interval)
+  }, [type])
+
+  // Date effect
+  useEffect(() => {
+    if (type !== "Date") return
+    const interval = setInterval(() => setDate(formatDate()), 60000)
+    return () => clearInterval(interval)
+  }, [type])
+
+  // Selection effect
+  useEffect(() => {
+    if (!["CharacterCount", "LineCount", "CharacterAndLineCount"].includes(type)) return
+
+    const fetchSelection = async () => {
+      try {
+        const info = await invoke<SelectionInfo>("get_selection_info")
+        setSelection(info)
+      } catch {
+        setSelection(null)
+      }
+    }
+
+    fetchSelection()
+    const interval = setInterval(fetchSelection, 500)
+    return () => clearInterval(interval)
+  }, [type])
+
+  // Battery effect
+  useEffect(() => {
+    if (type !== "Battery") return
+
+    const fetchBattery = async () => {
+      try {
+        const info = await invoke<BatteryInfo | null>("get_battery_info")
+        setBattery(info)
+      } catch {
+        setBattery(null)
+      }
+    }
+
+    fetchBattery()
+    const interval = setInterval(fetchBattery, 60000)
+    return () => clearInterval(interval)
+  }, [type])
+
+  // Caps Lock effect
+  useEffect(() => {
+    if (type !== "CapsLock") return
+
+    const fetchCapsLock = () => {
+      invoke<boolean>("get_caps_lock_state").then(setCapsLock).catch(() => {})
+    }
+
+    fetchCapsLock()
+    const interval = setInterval(fetchCapsLock, 200)
+
+    const unlisten = listen<boolean>("caps-lock-changed", (event) => {
+      setCapsLock(event.payload)
+    })
+
+    return () => {
+      clearInterval(interval)
+      unlisten.then((fn) => fn())
+    }
+  }, [type])
+
+  // Keystroke buffer effect
+  useEffect(() => {
+    if (type !== "KeystrokeBuffer") return
+
+    const fetchPendingKeys = () => {
+      invoke<string>("get_pending_keys").then(setPendingKeys).catch(() => {})
+    }
+
+    fetchPendingKeys()
+    const interval = setInterval(fetchPendingKeys, 100)
+
+    const unlisten = listen<string>("pending-keys-changed", (event) => {
+      setPendingKeys(event.payload)
+    })
+
+    return () => {
+      clearInterval(interval)
+      unlisten.then((fn) => fn())
+    }
   }, [type])
 
   if (type === "None") return null
@@ -49,17 +154,34 @@ function Widget({ type }: { type: WidgetType }) {
     case "Time":
       content = time
       break
+    case "Date":
+      content = date
+      break
     case "CharacterCount":
-      content = "-" // TODO: implement selection tracking
+      content = selection ? `${selection.char_count}c` : "-"
       break
     case "LineCount":
-      content = "-" // TODO: implement selection tracking
+      content = selection ? `${selection.line_count}L` : "-"
       break
     case "CharacterAndLineCount":
-      content = "-" // TODO: implement selection tracking
+      content = selection ? `${selection.char_count}c ${selection.line_count}L` : "-"
+      break
+    case "Battery":
+      content = battery ? `${battery.percentage}%` : "-"
+      break
+    case "CapsLock":
+      content = capsLock ? "CAPS" : ""
+      break
+    case "KeystrokeBuffer":
+      content = pendingKeys || ""
       break
     default:
       return null
+  }
+
+  // Don't render empty content for CapsLock and KeystrokeBuffer
+  if ((type === "CapsLock" || type === "KeystrokeBuffer") && !content) {
+    return null
   }
 
   return (

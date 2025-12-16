@@ -34,11 +34,7 @@ impl Default for Settings {
             indicator_position: 1, // Top center
             indicator_opacity: 0.9,
             indicator_size: 1.0,
-            ignored_apps: vec![
-                "com.apple.Terminal".to_string(),
-                "com.googlecode.iterm2".to_string(),
-                "com.microsoft.VSCode".to_string(),
-            ],
+            ignored_apps: vec![],
             launch_at_login: false,
             show_in_menu_bar: true,
             top_widget: "None".to_string(),

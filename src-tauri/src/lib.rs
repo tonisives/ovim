@@ -5,6 +5,7 @@ mod config;
 pub mod ipc;
 mod keyboard;
 mod vim;
+mod widgets;
 mod window;
 
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,9 @@ use tauri::{
     menu::{Menu, MenuItem},
     AppHandle, Emitter, Manager, State,
 };
+
+#[cfg(target_os = "macos")]
+use objc::{class, msg_send, sel, sel_impl};
 
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
@@ -33,7 +37,7 @@ fn execute_action_async(action: VimAction) {
 
 /// Application state shared across commands
 pub struct AppState {
-    settings: Mutex<Settings>,
+    settings: Arc<Mutex<Settings>>,
     vim_state: Arc<Mutex<VimState>>,
     keyboard_capture: KeyboardCapture,
 }
@@ -137,10 +141,71 @@ fn is_capture_running(state: State<AppState>) -> bool {
     state.keyboard_capture.is_running()
 }
 
+#[tauri::command]
+fn get_selection_info() -> widgets::selection::SelectionInfo {
+    widgets::selection::get_selection_info()
+}
+
+#[tauri::command]
+fn get_battery_info() -> Option<widgets::battery::BatteryInfo> {
+    widgets::battery::get_battery_info()
+}
+
+#[tauri::command]
+fn get_caps_lock_state() -> bool {
+    widgets::capslock::is_caps_lock_on()
+}
+
+#[tauri::command]
+fn get_pending_keys(state: State<AppState>) -> String {
+    let vim_state = state.vim_state.lock().unwrap();
+    vim_state.get_pending_keys()
+}
+
 // Helper functions
+
+/// Get the bundle identifier of the frontmost (currently focused) application
+#[cfg(target_os = "macos")]
+fn get_frontmost_app_bundle_id() -> Option<String> {
+    unsafe {
+        let workspace: *mut objc::runtime::Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return None;
+        }
+        let app: *mut objc::runtime::Object = msg_send![workspace, frontmostApplication];
+        if app.is_null() {
+            return None;
+        }
+        let bundle_id: *mut objc::runtime::Object = msg_send![app, bundleIdentifier];
+        if bundle_id.is_null() {
+            return None;
+        }
+        let utf8: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
+        if utf8.is_null() {
+            return None;
+        }
+        Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
+    }
+}
+
+/// Check if the frontmost app is in the ignored apps list.
+/// Returns false early if the list is empty (no NSWorkspace call needed).
+fn is_frontmost_app_ignored(ignored_apps: &[String]) -> bool {
+    if ignored_apps.is_empty() {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(bundle_id) = get_frontmost_app_bundle_id() {
+            return ignored_apps.iter().any(|id| id == &bundle_id);
+        }
+    }
+    false
+}
 
 fn create_keyboard_callback(
     vim_state: Arc<Mutex<VimState>>,
+    settings: Arc<Mutex<Settings>>,
 ) -> impl Fn(KeyEvent) -> Option<KeyEvent> + Send + 'static {
     move |event| {
         // Check for hyper+0 (Cmd+Ctrl+Option+Shift+0) to toggle vim mode
@@ -151,10 +216,29 @@ fn create_keyboard_callback(
                 && event.modifiers.shift;
 
             if is_hyper && event.keycode() == Some(KeyCode::Num0) {
+                // Check if app is ignored before entering vim mode
+                let ignored_apps = settings.lock().unwrap().ignored_apps.clone();
+                if is_frontmost_app_ignored(&ignored_apps) {
+                    log::debug!("Hyper+0: ignored app, passing through");
+                    return Some(event);
+                }
                 let mut state = vim_state.lock().unwrap();
                 let new_mode = state.toggle_mode();
                 log::info!("Hyper+0: toggled vim mode to {:?}", new_mode);
                 return None;
+            }
+        }
+
+        // Check if this is the vim key (CapsLock) trying to enter Normal mode
+        // Only check ignored apps when transitioning from Insert to Normal
+        if event.is_key_down && event.keycode() == Some(KeyCode::CapsLock) {
+            let current_mode = vim_state.lock().unwrap().mode();
+            if current_mode == VimMode::Insert {
+                let ignored_apps = settings.lock().unwrap().ignored_apps.clone();
+                if is_frontmost_app_ignored(&ignored_apps) {
+                    log::debug!("CapsLock: ignored app, passing through");
+                    return Some(event);
+                }
             }
         }
 
@@ -251,12 +335,16 @@ pub fn run() {
     let (vim_state, mode_rx) = VimState::new();
     let vim_state = Arc::new(Mutex::new(vim_state));
 
-    let keyboard_capture = KeyboardCapture::new();
-    keyboard_capture.set_callback(create_keyboard_callback(Arc::clone(&vim_state)));
+    let settings = Arc::new(Mutex::new(Settings::load()));
 
-    let settings = Settings::load();
+    let keyboard_capture = KeyboardCapture::new();
+    keyboard_capture.set_callback(create_keyboard_callback(
+        Arc::clone(&vim_state),
+        Arc::clone(&settings),
+    ));
+
     let app_state = AppState {
-        settings: Mutex::new(settings),
+        settings,
         vim_state: Arc::clone(&vim_state),
         keyboard_capture,
     };
@@ -277,6 +365,10 @@ pub fn run() {
             is_capture_running,
             open_settings_window,
             pick_app,
+            get_selection_info,
+            get_battery_info,
+            get_caps_lock_state,
+            get_pending_keys,
         ])
         .setup(move |app| {
             // Hide dock icon - this is a menu bar app

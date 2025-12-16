@@ -9,10 +9,14 @@ interface Props {
 
 const WIDGET_OPTIONS = [
   { value: "None", label: "None" },
-  { value: "Time", label: "Time" },
-  { value: "CharacterCount", label: "Selected character count" },
-  { value: "LineCount", label: "Selected lines count" },
-  { value: "CharacterAndLineCount", label: "Character and line count" },
+  { value: "Time", label: "Time (HH:MM)" },
+  { value: "Date", label: "Date" },
+  { value: "CharacterCount", label: "Selected chars" },
+  { value: "LineCount", label: "Selected lines" },
+  { value: "CharacterAndLineCount", label: "Chars + lines" },
+  { value: "Battery", label: "Battery %" },
+  { value: "CapsLock", label: "Caps Lock" },
+  { value: "KeystrokeBuffer", label: "Pending keys" },
 ];
 
 export function WidgetSettings({ settings, onUpdate }: Props) {
