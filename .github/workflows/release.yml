@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  release:
+    types:
+      - created
+  workflow_dispatch:
+
+jobs:
+  # Build GUI app with Tauri
+  gui:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            arch: 'aarch64'
+          - platform: 'macos-latest'
+            args: '--target x86_64-apple-darwin'
+            arch: 'x64'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Update version if release starts with 'v'
+        shell: bash
+        run: ./etc/update-version.sh "${{ github.ref_name }}"
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Import Code-Signing Certificates (macOS)
+        uses: Apple-Actions/import-codesign-certs@v2
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Build the app
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ovim v__VERSION__'
+          releaseBody: 'See the assets to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Rename macOS DMG for Homebrew
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find the DMG file in the artifacts
+          DMG_PATH=$(find target -name "*.dmg" -type f 2>/dev/null | head -1)
+          if [ -n "$DMG_PATH" ]; then
+            NEW_NAME="ovim_${{ matrix.arch }}.dmg"
+            # Copy to new name and upload
+            cp "$DMG_PATH" "$NEW_NAME"
+            gh release upload "${{ github.ref_name }}" "$NEW_NAME" --clobber --repo "${{ github.repository }}"
+          fi
+
+  # Update Homebrew tap with new SHA256 checksums
+  update-homebrew:
+    needs: [gui]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download release artifacts and calculate checksums
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Download GUI artifacts (DMG)
+          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_aarch64.dmg" -o dmg-arm.dmg
+          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_x64.dmg" -o dmg-intel.dmg
+
+          # Calculate GUI checksums
+          echo "SHA256_DMG_ARM=$(sha256sum dmg-arm.dmg | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA256_DMG_INTEL=$(sha256sum dmg-intel.dmg | cut -d' ' -f1)" >> $GITHUB_ENV
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: tonisives/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update cask
+        run: |
+          cd homebrew-tap
+
+          # Update Cask with arch-specific checksums
+          awk -v arm="$SHA256_DMG_ARM" -v intel="$SHA256_DMG_INTEL" '
+            /^cask/ { in_cask=1 }
+            /sha256.*:no_check/ && in_cask {
+              print "  sha256 arm: \"" arm "\", intel: \"" intel "\""
+              next
+            }
+            /sha256 arm:/ && in_cask {
+              print "  sha256 arm: \"" arm "\", intel: \"" intel "\""
+              next
+            }
+            { print }
+          ' Casks/ovim.rb > Casks/ovim.rb.tmp && mv Casks/ovim.rb.tmp Casks/ovim.rb
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/ovim.rb
+          git diff --staged --quiet || git commit -m "Update ovim to ${{ github.ref_name }}"
+          git push
