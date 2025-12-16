@@ -2500,6 +2500,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ovim-rust"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cocoa",
+ "core-foundation",
+ "core-graphics 0.25.0",
+ "dirs",
+ "env_logger",
+ "log",
+ "objc",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3990,27 +4011,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
-]
-
-[[package]]
-name = "ti-vim-rust"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cocoa",
- "core-foundation",
- "core-graphics 0.25.0",
- "dirs",
- "env_logger",
- "log",
- "objc",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "thiserror 2.0.17",
- "tokio",
 ]
 
 [[package]]

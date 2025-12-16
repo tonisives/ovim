@@ -51,7 +51,7 @@ impl Default for Settings {
 impl Settings {
     /// Get the path to the settings file
     pub fn file_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("ti-vim").join("settings.json"))
+        dirs::config_dir().map(|p| p.join("ovim").join("settings.json"))
     }
 
     /// Load settings from disk

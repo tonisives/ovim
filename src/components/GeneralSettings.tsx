@@ -1,8 +1,8 @@
-import type { Settings } from "./SettingsApp";
+import type { Settings } from "./SettingsApp"
 
 interface Props {
-  settings: Settings;
-  onUpdate: (updates: Partial<Settings>) => void;
+  settings: Settings
+  onUpdate: (updates: Partial<Settings>) => void
 }
 
 const VIM_KEY_OPTIONS = [
@@ -10,12 +10,12 @@ const VIM_KEY_OPTIONS = [
   { value: "escape", label: "Escape" },
   { value: "right_control", label: "Right Control" },
   { value: "right_option", label: "Right Option" },
-];
+]
 
 const ICON_STYLE_OPTIONS = [
   { value: true, label: "Menu Bar" },
   { value: false, label: "Hidden" },
-];
+]
 
 export function GeneralSettings({ settings, onUpdate }: Props) {
   return (
@@ -44,7 +44,7 @@ export function GeneralSettings({ settings, onUpdate }: Props) {
             checked={settings.launch_at_login}
             onChange={(e) => onUpdate({ launch_at_login: e.target.checked })}
           />
-          Launch ti-vim at login
+          Launch ovim at login
         </label>
       </div>
 
@@ -53,9 +53,7 @@ export function GeneralSettings({ settings, onUpdate }: Props) {
         <select
           id="icon-style"
           value={settings.show_in_menu_bar ? "true" : "false"}
-          onChange={(e) =>
-            onUpdate({ show_in_menu_bar: e.target.value === "true" })
-          }
+          onChange={(e) => onUpdate({ show_in_menu_bar: e.target.value === "true" })}
         >
           {ICON_STYLE_OPTIONS.map((opt) => (
             <option key={String(opt.value)} value={String(opt.value)}>
@@ -65,5 +63,5 @@ export function GeneralSettings({ settings, onUpdate }: Props) {
         </select>
       </div>
     </div>
-  );
+  )
 }

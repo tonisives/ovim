@@ -279,6 +279,10 @@ pub fn run() {
             pick_app,
         ])
         .setup(move |app| {
+            // Hide dock icon - this is a menu bar app
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             // Set up tray menu on existing tray icon from tauri.conf.json
             let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;

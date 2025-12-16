@@ -1,17 +1,17 @@
 [package]
-name = "ti-vim-rust"
+name = "ovim-rust"
 version = "0.1.0"
 description = "System-wide Vim mode for macOS"
 authors = ["tonis"]
 edition = "2021"
-default-run = "ti-vim-rust"
+default-run = "ovim-rust"
 
 [lib]
 name = "ti_vim_rust_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "ti-vim"
+name = "ovim"
 path = "src/cli.rs"
 
 [build-dependencies]

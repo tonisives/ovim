@@ -8,6 +8,6 @@ pnpm tauri build
 
 ## Build just the Rust CLI binary:
 
-cd src-tauri && cargo build --release --bin ti-vim
+cd src-tauri && cargo build --release --bin ovim
 
-The binary will be at src-tauri/target/release/ti-vim
+The binary will be at src-tauri/target/release/ovim

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ti-vim",
+  "productName": "ovim",
   "version": "0.1.0",
-  "identifier": "com.tonis.ti-vim",
+  "identifier": "com.tonis.ovim",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "trayIcon": {
       "id": "main",
-      "iconPath": "icons/32x32.png",
+      "iconPath": "icons/tray-icon.png",
       "iconAsTemplate": true
     },
     "windows": [
@@ -34,7 +34,7 @@
       },
       {
         "label": "settings",
-        "title": "ti-vim Settings",
+        "title": "ovim Settings",
         "url": "/settings.html",
         "width": 600,
         "height": 500,

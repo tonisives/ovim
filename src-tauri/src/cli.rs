@@ -26,7 +26,7 @@ fn socket_path() -> PathBuf {
     let runtime_dir = dirs::runtime_dir()
         .or_else(dirs::cache_dir)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    runtime_dir.join("ti-vim.sock")
+    runtime_dir.join("ovim.sock")
 }
 
 async fn send_command(cmd: IpcCommand) -> Result<IpcResponse, String> {
@@ -34,7 +34,7 @@ async fn send_command(cmd: IpcCommand) -> Result<IpcResponse, String> {
 
     let stream = UnixStream::connect(&path)
         .await
-        .map_err(|e| format!("Failed to connect to ti-vim (is it running?): {}", e))?;
+        .map_err(|e| format!("Failed to connect to ovim (is it running?): {}", e))?;
 
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -57,9 +57,9 @@ async fn send_command(cmd: IpcCommand) -> Result<IpcResponse, String> {
 }
 
 fn print_usage() {
-    eprintln!("ti-vim - System-wide Vim mode control");
+    eprintln!("ovim - System-wide Vim mode control");
     eprintln!();
-    eprintln!("Usage: ti-vim <command>");
+    eprintln!("Usage: ovim <command>");
     eprintln!();
     eprintln!("Commands:");
     eprintln!("  mode          Get current mode");
@@ -70,9 +70,9 @@ fn print_usage() {
     eprintln!("  set <mode>    Set mode to insert/normal/visual");
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  ti-vim toggle     # Toggle mode (useful for Karabiner)");
-    eprintln!("  ti-vim normal     # Enter normal mode");
-    eprintln!("  ti-vim insert     # Enter insert mode");
+    eprintln!("  ovim toggle     # Toggle mode (useful for Karabiner)");
+    eprintln!("  ovim normal     # Enter normal mode");
+    eprintln!("  ovim insert     # Enter insert mode");
 }
 
 #[tokio::main(flavor = "current_thread")]

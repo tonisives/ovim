@@ -7,7 +7,7 @@ pub fn socket_path() -> PathBuf {
     let runtime_dir = dirs::runtime_dir()
         .or_else(dirs::cache_dir)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    runtime_dir.join("ti-vim.sock")
+    runtime_dir.join("ovim.sock")
 }
 
 /// IPC command from CLI to main app
@@ -105,13 +105,13 @@ where
     Ok(())
 }
 
-/// Send a command to the running ti-vim instance
+/// Send a command to the running ovim instance
 pub async fn send_command(cmd: IpcCommand) -> Result<IpcResponse, String> {
     let path = socket_path();
 
     let stream = UnixStream::connect(&path)
         .await
-        .map_err(|e| format!("Failed to connect to ti-vim (is it running?): {}", e))?;
+        .map_err(|e| format!("Failed to connect to ovim (is it running?): {}", e))?;
 
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
