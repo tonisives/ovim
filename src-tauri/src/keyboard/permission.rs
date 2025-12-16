@@ -22,9 +22,6 @@ pub fn request_accessibility_permission() -> bool {
         let key = CFString::new(K_AX_TRUSTED_CHECK_OPTION_PROMPT);
         let value = CFBoolean::true_value();
 
-        let keys = [key.as_CFType()];
-        let values = [value.as_CFType()];
-
         let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
 
         AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef())

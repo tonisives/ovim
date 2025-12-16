@@ -2,6 +2,7 @@
 /// Reference: https://developer.apple.com/documentation/carbon/1430449-virtual_key_codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
+#[allow(dead_code)]
 pub enum KeyCode {
     // Letters
     A = 0x00,

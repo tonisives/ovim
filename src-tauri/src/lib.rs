@@ -1,3 +1,6 @@
+// Allow unexpected_cfgs from the objc crate's macros which use cfg(feature = "cargo-clippy")
+#![allow(unexpected_cfgs)]
+
 mod config;
 pub mod ipc;
 mod keyboard;
@@ -294,17 +297,6 @@ pub fn run() {
                         app.exit(0);
                     }
                     _ => {}
-                });
-                tray.on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click { button, .. } = event {
-                        if button == tauri::tray::MouseButton::Left {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("settings") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    }
                 });
             }
 

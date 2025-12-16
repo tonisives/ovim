@@ -43,8 +43,17 @@ dirs = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
-objc = "0.2"
+objc = "0.2.7"
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[lints.rust]
+warnings = "deny"
+unused = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = "warn"
+nursery = "warn"

@@ -1,7 +1,13 @@
-# Tauri + React + Typescript
+## Development mode:
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+pnpm tauri dev
 
-## Recommended IDE Setup
+## Production build:
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+pnpm tauri build
+
+## Build just the Rust CLI binary:
+
+cd src-tauri && cargo build --release --bin ti-vim
+
+The binary will be at src-tauri/target/release/ti-vim
