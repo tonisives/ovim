@@ -24,7 +24,14 @@ pub fn trigger_nvim_edit(
         .ok_or("No focused application found")?;
     log::info!("Captured focus context: {:?}", focus_context);
 
-    // 2. Get text from the focused element (try accessibility first, then clipboard fallback)
+    // 2. Capture geometry info BEFORE any clipboard operations (which may change focus)
+    log::info!("popup_mode={}, popup_width={}, popup_height={}", settings.popup_mode, settings.popup_width, settings.popup_height);
+    let element_frame = accessibility::get_focused_element_frame();
+    let window_frame = accessibility::get_focused_window_frame();
+    log::info!("Element frame: {:?}", element_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
+    log::info!("Window frame: {:?}", window_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
+
+    // 3. Get text from the focused element (try accessibility first, then clipboard fallback)
     let mut text = accessibility::get_focused_element_text().unwrap_or_default();
     log::info!("Got text from accessibility API: {} chars", text.len());
 
@@ -37,12 +44,10 @@ pub fn trigger_nvim_edit(
         }
     }
 
-    // 3. Calculate window geometry if popup mode is enabled
+    // 4. Calculate window geometry if popup mode is enabled
     let geometry = if settings.popup_mode {
         // Try to get element frame from accessibility API
-        let frame_geometry = accessibility::get_focused_element_frame().map(|frame| {
-            log::info!("Element frame: x={}, y={}, w={}, h={}", frame.x, frame.y, frame.width, frame.height);
-
+        let frame_geometry = element_frame.map(|frame| {
             // Position window below the text field
             let x = frame.x as i32;
             let y = (frame.y + frame.height) as i32 + 4; // 4px gap below field
@@ -56,14 +61,13 @@ pub fn trigger_nvim_edit(
 
             let height = settings.popup_height;
 
+            log::info!("Using element frame geometry: x={}, y={}, w={}, h={}", x, y, width, height);
             WindowGeometry { x, y, width, height }
         });
 
-        // If element frame not available (e.g., web views), use mouse position as fallback
-        frame_geometry.or_else(|| {
-            accessibility::get_mouse_position().map(|(mouse_x, mouse_y)| {
-                log::info!("Using mouse position fallback: x={}, y={}", mouse_x, mouse_y);
-
+        // If element frame not available (e.g., web views), center in the focused window
+        let result = frame_geometry.or_else(|| {
+            window_frame.map(|wf| {
                 let width = if settings.popup_width > 0 {
                     settings.popup_width
                 } else {
@@ -72,18 +76,26 @@ pub fn trigger_nvim_edit(
 
                 let height = settings.popup_height;
 
-                // Position window slightly below and to the right of cursor
-                WindowGeometry {
-                    x: mouse_x as i32,
-                    y: mouse_y as i32 + 20,
-                    width,
-                    height,
-                }
+                // Center popup in the focused window
+                let x = (wf.x + (wf.width - width as f64) / 2.0) as i32;
+                let y = (wf.y + (wf.height - height as f64) / 2.0) as i32;
+
+                log::info!("Using window frame geometry (centered): x={}, y={}, w={}, h={}", x, y, width, height);
+                WindowGeometry { x, y, width, height }
             })
-        })
+        });
+
+        if result.is_none() {
+            log::warn!("No geometry available - window will open at default size/position");
+        }
+
+        result
     } else {
+        log::info!("popup_mode is disabled");
         None
     };
+
+    log::info!("Final geometry: {:?}", geometry);
 
     // 4. Start edit session (writes temp file, spawns terminal)
     let session_id = manager.start_session(focus_context, text.clone(), settings.clone(), geometry)?;

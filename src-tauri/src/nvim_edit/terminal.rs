@@ -112,14 +112,41 @@ fn spawn_alacritty(nvim_path: &str, file_path: &str, geometry: Option<WindowGeom
     let resolved_nvim = resolve_command_path(nvim_path);
     log::info!("Resolved nvim path: {} -> {}", nvim_path, resolved_nvim);
 
+    // Start the resize watcher BEFORE spawning to minimize flash
+    if let Some(geo) = geometry.clone() {
+        let title = unique_title.clone();
+        std::thread::spawn(move || {
+            // Poll rapidly to catch the window as soon as it appears
+            for _attempt in 0..200 {
+                if let Some(index) = find_alacritty_window_by_title(&title) {
+                    log::info!("Found window '{}' at index {}, setting bounds", title, index);
+                    set_window_bounds_atomic("Alacritty", index, geo.x, geo.y, geo.width, geo.height);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            log::warn!("Timeout waiting for Alacritty window '{}'", title);
+        });
+    }
+
+    // Calculate initial window size - use geometry if provided, otherwise quarter screen centered
+    let (init_columns, init_lines) = if let Some(ref geo) = geometry {
+        // Convert pixels to columns/lines (approximate: 8px per col, 16px per line)
+        ((geo.width / 8).max(40) as u32, (geo.height / 16).max(10) as u32)
+    } else {
+        (80, 24) // Default terminal size
+    };
+
     // Use `alacritty msg create-window` to create window in existing daemon
-    // with dynamic_title=false so our title sticks
-    // Use "+normal G$" to move cursor to end of file (G = last line, $ = end of line)
+    // Override startup_mode to Windowed and set initial dimensions
     let result = Command::new("alacritty")
         .args([
             "msg", "create-window",
             "-o", &format!("window.title=\"{}\"", unique_title),
             "-o", "window.dynamic_title=false",
+            "-o", "window.startup_mode=\"Windowed\"",
+            "-o", &format!("window.dimensions.columns={}", init_columns),
+            "-o", &format!("window.dimensions.lines={}", init_lines),
             "-e", &resolved_nvim, "+normal G$", file_path,
         ])
         .spawn();
@@ -133,6 +160,9 @@ fn spawn_alacritty(nvim_path: &str, file_path: &str, geometry: Option<WindowGeom
                 .args([
                     "-o", &format!("window.title=\"{}\"", unique_title),
                     "-o", "window.dynamic_title=false",
+                    "-o", "window.startup_mode=\"Windowed\"",
+                    "-o", &format!("window.dimensions.columns={}", init_columns),
+                    "-o", &format!("window.dimensions.lines={}", init_lines),
                     "-e", &resolved_nvim, "+normal G$", file_path,
                 ])
                 .spawn()
@@ -143,26 +173,6 @@ fn spawn_alacritty(nvim_path: &str, file_path: &str, geometry: Option<WindowGeom
     // Wait a bit for nvim to start, then find its PID by the file it's editing
     let pid = find_nvim_pid_for_file(file_path);
     log::info!("Found nvim PID: {:?} for file: {}", pid, file_path);
-
-    // Set window position/size on the NEW window by finding it by title
-    if let Some(geo) = geometry {
-        let title = unique_title.clone();
-        std::thread::spawn(move || {
-            // Poll until we find the window with our title
-            for attempt in 0..50 {
-                if let Some(index) = find_alacritty_window_by_title(&title) {
-                    log::info!("Found window '{}' at index {}", title, index);
-                    set_window_bounds_by_index("Alacritty", index, geo.x, geo.y, geo.width, geo.height);
-                    return;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                if attempt % 10 == 0 {
-                    log::info!("Waiting for window '{}' (attempt {})", title, attempt);
-                }
-            }
-            log::warn!("Timeout waiting for Alacritty window '{}'", title);
-        });
-    }
 
     Ok(SpawnInfo {
         terminal_type: TerminalType::Alacritty,
@@ -422,6 +432,23 @@ fn resolve_command_path(cmd: &str) -> String {
 
 /// Find Alacritty window index by title (returns 1-based index)
 fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
+    // First, let's list all window titles to debug
+    let list_script = r#"
+        tell application "System Events"
+            tell process "Alacritty"
+                set windowNames to {}
+                repeat with i from 1 to (count of windows)
+                    set end of windowNames to name of window i
+                end repeat
+                return windowNames
+            end tell
+        end tell
+        "#;
+
+    if let Ok(out) = Command::new("osascript").arg("-e").arg(list_script).output() {
+        log::info!("Alacritty window titles: {}", String::from_utf8_lossy(&out.stdout).trim());
+    }
+
     let script = format!(
         r#"
         tell application "System Events"
@@ -449,6 +476,7 @@ fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
         if out.status.success() {
             let index_str = String::from_utf8_lossy(&out.stdout);
             let index: usize = index_str.trim().parse().unwrap_or(0);
+            log::info!("Search for '{}' returned index: {}", title, index);
             if index > 0 {
                 return Some(index);
             }
@@ -458,6 +486,7 @@ fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
 }
 
 /// Set window bounds by window index (1-based)
+#[allow(dead_code)]
 fn set_window_bounds_by_index(app_name: &str, index: usize, x: i32, y: i32, width: u32, height: u32) {
     let script = format!(
         r#"
@@ -484,6 +513,38 @@ fn set_window_bounds_by_index(app_name: &str, index: usize, x: i32, y: i32, widt
     if let Ok(out) = output {
         if !out.status.success() {
             log::error!("AppleScript failed: {}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
+}
+
+/// Set window bounds atomically (position and size in one call)
+fn set_window_bounds_atomic(app_name: &str, index: usize, x: i32, y: i32, width: u32, height: u32) {
+    // Set both position and size in a single script for speed
+    let script = format!(
+        r#"
+        tell application "System Events"
+            tell process "{}"
+                if (count of windows) >= {} then
+                    set w to window {}
+                    set position of w to {{{}, {}}}
+                    set size of w to {{{}, {}}}
+                end if
+            end tell
+        end tell
+        "#,
+        app_name, index, index, x, y, width, height
+    );
+
+    log::info!("Setting window {} index {} to {}x{} at ({}, {})", app_name, index, width, height, x, y);
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output();
+
+    if let Ok(out) = output {
+        if !out.status.success() {
+            log::error!("AppleScript set bounds failed: {}", String::from_utf8_lossy(&out.stderr));
         }
     }
 }

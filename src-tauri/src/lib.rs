@@ -27,6 +27,43 @@ use nvim_edit::EditSessionManager;
 use vim::{ProcessResult, VimAction, VimMode, VimState};
 use window::setup_indicator_window;
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::OnceLock;
+
+static LOG_FILE: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
+
+fn init_file_logger() {
+    // Create/truncate the log file
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open("/tmp/ovim-rust.log")
+        .expect("Failed to create log file");
+
+    LOG_FILE.set(Mutex::new(file)).ok();
+
+    // Set up env_logger to also write to our file
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            let timestamp = chrono::Local::now().format("%H:%M:%S%.3f");
+            let line = format!("[{}] {} - {}\n", timestamp, record.level(), record.args());
+
+            // Write to file
+            if let Some(file_mutex) = LOG_FILE.get() {
+                if let Ok(mut file) = file_mutex.lock() {
+                    let _ = file.write_all(line.as_bytes());
+                    let _ = file.flush();
+                }
+            }
+
+            // Also write to stderr
+            write!(buf, "{}", line)
+        })
+        .init();
+}
+
 /// Execute a VimAction on a separate thread with a small delay
 fn execute_action_async(action: VimAction) {
     thread::spawn(move || {
@@ -207,6 +244,32 @@ async fn record_key(state: State<'_, AppState>) -> Result<RecordedKey, String> {
 fn cancel_record_key(state: State<AppState>) {
     let mut record_tx = state.record_key_tx.lock().unwrap();
     *record_tx = None;
+}
+
+/// Log message from webview to /tmp/ovim-webview.log
+#[tauri::command]
+fn webview_log(level: String, message: String) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let timestamp = chrono::Local::now().format("%H:%M:%S%.3f");
+    let line = format!("[{}] {} - {}\n", timestamp, level.to_uppercase(), message);
+
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/ovim-webview.log")
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+
+    // Also log to rust logger
+    match level.to_lowercase().as_str() {
+        "error" => log::error!("[webview] {}", message),
+        "warn" => log::warn!("[webview] {}", message),
+        "debug" => log::debug!("[webview] {}", message),
+        _ => log::info!("[webview] {}", message),
+    }
 }
 
 // Helper functions
@@ -444,7 +507,9 @@ fn handle_set_mode(state: &mut VimState, app_handle: &AppHandle, mode_str: &str)
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    // Initialize file-based logging to /tmp/ovim-rust.log
+    init_file_logger();
+    log::info!("ovim-rust started");
 
     let (vim_state, mode_rx) = VimState::new();
     let vim_state = Arc::new(Mutex::new(vim_state));
@@ -493,6 +558,7 @@ pub fn run() {
             get_key_display_name,
             record_key,
             cancel_record_key,
+            webview_log,
         ])
         .setup(move |app| {
             // Hide dock icon - this is a menu bar app

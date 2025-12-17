@@ -33,6 +33,7 @@ tokio = { version = "1", features = ["sync", "rt", "net", "io-util", "macros"] }
 # Logging
 log = "0.4"
 env_logger = "0.11"
+chrono = "0.4"
 
 # Error handling
 thiserror = "2"

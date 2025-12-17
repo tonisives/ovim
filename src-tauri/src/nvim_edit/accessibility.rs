@@ -3,40 +3,26 @@
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::CFString;
 
-// AXValue types for position and size (may be used for future features)
-#[allow(dead_code)]
 type AXValueRef = CFTypeRef;
-#[allow(dead_code, non_upper_case_globals)]
+#[allow(non_upper_case_globals)]
 const kAXValueCGPointType: i32 = 1;
-#[allow(dead_code, non_upper_case_globals)]
+#[allow(non_upper_case_globals)]
 const kAXValueCGSizeType: i32 = 2;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXUIElementCreateSystemWide() -> CFTypeRef;
+    fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
     fn AXUIElementCopyAttributeValue(
         element: CFTypeRef,
         attribute: CFTypeRef,
         value: *mut CFTypeRef,
     ) -> i32;
-    #[allow(dead_code)]
     fn AXValueGetValue(
         value: CFTypeRef,
         the_type: i32,
         value_ptr: *mut std::ffi::c_void,
     ) -> bool;
-}
-
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGEventCreate(source: *const std::ffi::c_void) -> *mut std::ffi::c_void;
-    fn CGEventGetLocation(event: *mut std::ffi::c_void) -> core_graphics::geometry::CGPoint;
-}
-
-// Use a different name to avoid conflict with core_foundation's CFRelease
-#[allow(non_snake_case)]
-unsafe fn CFReleaseMut(cf: *mut std::ffi::c_void) {
-    CFRelease(cf as CFTypeRef);
 }
 
 /// Context about the focused application for later restoration
@@ -132,21 +118,118 @@ pub struct ElementFrame {
     pub height: f64,
 }
 
-/// Get the current mouse cursor position
-pub fn get_mouse_position() -> Option<(f64, f64)> {
+/// Get the frame of the frontmost window of the focused application
+pub fn get_focused_window_frame() -> Option<ElementFrame> {
+    // Get the frontmost app's PID first
+    let context = capture_focus_context()?;
+    get_window_frame_for_pid(context.app_pid)
+}
+
+/// Get the frame of the focused window for a specific application PID
+pub fn get_window_frame_for_pid(pid: i32) -> Option<ElementFrame> {
     unsafe {
-        let event = CGEventCreate(std::ptr::null());
-        if event.is_null() {
+        // Create AXUIElement for the specific application
+        let app_element = AXUIElementCreateApplication(pid);
+        if app_element.is_null() {
+            log::warn!("get_window_frame_for_pid: AXUIElementCreateApplication returned null for pid {}", pid);
             return None;
         }
-        let point = CGEventGetLocation(event);
-        CFReleaseMut(event);
-        Some((point.x, point.y))
+
+        // Get focused window from the application
+        let focused_window_attr = CFString::new("AXFocusedWindow");
+        let mut focused_window: CFTypeRef = std::ptr::null();
+        let result = AXUIElementCopyAttributeValue(
+            app_element,
+            focused_window_attr.as_CFTypeRef(),
+            &mut focused_window,
+        );
+
+        if result != 0 || focused_window.is_null() {
+            log::warn!("get_window_frame_for_pid: Failed to get AXFocusedWindow (result={})", result);
+            CFRelease(app_element);
+            return None;
+        }
+
+        // Get position (AXPosition)
+        let position_attr = CFString::new("AXPosition");
+        let mut position_value: CFTypeRef = std::ptr::null();
+        let result = AXUIElementCopyAttributeValue(
+            focused_window,
+            position_attr.as_CFTypeRef(),
+            &mut position_value,
+        );
+
+        if result != 0 || position_value.is_null() {
+            log::warn!("get_window_frame_for_pid: Failed to get AXPosition (result={})", result);
+            CFRelease(focused_window);
+            CFRelease(app_element);
+            return None;
+        }
+
+        // Get size (AXSize)
+        let size_attr = CFString::new("AXSize");
+        let mut size_value: CFTypeRef = std::ptr::null();
+        let result = AXUIElementCopyAttributeValue(
+            focused_window,
+            size_attr.as_CFTypeRef(),
+            &mut size_value,
+        );
+
+        if result != 0 || size_value.is_null() {
+            log::warn!("get_window_frame_for_pid: Failed to get AXSize (result={})", result);
+            CFRelease(position_value);
+            CFRelease(focused_window);
+            CFRelease(app_element);
+            return None;
+        }
+
+        // Extract CGPoint from AXValue (position)
+        let mut point = core_graphics::geometry::CGPoint::new(0.0, 0.0);
+        let extracted = AXValueGetValue(
+            position_value,
+            kAXValueCGPointType,
+            &mut point as *mut _ as *mut std::ffi::c_void,
+        );
+
+        if !extracted {
+            log::warn!("get_window_frame_for_pid: Failed to extract CGPoint from AXPosition");
+            CFRelease(size_value);
+            CFRelease(position_value);
+            CFRelease(focused_window);
+            CFRelease(app_element);
+            return None;
+        }
+
+        // Extract CGSize from AXValue (size)
+        let mut size = core_graphics::geometry::CGSize::new(0.0, 0.0);
+        let extracted = AXValueGetValue(
+            size_value,
+            kAXValueCGSizeType,
+            &mut size as *mut _ as *mut std::ffi::c_void,
+        );
+
+        CFRelease(size_value);
+        CFRelease(position_value);
+        CFRelease(focused_window);
+        CFRelease(app_element);
+
+        if !extracted {
+            log::warn!("get_window_frame_for_pid: Failed to extract CGSize from AXSize");
+            return None;
+        }
+
+        log::info!("get_window_frame_for_pid: Got frame x={}, y={}, w={}, h={}", point.x, point.y, size.width, size.height);
+
+        Some(ElementFrame {
+            x: point.x,
+            y: point.y,
+            width: size.width,
+            height: size.height,
+        })
     }
 }
 
 /// Get the position and size of the currently focused UI element
-#[allow(dead_code)]
 pub fn get_focused_element_frame() -> Option<ElementFrame> {
     unsafe {
         let system_wide = AXUIElementCreateSystemWide();
