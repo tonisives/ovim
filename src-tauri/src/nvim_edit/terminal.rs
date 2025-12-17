@@ -530,8 +530,10 @@ fn set_window_bounds_by_index(app_name: &str, index: usize, x: i32, y: i32, widt
 }
 
 
-/// Focus an Alacritty window by index
+/// Focus an Alacritty window by index (without bringing all app windows to front)
 fn focus_alacritty_window_by_index(index: usize) {
+    // Use AXRaise to bring the specific window to front, then set frontmost
+    // to give it focus. Avoid "activate" which brings ALL app windows forward.
     let script = format!(
         r#"
         tell application "System Events"
@@ -539,10 +541,10 @@ fn focus_alacritty_window_by_index(index: usize) {
                 if (count of windows) >= {} then
                     set w to window {}
                     perform action "AXRaise" of w
+                    set frontmost to true
                 end if
             end tell
         end tell
-        tell application "Alacritty" to activate
         "#,
         index, index
     );
