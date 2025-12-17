@@ -407,3 +407,53 @@ body {
   50% { opacity: 0.7; }
 }
 
+/* Key display for nvim edit settings */
+.key-display {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.current-key {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: "SF Mono", Monaco, monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  min-width: 100px;
+}
+
+/* Text input */
+.form-group input[type="text"] {
+  width: 100%;
+  max-width: 250px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.form-group input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-hover);
+}
+
+.form-group input[type="text"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-group .hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+

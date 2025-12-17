@@ -4,6 +4,7 @@
 mod config;
 pub mod ipc;
 mod keyboard;
+mod nvim_edit;
 mod vim;
 mod widgets;
 mod window;
@@ -22,6 +23,7 @@ use objc::{class, msg_send, sel, sel_impl};
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
 use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture, KeyCode, KeyEvent};
+use nvim_edit::EditSessionManager;
 use vim::{ProcessResult, VimAction, VimMode, VimState};
 use window::setup_indicator_window;
 
@@ -59,6 +61,9 @@ pub struct AppState {
     keyboard_capture: KeyboardCapture,
     /// One-shot channel to receive recorded key
     record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>>,
+    /// Edit session manager for "Edit with Neovim" feature
+    #[allow(dead_code)]
+    edit_session_manager: Arc<EditSessionManager>,
 }
 
 // Tauri commands
@@ -249,6 +254,7 @@ fn create_keyboard_callback(
     vim_state: Arc<Mutex<VimState>>,
     settings: Arc<Mutex<Settings>>,
     record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>>,
+    edit_session_manager: Arc<EditSessionManager>,
 ) -> impl Fn(KeyEvent) -> Option<KeyEvent> + Send + 'static {
     move |event| {
         // Check if we're recording a key (only on key down)
@@ -269,6 +275,39 @@ fn create_keyboard_callback(
                     let _ = tx.send(recorded);
                     // Suppress the key so it doesn't trigger vim mode or other actions
                     return None;
+                }
+            }
+        }
+
+        // Check if this is the configured nvim edit shortcut
+        if event.is_key_down {
+            let settings_guard = settings.lock().unwrap();
+            let nvim_settings = &settings_guard.nvim_edit;
+
+            if nvim_settings.enabled {
+                let nvim_key = KeyCode::from_name(&nvim_settings.shortcut_key);
+                let mods = &nvim_settings.shortcut_modifiers;
+
+                let modifiers_match = event.modifiers.shift == mods.shift
+                    && event.modifiers.control == mods.control
+                    && event.modifiers.option == mods.option
+                    && event.modifiers.command == mods.command;
+
+                if let Some(configured_key) = nvim_key {
+                    if event.keycode() == Some(configured_key) && modifiers_match {
+                        let nvim_settings_clone = nvim_settings.clone();
+                        drop(settings_guard);
+
+                        // Trigger nvim edit
+                        let manager = Arc::clone(&edit_session_manager);
+                        thread::spawn(move || {
+                            if let Err(e) = nvim_edit::trigger_nvim_edit(manager, nvim_settings_clone) {
+                                log::error!("Failed to trigger nvim edit: {}", e);
+                            }
+                        });
+
+                        return None; // Suppress the key
+                    }
                 }
             }
         }
@@ -413,12 +452,14 @@ pub fn run() {
     let settings = Arc::new(Mutex::new(Settings::load()));
     let record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>> =
         Arc::new(Mutex::new(None));
+    let edit_session_manager = Arc::new(EditSessionManager::new());
 
     let keyboard_capture = KeyboardCapture::new();
     keyboard_capture.set_callback(create_keyboard_callback(
         Arc::clone(&vim_state),
         Arc::clone(&settings),
         Arc::clone(&record_key_tx),
+        Arc::clone(&edit_session_manager),
     ));
 
     let app_state = AppState {
@@ -426,6 +467,7 @@ pub fn run() {
         vim_state: Arc::clone(&vim_state),
         keyboard_capture,
         record_key_tx,
+        edit_session_manager,
     };
 
     let mode_rx = Arc::new(Mutex::new(mode_rx));

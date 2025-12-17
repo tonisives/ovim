@@ -4,12 +4,21 @@ import { GeneralSettings } from "./GeneralSettings";
 import { IndicatorSettings } from "./IndicatorSettings";
 import { WidgetSettings } from "./WidgetSettings";
 import { IgnoredAppsSettings } from "./IgnoredAppsSettings";
+import { NvimEditSettings } from "./NvimEditSettings";
 
 export interface VimKeyModifiers {
   shift: boolean;
   control: boolean;
   option: boolean;
   command: boolean;
+}
+
+export interface NvimEditSettings {
+  enabled: boolean;
+  shortcut_key: string;
+  shortcut_modifiers: VimKeyModifiers;
+  terminal: string;
+  nvim_path: string;
 }
 
 export interface Settings {
@@ -24,9 +33,10 @@ export interface Settings {
   top_widget: string;
   bottom_widget: string;
   electron_apps: string[];
+  nvim_edit: NvimEditSettings;
 }
 
-type TabId = "general" | "indicator" | "widgets" | "ignored";
+type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim";
 
 export function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -60,6 +70,7 @@ export function SettingsApp() {
     { id: "indicator", label: "Indicator", icon: "diamond" },
     { id: "widgets", label: "Widgets", icon: "ruler" },
     { id: "ignored", label: "Ignored Apps", icon: "pause" },
+    { id: "nvim", label: "Nvim Edit", icon: "edit" },
   ];
 
   return (
@@ -90,6 +101,9 @@ export function SettingsApp() {
         {activeTab === "ignored" && (
           <IgnoredAppsSettings settings={settings} onUpdate={updateSettings} />
         )}
+        {activeTab === "nvim" && (
+          <NvimEditSettings settings={settings} onUpdate={updateSettings} />
+        )}
       </div>
 
     </div>
@@ -102,6 +116,7 @@ function getIcon(name: string): string {
     diamond: "\u25C6",
     ruler: "\u25A6",
     pause: "\u23F8",
+    edit: "\u270E",
   };
   return icons[name] || "";
 }

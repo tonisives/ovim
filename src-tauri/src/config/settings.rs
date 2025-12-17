@@ -2,12 +2,45 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Modifier keys for vim key activation
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct VimKeyModifiers {
     pub shift: bool,
     pub control: bool,
     pub option: bool,
     pub command: bool,
+}
+
+/// Settings for "Edit with Neovim" feature
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NvimEditSettings {
+    /// Enable the feature
+    pub enabled: bool,
+    /// Keyboard shortcut key (e.g., "e")
+    pub shortcut_key: String,
+    /// Shortcut modifiers
+    pub shortcut_modifiers: VimKeyModifiers,
+    /// Terminal to use: "alacritty", "iterm", "kitty", "default"
+    pub terminal: String,
+    /// Path to nvim (default: "nvim" - uses PATH)
+    pub nvim_path: String,
+}
+
+impl Default for NvimEditSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            shortcut_key: "e".to_string(),
+            shortcut_modifiers: VimKeyModifiers {
+                shift: true,
+                control: false,
+                option: false,
+                command: true, // Cmd+Shift+E
+            },
+            terminal: "alacritty".to_string(),
+            nvim_path: "nvim".to_string(),
+        }
+    }
 }
 
 /// Application settings
@@ -37,6 +70,8 @@ pub struct Settings {
     pub bottom_widget: String,
     /// Bundle identifiers of Electron apps for selection observing
     pub electron_apps: Vec<String>,
+    /// Settings for "Edit with Neovim" feature
+    pub nvim_edit: NvimEditSettings,
 }
 
 impl Default for Settings {
@@ -53,6 +88,7 @@ impl Default for Settings {
             top_widget: "None".to_string(),
             bottom_widget: "None".to_string(),
             electron_apps: vec![],
+            nvim_edit: NvimEditSettings::default(),
         }
     }
 }
