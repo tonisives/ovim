@@ -105,36 +105,69 @@ fn wait_for_pid(pid: u32) -> Result<(), String> {
 
 /// Spawn Alacritty terminal
 fn spawn_alacritty(nvim_path: &str, file_path: &str, geometry: Option<WindowGeometry>) -> Result<SpawnInfo, String> {
-    // Alacritty may be running as a daemon - the `-e` command connects to it
-    // and returns immediately. We need to find the actual nvim process.
+    // Generate a unique window title so we can find it
+    let unique_title = format!("ovim-edit-{}", std::process::id());
+
+    // Resolve nvim path to absolute path (msg create-window doesn't inherit PATH)
+    let resolved_nvim = resolve_command_path(nvim_path);
+    log::info!("Resolved nvim path: {} -> {}", nvim_path, resolved_nvim);
+
+    // Use `alacritty msg create-window` to create window in existing daemon
+    // with dynamic_title=false so our title sticks
     // Use "+normal G$" to move cursor to end of file (G = last line, $ = end of line)
-    let mut cmd = Command::new("alacritty");
+    let result = Command::new("alacritty")
+        .args([
+            "msg", "create-window",
+            "-o", &format!("window.title=\"{}\"", unique_title),
+            "-o", "window.dynamic_title=false",
+            "-e", &resolved_nvim, "+normal G$", file_path,
+        ])
+        .spawn();
 
-    // Add window position/size if provided
-    // Alacritty uses --option for runtime config overrides
-    if let Some(geo) = geometry {
-        cmd.args([
-            "--option", &format!("window.position.x={}", geo.x),
-            "--option", &format!("window.position.y={}", geo.y),
-            "--option", &format!("window.dimensions.columns={}", geo.width / 8), // Approximate char width
-            "--option", &format!("window.dimensions.lines={}", geo.height / 16), // Approximate line height
-        ]);
-    }
-
-    cmd.args(["-e", nvim_path, "+normal G$", file_path]);
-
-    let _child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn alacritty: {}", e))?;
+    // If msg create-window fails (no daemon running), fall back to regular spawn
+    let cmd = match result {
+        Ok(child) => child,
+        Err(_) => {
+            log::info!("msg create-window failed, falling back to regular spawn");
+            Command::new("alacritty")
+                .args([
+                    "-o", &format!("window.title=\"{}\"", unique_title),
+                    "-o", "window.dynamic_title=false",
+                    "-e", &resolved_nvim, "+normal G$", file_path,
+                ])
+                .spawn()
+                .map_err(|e| format!("Failed to spawn alacritty: {}", e))?
+        }
+    };
 
     // Wait a bit for nvim to start, then find its PID by the file it's editing
     let pid = find_nvim_pid_for_file(file_path);
     log::info!("Found nvim PID: {:?} for file: {}", pid, file_path);
 
+    // Set window position/size on the NEW window by finding it by title
+    if let Some(geo) = geometry {
+        let title = unique_title.clone();
+        std::thread::spawn(move || {
+            // Poll until we find the window with our title
+            for attempt in 0..50 {
+                if let Some(index) = find_alacritty_window_by_title(&title) {
+                    log::info!("Found window '{}' at index {}", title, index);
+                    set_window_bounds_by_index("Alacritty", index, geo.x, geo.y, geo.width, geo.height);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if attempt % 10 == 0 {
+                    log::info!("Waiting for window '{}' (attempt {})", title, attempt);
+                }
+            }
+            log::warn!("Timeout waiting for Alacritty window '{}'", title);
+        });
+    }
+
     Ok(SpawnInfo {
         terminal_type: TerminalType::Alacritty,
         process_id: pid,
-        child: None, // Don't track the wrapper process
+        child: Some(cmd),
     })
 }
 
@@ -364,4 +397,93 @@ fn move_window_to_position(app_name: &str, x: i32, y: i32) {
         .arg("-e")
         .arg(&script)
         .output();
+}
+
+/// Resolve a command name to its absolute path using `which`
+fn resolve_command_path(cmd: &str) -> String {
+    // If already absolute path, return as-is
+    if cmd.starts_with('/') {
+        return cmd.to_string();
+    }
+
+    // Try to resolve using `which`
+    if let Ok(output) = Command::new("which").arg(cmd).output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return path;
+            }
+        }
+    }
+
+    // Fallback: return original (might work if PATH is set)
+    cmd.to_string()
+}
+
+/// Find Alacritty window index by title (returns 1-based index)
+fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
+    let script = format!(
+        r#"
+        tell application "System Events"
+            tell process "Alacritty"
+                set windowIndex to 0
+                repeat with i from 1 to (count of windows)
+                    set w to window i
+                    if name of w contains "{}" then
+                        return i
+                    end if
+                end repeat
+                return 0
+            end tell
+        end tell
+        "#,
+        title
+    );
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            let index_str = String::from_utf8_lossy(&out.stdout);
+            let index: usize = index_str.trim().parse().unwrap_or(0);
+            if index > 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+/// Set window bounds by window index (1-based)
+fn set_window_bounds_by_index(app_name: &str, index: usize, x: i32, y: i32, width: u32, height: u32) {
+    let script = format!(
+        r#"
+        tell application "System Events"
+            tell process "{}"
+                if (count of windows) >= {} then
+                    set w to window {}
+                    set position of w to {{{}, {}}}
+                    set size of w to {{{}, {}}}
+                end if
+            end tell
+        end tell
+        "#,
+        app_name, index, index, x, y, width, height
+    );
+
+    log::info!("Setting window {} index {} bounds: {}x{} at ({}, {})", app_name, index, width, height, x, y);
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output();
+
+    if let Ok(out) = output {
+        if !out.status.success() {
+            log::error!("AppleScript failed: {}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
 }

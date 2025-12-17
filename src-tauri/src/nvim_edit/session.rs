@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use uuid::Uuid;
 
 use super::accessibility::FocusContext;
@@ -15,6 +16,7 @@ pub struct EditSession {
     pub focus_context: FocusContext,
     pub original_text: String,
     pub temp_file: PathBuf,
+    pub file_mtime: SystemTime,
     pub terminal_type: TerminalType,
     pub process_id: Option<u32>,
 }
@@ -54,6 +56,11 @@ impl EditSessionManager {
         std::fs::write(&temp_file, &text)
             .map_err(|e| format!("Failed to write temp file: {}", e))?;
 
+        // Get file modification time after writing
+        let file_mtime = std::fs::metadata(&temp_file)
+            .and_then(|m| m.modified())
+            .map_err(|e| format!("Failed to get file mtime: {}", e))?;
+
         // Spawn terminal
         let SpawnInfo {
             terminal_type,
@@ -67,6 +74,7 @@ impl EditSessionManager {
             focus_context,
             original_text: text,
             temp_file,
+            file_mtime,
             terminal_type,
             process_id,
         };
@@ -86,6 +94,7 @@ impl EditSessionManager {
             focus_context: s.focus_context.clone(),
             original_text: s.original_text.clone(),
             temp_file: s.temp_file.clone(),
+            file_mtime: s.file_mtime,
             terminal_type: s.terminal_type.clone(),
             process_id: s.process_id,
         })

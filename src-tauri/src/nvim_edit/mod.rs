@@ -24,9 +24,18 @@ pub fn trigger_nvim_edit(
         .ok_or("No focused application found")?;
     log::info!("Captured focus context: {:?}", focus_context);
 
-    // 2. Get text and position from the focused element
-    let text = accessibility::get_focused_element_text().unwrap_or_default();
-    log::info!("Got text from focused element: {} chars", text.len());
+    // 2. Get text from the focused element (try accessibility first, then clipboard fallback)
+    let mut text = accessibility::get_focused_element_text().unwrap_or_default();
+    log::info!("Got text from accessibility API: {} chars", text.len());
+
+    // If accessibility returned empty, try clipboard-based capture (for web text fields)
+    if text.is_empty() {
+        log::info!("Accessibility returned empty, trying clipboard-based capture");
+        if let Some(captured) = capture_text_via_clipboard() {
+            text = captured;
+            log::info!("Captured {} chars via clipboard", text.len());
+        }
+    }
 
     // 3. Calculate window geometry if popup mode is enabled
     let geometry = if settings.popup_mode {
@@ -94,7 +103,7 @@ pub fn trigger_nvim_edit(
 fn complete_edit_session(
     manager: &EditSessionManager,
     session_id: &uuid::Uuid,
-    original_text: &str,
+    _original_text: &str,
     focus_context: &accessibility::FocusContext,
 ) -> Result<(), String> {
     // Read the temp file
@@ -103,6 +112,18 @@ fn complete_edit_session(
 
     log::info!("Reading temp file: {:?}", session.temp_file);
 
+    // Check if file was modified by comparing modification times
+    let current_mtime = std::fs::metadata(&session.temp_file)
+        .and_then(|m| m.modified())
+        .map_err(|e| format!("Failed to get current file mtime: {}", e))?;
+
+    if current_mtime == session.file_mtime {
+        log::info!("File not modified (nvim quit without saving), skipping restoration");
+        // Clean up temp file
+        let _ = std::fs::remove_file(&session.temp_file);
+        return Ok(());
+    }
+
     let edited_text = std::fs::read_to_string(&session.temp_file)
         .map_err(|e| format!("Failed to read temp file: {}", e))?;
 
@@ -110,12 +131,6 @@ fn complete_edit_session(
 
     // Clean up temp file
     let _ = std::fs::remove_file(&session.temp_file);
-
-    // Check if text changed (but always paste if original was empty - user might be creating new content)
-    if !original_text.is_empty() && edited_text.trim() == original_text.trim() {
-        log::info!("No changes made, skipping restoration");
-        return Ok(());
-    }
 
     log::info!("Restoring focus to app: {:?}", focus_context);
 
@@ -194,4 +209,64 @@ fn replace_text_via_clipboard(text: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Capture text from focused element via clipboard (fallback for web text fields)
+fn capture_text_via_clipboard() -> Option<String> {
+    // Save current clipboard
+    let original_clipboard = Command::new("pbpaste")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok());
+
+    // Select all (Cmd+A)
+    if inject_key_press(
+        KeyCode::A,
+        Modifiers { command: true, ..Default::default() },
+    ).is_err() {
+        return None;
+    }
+
+    thread::sleep(Duration::from_millis(50));
+
+    // Copy (Cmd+C)
+    if inject_key_press(
+        KeyCode::C,
+        Modifiers { command: true, ..Default::default() },
+    ).is_err() {
+        return None;
+    }
+
+    thread::sleep(Duration::from_millis(100));
+
+    // Read clipboard
+    let captured_text = Command::new("pbpaste")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok());
+
+    // Deselect by pressing Right arrow (moves cursor to end of selection)
+    let _ = inject_key_press(
+        KeyCode::Right,
+        Modifiers::default(),
+    );
+
+    // Restore original clipboard
+    if let Some(original) = original_clipboard {
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            let _ = Command::new("pbcopy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut p| {
+                    if let Some(mut stdin) = p.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(original.as_bytes());
+                    }
+                    p.wait()
+                });
+        });
+    }
+
+    captured_text
 }
