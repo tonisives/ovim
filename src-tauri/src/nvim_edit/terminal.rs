@@ -523,44 +523,6 @@ fn set_window_bounds_by_index(app_name: &str, index: usize, x: i32, y: i32, widt
     }
 }
 
-/// Close alacritty window by title (for --hold windows)
-/// With --hold, the window shows "[Process exited - press any key to close]"
-/// We need to send a keystroke to that window to close it
-pub fn close_alacritty_window_by_title(title: &str) {
-    // The alacritty window should still be focused at this point
-    // Just send a keystroke to dismiss the --hold prompt
-    let script = format!(
-        r#"
-        tell application "System Events"
-            tell process "Alacritty"
-                repeat with i from 1 to (count of windows)
-                    set w to window i
-                    if name of w contains "{}" then
-                        -- Send any key to close the held window
-                        -- The window should already be focused
-                        keystroke return
-                        return
-                    end if
-                end repeat
-            end tell
-        end tell
-        "#,
-        title
-    );
-
-    log::info!("Closing alacritty window with title: {}", title);
-
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output();
-
-    if let Ok(out) = output {
-        if !out.status.success() {
-            log::warn!("Failed to close alacritty window: {}", String::from_utf8_lossy(&out.stderr));
-        }
-    }
-}
 
 /// Set window bounds atomically (position and size in one call)
 fn set_window_bounds_atomic(app_name: &str, index: usize, x: i32, y: i32, width: u32, height: u32) {

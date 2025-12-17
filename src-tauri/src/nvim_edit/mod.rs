@@ -132,19 +132,10 @@ pub fn trigger_nvim_edit(
 
             log::info!("Terminal process exited, reading edited file");
 
-            // IMPORTANT: To prevent window flicker when alacritty closes:
-            // 1. Close the alacritty window first (while it's still focused) by sending a key
-            // 2. Then restore focus to the target app
-            // This way macOS never auto-switches to another window
-
-            // Close alacritty window by title (if we have one)
-            // With --hold, we need to send a key to dismiss it
-            if let Some(ref title) = session.window_title {
-                terminal::close_alacritty_window_by_title(title);
-            }
-
-            // Now restore focus to the original app
-            log::info!("Restoring focus after closing alacritty window");
+            // Restore focus to the original app immediately
+            // This races with alacritty window closing - we want to activate the target
+            // app before macOS can auto-switch to another alacritty window
+            log::info!("Restoring focus immediately");
             if let Err(e) = accessibility::restore_focus(&session.focus_context) {
                 log::error!("Error restoring focus: {}", e);
             }
