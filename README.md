@@ -1,20 +1,19 @@
-# OVIM
+# ovim
 
-System-wide Vim keybindings for macOS.
+macOS system-wide Vim keybindings and modal editor.
 
-OVIM is a lightweight menu bar application that brings Vim's modal editing to every app on your Mac. Press a key to toggle between Insert and Normal mode anywhere - in your browser, text editors, terminal, or any other application.
+ovim is a lightweight menu bar application that brings Vim's modal editing to every app on your Mac. Press a key to toggle between Insert and Normal mode anywhere - in your browser, text editors, terminal, or any other application.
 
-![OVIM Modes](docs/images/modes-animated.gif)
+![ovim Modes](docs/images/modes-animated.gif)
 
 ## Features
 
 - **System-wide Vim modes** - Normal, Insert, and Visual modes work in any macOS application
-- **Menu bar application** - Runs quietly in the background, accessible from the menu bar
-- **Mode indicator** - Small floating widget shows your current mode at a glance
-- **Configurable activation key** - Default is Caps Lock, but you can customize it with modifier keys
-- **Per-application ignore list** - Disable OVIM for specific apps that have their own Vim mode
-- **Customizable widgets** - Display battery status, caps lock state, or selection info
-- **Launch at login** - Optionally start OVIM when your Mac boots
+- **Modal popup editor** - Open a full Neovim editor popup for complex edits, then paste back
+- **Mode indicator** - Floating widget shows current mode with customizable position, size, and opacity
+- **Configurable activation key** - Default is Caps Lock, customizable with modifier keys
+- **Per-application ignore list** - Disable ovim for apps with their own Vim mode
+- **Widgets** - Display battery status, caps lock state, or selection info
 
 ## Installation
 
@@ -26,195 +25,95 @@ brew install --cask ovim
 
 ### GitHub Releases
 
-Download the latest `.dmg` from the [Releases](https://github.com/tonisives/ovim/releases) page and drag OVIM to your Applications folder.
+Download the latest `.dmg` from the [Releases](https://github.com/tonisives/ovim/releases) page.
 
 ### Build from Source
 
-See [Building from Source](#building-from-source) below.
+```bash
+git clone https://github.com/tonisives/ovim.git
+cd ovim
+pnpm install
+pnpm tauri build
+# Built app in src-tauri/target/release/bundle/
+```
+
+Requires [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) v18+, and [pnpm](https://pnpm.io/).
 
 ## Requirements
 
 - macOS 10.15 (Catalina) or later
-- **Accessibility permission** - OVIM needs permission to capture keyboard input. You'll be prompted to grant this on first launch in System Settings > Privacy & Security > Accessibility.
+- **Accessibility permission** - Grant in System Settings > Privacy & Security > Accessibility
 
-## Usage
+## Quick Start
 
-### Getting Started
-
-1. Launch OVIM - it will appear in your menu bar
+1. Launch ovim - it appears in your menu bar
 2. Grant Accessibility permission when prompted
-3. Press **Caps Lock** (or your configured activation key) to toggle between modes
+3. Press **Caps Lock** to toggle between modes
+4. Access Settings from the menu bar icon
 
-### Modes
+## Vim Commands
 
-- **Insert mode** (default) - Keys work normally, passed through to the active application
-- **Normal mode** - Vim navigation and commands are active
-- **Visual mode** - Select text using Vim motions
-
-### Mode Indicator
-
-The floating indicator shows your current mode:
-- Displayed near the top-left of your screen by default
-- Position, opacity, and size are customizable in Settings
-
-![Mode Indicator](docs/images/indicator-modes-explanation.gif)
-
-### Accessing Settings
-
-Click the OVIM icon in the menu bar and select **Settings**.
-
-## Supported Vim Commands
-
-### Modes
+### Mode Switching
 
 | Key | Action |
-|-----|--------|
+| --- | ------ |
 | `Esc` | Return to Normal mode |
-| `i` | Insert at cursor |
-| `I` | Insert at line start |
-| `a` | Append after cursor |
-| `A` | Append at line end |
-| `o` | Open line below |
-| `O` | Open line above |
+| `i` / `I` | Insert at cursor / line start |
+| `a` / `A` | Append after cursor / line end |
+| `o` / `O` | Open line below / above |
 | `v` | Enter Visual mode |
-| `s` | Substitute character (delete and insert) |
-| `S` | Substitute line (delete line and insert) |
+| `s` / `S` | Substitute character / line |
 
 ### Motions
 
 | Key | Action |
-|-----|--------|
-| `h` | Move left |
-| `j` | Move down |
-| `k` | Move up |
-| `l` | Move right |
-| `w` | Word forward |
-| `b` | Word backward |
-| `e` | Word end |
-| `ge` | Word end backward |
-| `0` | Line start |
-| `$` | Line end |
-| `{` | Paragraph up |
-| `}` | Paragraph down |
-| `gg` | Document start |
-| `G` | Document end |
-| `Ctrl+u` | Half page up |
-| `Ctrl+d` | Half page down |
+| --- | ------ |
+| `h` `j` `k` `l` | Left, down, up, right |
+| `w` / `b` / `e` | Word forward / backward / end |
+| `0` / `$` | Line start / end |
+| `{` / `}` | Paragraph up / down |
+| `gg` / `G` | Document start / end |
+| `Ctrl+u` / `Ctrl+d` | Half page up / down |
 
-### Operators
+### Operators + Text Objects
 
-Operators can be combined with motions (e.g., `dw` deletes a word, `y$` yanks to line end).
+Operators combine with motions (e.g., `dw` deletes word, `y$` yanks to line end).
 
-| Key | Action |
-|-----|--------|
+| Operator | Action |
+| -------- | ------ |
 | `d` | Delete |
 | `y` | Yank (copy) |
-| `c` | Change (delete and enter insert mode) |
+| `c` | Change (delete + insert) |
 
-### Text Objects
-
-Use with operators (e.g., `diw` deletes inner word, `yaw` yanks around word).
-
-| Key | Action |
-|-----|--------|
-| `iw` | Inner word |
-| `aw` | Around word (includes surrounding space) |
+| Text Object | Action |
+| ----------- | ------ |
+| `iw` / `aw` | Inner word / around word |
 
 ### Commands
 
 | Key | Action |
-|-----|--------|
-| `x` | Delete character under cursor |
-| `X` | Delete character before cursor |
-| `D` | Delete to line end |
-| `C` | Change to line end |
-| `Y` | Yank line |
-| `dd` | Delete line |
-| `yy` | Yank line |
-| `cc` | Change line |
+| --- | ------ |
+| `x` / `X` | Delete char under / before cursor |
+| `D` / `C` / `Y` | Delete / change / yank to line end |
+| `dd` / `yy` / `cc` | Delete / yank / change line |
 | `J` | Join lines |
-| `p` | Paste after cursor |
-| `P` | Paste before cursor |
-| `u` | Undo |
-| `Ctrl+r` | Redo |
-| `>>` | Indent line |
-| `<<` | Outdent line |
+| `p` / `P` | Paste after / before cursor |
+| `u` / `Ctrl+r` | Undo / redo |
+| `>>` / `<<` | Indent / outdent line |
 
 ### Counts
 
-Prefix motions and commands with a number to repeat them:
-- `5j` - Move down 5 lines
-- `3dw` - Delete 3 words
-- `10x` - Delete 10 characters
+Prefix with numbers: `5j` (move down 5), `3dw` (delete 3 words), `10x` (delete 10 chars).
 
-## Settings
+## Screenshots
 
-### General
-- **Activation key** - Key to toggle Vim mode (default: Caps Lock)
-- **Key modifiers** - Require Shift, Control, Option, or Command with the activation key
-- **Launch at login** - Start OVIM automatically when you log in
-- **Show in menu bar** - Toggle menu bar icon visibility
-
-### Indicator
-- **Position** - Where to display the mode indicator on screen
-- **Opacity** - Transparency of the indicator (0-100%)
-- **Size** - Scale of the indicator
-
-### Widgets
-- **Top widget** - Information displayed above the mode indicator
-- **Bottom widget** - Information displayed below the mode indicator
-- Available widgets: Battery, Caps Lock state, Selection info
-
-### Ignored Apps
-- Add applications where OVIM should be disabled
-- Useful for apps with their own Vim mode (e.g., terminal emulators, VS Code with Vim extension)
-
-### Screenshots
-
-#### Indicator Position
-![Indicator Position](docs/images/change-indicator-position.gif)
-
-#### Visual Mode with Ctrl+u/d
-![Visual Mode](docs/images/visual-C-u-d.gif)
-
-#### Widgets
-![Widgets](docs/images/widgets.png)
-
-#### Mode Indicators
 | Normal | Insert | Visual |
-|--------|--------|--------|
+| ------ | ------ | ------ |
 | ![Normal](docs/images/Component-2.png) | ![Insert](docs/images/Component-3.png) | ![Visual](docs/images/Component-4.png) |
 
-## Building from Source
+![Indicator Position](docs/images/change-indicator-position.gif)
 
-### Prerequisites
-
-- [Rust](https://rustup.rs/) toolchain
-- [Node.js](https://nodejs.org/) (v18 or later recommended)
-- [pnpm](https://pnpm.io/) package manager
-
-### Build
-
-```bash
-# Clone the repository
-git clone https://github.com/tonisives/ovim.git
-cd ovim
-
-# Install dependencies
-pnpm install
-
-# Build the app (universal binary for Intel + Apple Silicon)
-pnpm tauri build
-
-# The built app will be in src-tauri/target/release/bundle/
-```
-
-### Development
-
-```bash
-# Run in development mode with hot reload
-pnpm tauri dev
-```
+![Visual Mode](docs/images/visual-C-u-d.gif)
 
 ## License
 
