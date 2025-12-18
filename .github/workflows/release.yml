@@ -95,6 +95,10 @@ jobs:
           echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
           echo "Found app at: $APP_PATH"
 
+      - name: Fix executable permissions
+        run: |
+          chmod +x "${{ steps.find-app.outputs.app_path }}/Contents/MacOS/"*
+
       - name: Import Code-Signing Certificates
         uses: Apple-Actions/import-codesign-certs@v2
         with:
