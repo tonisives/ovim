@@ -51,6 +51,21 @@ Requires [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) v18+, and [p
 3. Press **Caps Lock** to toggle between modes
 4. Access Settings from the menu bar icon
 
+## Edit Popup
+
+Press `ge` in Normal mode to open the edit popup - a full Neovim editor window for complex text editing. This is useful when you need more powerful editing capabilities than the basic Vim keybindings provide.
+
+![Edit Popup](docs/images/edit-popup.gif)
+
+**How it works:**
+
+1. Select text in any application (optional)
+2. Press `ge` to open the edit popup
+3. Edit using your full Neovim configuration
+4. Press `<leader>w` to save and paste the content back, or `<Esc><Esc>` to cancel
+
+The edit popup uses your existing Neovim configuration, so all your plugins, keybindings, and settings are available.
+
 ## Vim Commands
 
 See [docs/keybindings.md](docs/keybindings.md) for the full list of supported Vim keybindings.
@@ -70,8 +85,8 @@ See [docs/cli.md](docs/cli.md) for full CLI documentation and Karabiner integrat
 
 ## Screenshots
 
-| Normal | Insert | Visual |
-| ------ | ------ | ------ |
+| Normal                                 | Insert                                 | Visual                                 |
+| -------------------------------------- | -------------------------------------- | -------------------------------------- |
 | ![Normal](docs/images/Component-2.png) | ![Insert](docs/images/Component-3.png) | ![Visual](docs/images/Component-4.png) |
 
 ![Indicator Position](docs/images/change-indicator-position.gif)
