@@ -17,11 +17,70 @@ extern "C" {
         attribute: CFTypeRef,
         value: *mut CFTypeRef,
     ) -> i32;
+    fn AXUIElementSetAttributeValue(
+        element: CFTypeRef,
+        attribute: CFTypeRef,
+        value: CFTypeRef,
+    ) -> i32;
     fn AXValueGetValue(
         value: CFTypeRef,
         the_type: i32,
         value_ptr: *mut std::ffi::c_void,
     ) -> bool;
+    fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+}
+
+/// Wrapper for AXUIElementRef that can be sent across threads
+/// The element is retained on creation and released on drop
+pub struct AXElementHandle {
+    element: CFTypeRef,
+}
+
+impl AXElementHandle {
+    /// Create a new handle by retaining the element
+    pub unsafe fn new(element: CFTypeRef) -> Option<Self> {
+        if element.is_null() {
+            return None;
+        }
+        CFRetain(element);
+        Some(Self { element })
+    }
+
+    /// Get the raw element pointer
+    pub fn as_ptr(&self) -> CFTypeRef {
+        self.element
+    }
+}
+
+impl Drop for AXElementHandle {
+    fn drop(&mut self) {
+        if !self.element.is_null() {
+            unsafe { CFRelease(self.element) };
+        }
+    }
+}
+
+// Safety: AXUIElementRef is safe to send across threads
+unsafe impl Send for AXElementHandle {}
+unsafe impl Sync for AXElementHandle {}
+
+impl std::fmt::Debug for AXElementHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AXElementHandle")
+            .field("element", &self.element)
+            .finish()
+    }
+}
+
+impl Clone for AXElementHandle {
+    fn clone(&self) -> Self {
+        unsafe {
+            if !self.element.is_null() {
+                CFRetain(self.element);
+            }
+            Self { element: self.element }
+        }
+    }
 }
 
 /// RAII wrapper for CFTypeRef that automatically releases the reference when dropped.
@@ -111,6 +170,8 @@ pub struct FocusContext {
     pub app_pid: i32,
     #[allow(dead_code)]
     pub app_bundle_id: String,
+    /// The focused UI element (if captured) for live text updates
+    pub focused_element: Option<AXElementHandle>,
 }
 
 /// Capture the current focus context (which app is focused)
@@ -145,10 +206,62 @@ pub fn capture_focus_context() -> Option<FocusContext> {
             .to_string_lossy()
             .into_owned();
 
+        // Also try to capture the focused UI element for live text updates
+        let focused_element = capture_focused_element();
+
         Some(FocusContext {
             app_pid: pid,
             app_bundle_id: bundle_id_str,
+            focused_element,
         })
+    }
+}
+
+/// Capture a handle to the currently focused UI element
+fn capture_focused_element() -> Option<AXElementHandle> {
+    unsafe {
+        let system_wide = AXUIElementCreateSystemWide();
+        if system_wide.is_null() {
+            return None;
+        }
+
+        // Get focused application
+        let focused_app_attr = CFString::new("AXFocusedApplication");
+        let mut focused_app: CFTypeRef = std::ptr::null();
+        let result = AXUIElementCopyAttributeValue(
+            system_wide,
+            focused_app_attr.as_CFTypeRef(),
+            &mut focused_app,
+        );
+
+        if result != 0 || focused_app.is_null() {
+            CFRelease(system_wide);
+            return None;
+        }
+
+        // Get focused UI element from the application
+        let focused_element_attr = CFString::new("AXFocusedUIElement");
+        let mut focused_element: CFTypeRef = std::ptr::null();
+        let result = AXUIElementCopyAttributeValue(
+            focused_app,
+            focused_element_attr.as_CFTypeRef(),
+            &mut focused_element,
+        );
+
+        CFRelease(focused_app);
+        CFRelease(system_wide);
+
+        if result != 0 || focused_element.is_null() {
+            return None;
+        }
+
+        // Create a handle (which will retain the element)
+        let handle = AXElementHandle::new(focused_element);
+
+        // Release our copy since AXElementHandle retained it
+        CFRelease(focused_element);
+
+        handle
     }
 }
 
@@ -280,4 +393,46 @@ pub fn get_focused_element_text() -> Option<String> {
     let focused_element = focused_app.get_attribute("AXFocusedUIElement")?;
     let value = focused_element.get_attribute("AXValue")?;
     value.into_string()
+}
+
+/// Set the text value of a UI element
+///
+/// This is used for live text sync - updating the original text field
+/// while the user edits in nvim. Returns Ok(()) if successful, Err otherwise.
+///
+/// Note: This may not work for all apps, especially:
+/// - Web browsers (use JavaScript injection instead)
+/// - Some Electron apps
+/// - Apps that don't properly implement accessibility
+pub fn set_element_text(element: &AXElementHandle, text: &str) -> Result<(), String> {
+    unsafe {
+        let value_attr = CFString::new("AXValue");
+        let cf_text = CFString::new(text);
+
+        let result = AXUIElementSetAttributeValue(
+            element.as_ptr(),
+            value_attr.as_CFTypeRef(),
+            cf_text.as_CFTypeRef(),
+        );
+
+        if result == 0 {
+            Ok(())
+        } else {
+            // Common error codes:
+            // -25200: kAXErrorAttributeUnsupported
+            // -25201: kAXErrorActionUnsupported
+            // -25202: kAXErrorNotificationUnsupported
+            // -25203: kAXErrorNotImplemented
+            // -25204: kAXErrorNotificationAlreadyRegistered
+            // -25205: kAXErrorNotificationNotRegistered
+            // -25206: kAXErrorAPIDisabled
+            // -25207: kAXErrorNoValue
+            // -25208: kAXErrorParameterizedAttributeUnsupported
+            // -25209: kAXErrorNotEnoughPrecision
+            // -25210: kAXErrorIllegalArgument
+            // -25211: kAXErrorCannotComplete
+            // -25212: kAXErrorFailure
+            Err(format!("AXUIElementSetAttributeValue failed with error code: {}", result))
+        }
+    }
 }
