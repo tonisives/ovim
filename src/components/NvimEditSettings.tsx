@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import type { Settings, VimKeyModifiers, NvimEditSettings as NvimEditSettingsType } from "./SettingsApp"
+import type {
+  Settings,
+  VimKeyModifiers,
+  NvimEditSettings as NvimEditSettingsType,
+} from "./SettingsApp"
 
 interface Props {
   settings: Settings
@@ -100,11 +104,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
         <label>Keyboard shortcut</label>
         <div className="key-display">
           {isRecording ? (
-            <button
-              type="button"
-              className="record-key-btn recording"
-              onClick={handleCancelRecord}
-            >
+            <button type="button" className="record-key-btn recording" onClick={handleCancelRecord}>
               Press any key...
             </button>
           ) : (
@@ -137,6 +137,12 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
             </option>
           ))}
         </select>
+        {nvimEdit.terminal !== "alacritty" && (
+          <div className="alert alert-warning">
+            Terminal programs with tabs have limited support. Use Alacritty for best performance and
+            tested compatibility.
+          </div>
+        )}
       </div>
 
       <div className="form-group">
@@ -162,7 +168,9 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
           />
           Open as popup below text field
         </label>
-        <span className="hint">Position the terminal window directly below the text field instead of opening fullscreen</span>
+        <span className="hint">
+          Position the terminal window directly below the text field instead of opening fullscreen
+        </span>
       </div>
 
       {nvimEdit.popup_mode && (

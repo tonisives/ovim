@@ -489,6 +489,21 @@ body {
   cursor: not-allowed;
 }
 
+/* Alert boxes */
+.alert {
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.alert-warning {
+  background: rgba(255, 179, 64, 0.15);
+  border: 1px solid rgba(255, 179, 64, 0.4);
+  color: #ffb340;
+}
+
 /* Permission warning */
 .permission-warning {
   background: var(--danger-bg);
