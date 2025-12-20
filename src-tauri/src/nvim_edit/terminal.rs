@@ -95,12 +95,33 @@ fn wait_for_pid(pid: u32) -> Result<(), String> {
     use std::time::Duration;
 
     loop {
-        // Check if process is still running using kill(pid, 0)
-        let result = unsafe { libc::kill(pid as i32, 0) };
-        if result != 0 {
-            // Process has exited
+        // First try waitpid with WNOHANG to reap zombie children (for processes we spawned)
+        let mut status: libc::c_int = 0;
+        let wait_result = unsafe { libc::waitpid(pid as i32, &mut status, libc::WNOHANG) };
+
+        if wait_result == pid as i32 {
+            // Process has exited and been reaped
+            log::info!("Process {} reaped via waitpid", pid);
             break;
+        } else if wait_result == -1 {
+            // Error - check errno
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if errno == libc::ECHILD {
+                // Not our child - fall back to kill(pid, 0) check
+                let kill_result = unsafe { libc::kill(pid as i32, 0) };
+                if kill_result != 0 {
+                    // Process doesn't exist
+                    log::info!("Process {} no longer exists (kill check)", pid);
+                    break;
+                }
+            } else {
+                // Other error
+                log::warn!("waitpid error for {}: errno={}", pid, errno);
+                break;
+            }
         }
+        // wait_result == 0 means process still running, continue polling
+
         // Poll very fast (10ms) so we can restore focus before the window closes
         thread::sleep(Duration::from_millis(10));
     }
@@ -302,16 +323,21 @@ fn spawn_wezterm(nvim_path: &str, file_path: &str, geometry: Option<WindowGeomet
 
     let mut cmd = Command::new("wezterm");
 
+    // Use --always-new-process so wezterm blocks until the command exits.
+    // Without this flag, wezterm start returns immediately by connecting to
+    // an existing GUI instance, and we can't wait for nvim to finish.
     // WezTerm only supports --position for window placement (no --width/--height)
     // Size must be set via config (initial_rows/initial_cols)
+    // Use "screen:" prefix for absolute screen coordinates (matching macOS accessibility API)
     if let Some(ref geo) = geometry {
         cmd.args([
             "start",
-            "--position", &format!("{},{}", geo.x, geo.y),
+            "--always-new-process",
+            "--position", &format!("screen:{},{}", geo.x, geo.y),
             "--",
         ]);
     } else {
-        cmd.args(["start", "--"]);
+        cmd.args(["start", "--always-new-process", "--"]);
     }
 
     cmd.args([&resolved_nvim, "+normal G$", file_path]);
@@ -319,6 +345,11 @@ fn spawn_wezterm(nvim_path: &str, file_path: &str, geometry: Option<WindowGeomet
     let child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn wezterm: {}", e))?;
+
+    // Get the wezterm process PID - with --always-new-process, the wezterm
+    // process itself will block until nvim exits, so we can track it directly
+    let wezterm_pid = child.id();
+    log::info!("WezTerm process PID: {}", wezterm_pid);
 
     // If geometry specified, try to resize using AppleScript after window appears
     if let Some(ref geo) = geometry {
@@ -330,14 +361,9 @@ fn spawn_wezterm(nvim_path: &str, file_path: &str, geometry: Option<WindowGeomet
         });
     }
 
-    // Wait a bit for nvim to start, then find its PID by the file it's editing
-    // We need to track nvim's PID, not wezterm's, to know when editing is done
-    let pid = find_nvim_pid_for_file(file_path);
-    log::info!("Found nvim PID: {:?} for file: {}", pid, file_path);
-
     Ok(SpawnInfo {
         terminal_type: TerminalType::WezTerm,
-        process_id: pid,
+        process_id: Some(wezterm_pid),
         child: Some(child),
         window_title: None,
     })

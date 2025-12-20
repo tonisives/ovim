@@ -137,8 +137,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
         </select>
         {nvimEdit.terminal !== "alacritty" && (
           <div className="alert alert-warning">
-            Terminal programs with tabs have limited support. Use Alacritty for best performance and
-            tested compatibility.
+            Limited support. Please use Alacritty for best performance and tested compatibility.
           </div>
         )}
       </div>
