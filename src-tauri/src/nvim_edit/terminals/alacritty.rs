@@ -29,16 +29,19 @@ impl TerminalSpawner for AlacrittySpawner {
 
         // Get editor path and args from settings
         let editor_path = settings.editor_path();
-        let mut editor_args = settings.editor_args();
+        let editor_args = settings.editor_args();
         let process_name = settings.editor_process_name();
 
-        // Add --listen for nvim RPC if socket_path provided and using nvim
-        if let Some(socket) = socket_path {
+        // Build socket args for nvim RPC if socket_path provided and using nvim
+        let socket_args: Vec<String> = if let Some(socket) = socket_path {
             if editor_path.contains("nvim") || editor_path == "nvim" {
-                editor_args.insert(0, socket.to_string_lossy().to_string());
-                editor_args.insert(0, "--listen".to_string());
+                vec!["--listen".to_string(), socket.to_string_lossy().to_string()]
+            } else {
+                vec![]
             }
-        }
+        } else {
+            vec![]
+        };
 
         // Resolve editor path to absolute path (msg create-window doesn't inherit PATH)
         let resolved_editor = resolve_command_path(&editor_path);
@@ -73,7 +76,7 @@ impl TerminalSpawner for AlacrittySpawner {
             (80, 24)
         };
 
-        // Build the command arguments: editor path, editor args, file path
+        // Build the command arguments: editor path, socket args, editor args, file path
         let mut cmd_args: Vec<String> = vec![
             "msg".to_string(),
             "create-window".to_string(),
@@ -90,6 +93,7 @@ impl TerminalSpawner for AlacrittySpawner {
             "-e".to_string(),
             resolved_editor.clone(),
         ];
+        cmd_args.extend(socket_args.iter().cloned());
         for arg in &editor_args {
             cmd_args.push(arg.to_string());
         }
@@ -129,6 +133,7 @@ impl TerminalSpawner for AlacrittySpawner {
                     "-e".to_string(),
                     resolved_editor.clone(),
                 ];
+                fallback_args.extend(socket_args.iter().cloned());
                 for arg in &editor_args {
                     fallback_args.push(arg.to_string());
                 }

@@ -43,7 +43,7 @@ pub fn detect_browser_type(bundle_id: &str) -> Option<BrowserType> {
 }
 
 /// JavaScript to get the focused element's viewport-relative position and viewport height
-const GET_ELEMENT_RECT_JS: &str = r#"(function() { var el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; if (el.tagName === 'IFRAME') { try { var iframeDoc = el.contentDocument || el.contentWindow.document; if (iframeDoc && iframeDoc.activeElement && iframeDoc.activeElement !== iframeDoc.body) { var iframeRect = el.getBoundingClientRect(); var innerEl = iframeDoc.activeElement; var innerRect = innerEl.getBoundingClientRect(); return JSON.stringify({ x: Math.round(iframeRect.left + innerRect.left), y: Math.round(iframeRect.top + innerRect.top), width: Math.round(innerRect.width), height: Math.round(innerRect.height), viewportHeight: window.innerHeight }); } } catch(e) {} } if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; } var rect = el.getBoundingClientRect(); if (rect.width === 0 && rect.height === 0) return null; return JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height), viewportHeight: window.innerHeight }); })()"#;
+const GET_ELEMENT_RECT_JS: &str = r#"(function() { function findDeepActiveElement(el) { if (el.shadowRoot && el.shadowRoot.activeElement) { return findDeepActiveElement(el.shadowRoot.activeElement); } return el; } var el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; if (el.tagName === 'IFRAME') { try { var iframeDoc = el.contentDocument || el.contentWindow.document; if (iframeDoc && iframeDoc.activeElement && iframeDoc.activeElement !== iframeDoc.body) { var iframeRect = el.getBoundingClientRect(); var innerEl = findDeepActiveElement(iframeDoc.activeElement); var innerRect = innerEl.getBoundingClientRect(); return JSON.stringify({ x: Math.round(iframeRect.left + innerRect.left), y: Math.round(iframeRect.top + innerRect.top), width: Math.round(innerRect.width), height: Math.round(innerRect.height), viewportHeight: window.innerHeight }); } } catch(e) {} } el = findDeepActiveElement(el); var rect = el.getBoundingClientRect(); if (rect.width === 0 && rect.height === 0) return null; return JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height), viewportHeight: window.innerHeight }); })()"#;
 
 /// JavaScript to set text on the focused element (for live sync in webviews)
 /// This handles input, textarea, and contenteditable elements
@@ -59,6 +59,14 @@ fn build_set_element_text_js(text: &str) -> String {
 
     format!(
         r#"(function() {{
+    // Recursively traverse shadow DOM to find the actual focused element
+    function findDeepActiveElement(el) {{
+        if (el.shadowRoot && el.shadowRoot.activeElement) {{
+            return findDeepActiveElement(el.shadowRoot.activeElement);
+        }}
+        return el;
+    }}
+
     var el = document.activeElement;
     if (!el || el === document.body || el === document.documentElement) return 'no_element';
 
@@ -72,17 +80,29 @@ fn build_set_element_text_js(text: &str) -> String {
         }} catch(e) {{ return 'iframe_error'; }}
     }}
 
-    // Handle shadow DOM
-    if (el.shadowRoot && el.shadowRoot.activeElement) {{
-        el = el.shadowRoot.activeElement;
-    }}
+    // Handle shadow DOM (recursively for nested shadow roots like Reddit uses)
+    el = findDeepActiveElement(el);
 
     var text = '{}';
 
-    // Handle contenteditable
+    // Handle contenteditable (including Lexical, ProseMirror, etc.)
     if (el.isContentEditable) {{
-        el.textContent = text;
-        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        // Select all content first
+        var selection = window.getSelection();
+        var range = document.createRange();
+        range.selectNodeContents(el);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        // Use InputEvent with insertText - works with modern rich text editors like Lexical
+        // Only dispatch beforeinput - Lexical handles this and generates its own input event
+        var inputEvent = new InputEvent('beforeinput', {{
+            inputType: 'insertText',
+            data: text,
+            bubbles: true,
+            cancelable: true
+        }});
+        el.dispatchEvent(inputEvent);
         return 'ok';
     }}
 

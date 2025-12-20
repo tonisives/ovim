@@ -24,15 +24,18 @@ impl TerminalSpawner for WezTermSpawner {
     ) -> Result<SpawnInfo, String> {
         // Get editor path and args from settings
         let editor_path = settings.editor_path();
-        let mut editor_args = settings.editor_args();
+        let editor_args = settings.editor_args();
 
-        // Add --listen for nvim RPC if socket_path provided and using nvim
-        if let Some(socket) = socket_path {
+        // Build socket args for nvim RPC if socket_path provided and using nvim
+        let socket_args: Vec<String> = if let Some(socket) = socket_path {
             if editor_path.contains("nvim") || editor_path == "nvim" {
-                editor_args.insert(0, socket.to_string_lossy().to_string());
-                editor_args.insert(0, "--listen".to_string());
+                vec!["--listen".to_string(), socket.to_string_lossy().to_string()]
+            } else {
+                vec![]
             }
-        }
+        } else {
+            vec![]
+        };
 
         // Resolve editor path
         let resolved_editor = resolve_command_path(&editor_path);
@@ -60,6 +63,9 @@ impl TerminalSpawner for WezTermSpawner {
         }
 
         cmd.arg(&resolved_editor);
+        for arg in &socket_args {
+            cmd.arg(arg);
+        }
         for arg in &editor_args {
             cmd.arg(arg);
         }
