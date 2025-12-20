@@ -2,20 +2,22 @@
 
 macOS system-wide Vim keybindings and modal editor.
 
-ovim is a lightweight menu bar application that brings Vim's modal editing to every app on your Mac. Press a key to toggle between Insert and Normal mode anywhere - in your browser, text editors, terminal, or any other application.
+**ovim has two independent editing modes:**
 
-| Mode Indicator | Edit Popup |
-| -------------- | ---------- |
-| ![ovim Modes](docs/images/modes-animated.gif) | ![Edit Popup](docs/images/edit-popup.gif) |
+| In-Place Mode                                                                                                                                          | Edit Popup                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Simulates Vim motions by intercepting keystrokes and injecting native macOS key events. Works instantly in any app. Supports a subset of Vim commands. | Opens your actual Neovim installation in a terminal window with your full config and plugins. Edit complex text, then paste back with `:wq`. |
+| ![ovim Modes](docs/images/modes-animated.gif)                                                                                                          | ![Edit Popup](docs/images/edit-popup.gif)                                                                                                    |
 
 ## Features
 
-- **System-wide Vim modes** - Normal, Insert, and Visual modes work in any macOS application
-- **Modal popup editor** - Open a full Neovim editor popup for complex edits, then paste back
-- **Mode indicator** - Floating widget shows current mode with customizable position, size, and opacity
-- **Configurable activation key** - Default is Caps Lock, customizable with modifier keys
-- **Per-application ignore list** - Disable ovim for apps with their own Vim mode
-- **Widgets** - Display battery status, caps lock state, or selection info
+| Feature           | In-Place Mode                                                            | Edit Popup                               |
+| ----------------- | ------------------------------------------------------------------------ | ---------------------------------------- |
+| Vim support       | Basic motions, operators, text objects ([see list](docs/keybindings.md)) | Full Neovim with all your plugins        |
+| User config       | In app configuration for widgets, ignore list                            | Uses your `~/.config/nvim`               |
+| Speed             | Instant                                                                  | ~500ms (terminal startup)                |
+| App compatibility | All apps (with Accessibility permission)                                 | Apps with Accessibility API or browsers  |
+| Use case          | Quick edits, modal navigation                                            | Complex edits, regex, macros, multi-line |
 
 ## Installation
 
@@ -50,28 +52,37 @@ Requires [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) v18+, and [p
 
 1. Launch ovim - it appears in your menu bar
 2. Grant Accessibility permission when prompted
-3. Press **Caps Lock** to toggle between modes
-4. Access Settings from the menu bar icon
+3. Access Settings from the menu bar icon
+
+| In-Place Mode                                                                                   | Edit Popup                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Press **Caps Lock** to toggle between Normal/Insert modes. Use Vim motions directly in any app. | Assign a shortcut to "Toggle Edit Popup" in Settings. Press it to open Neovim, edit, then `:wq` to paste back. |
+
+## In-Place Mode
+
+Toggle between Normal and Insert modes with Caps Lock (configurable). In Normal mode, use Vim motions directly in any application.
+
+**Supported commands:** `hjkl`, `w/b/e`, `0/$`, `gg/G`, `d/y/c` + motions, `dd/yy/cc`, `x`, `p/P`, `u/Ctrl+r`, Visual mode, counts, and more. See [docs/keybindings.md](docs/keybindings.md) for the full list.
+
+![Indicator Position](docs/images/change-indicator-position.gif)
+
+### Widgets
+
+Display battery status, time, or selection info
 
 ## Edit Popup
 
-The edit popup opens a full Neovim editor window for complex text editing. Assign a custom shortcut to toggle it anytime - this feature works independently from the Vim mode simulation.
-
-![Edit Popup](docs/images/edit-popup.gif)
+Opens your actual Neovim installation in a terminal window. Your full config (`~/.config/nvim`) and all plugins are available.
 
 **How it works:**
 
 1. Assign a shortcut to "Toggle Edit Popup" in Settings
-2. Select text in any application (optional)
-3. Press your shortcut to open the edit popup
-4. Edit using your full Neovim configuration
-5. Type `:wq` to save and paste the content back, or close the window to cancel
+2. Select text in any application (optional - captures existing text)
+3. Press your shortcut to open Neovim in a popup terminal
+4. Edit with your full Neovim setup (plugins, keybindings, macros, etc.)
+5. Type `:wq` to save and paste back, or close the window to cancel
 
-The edit popup uses your existing Neovim configuration, so all your plugins, keybindings, and settings are available.
-
-## Vim Commands
-
-See [docs/keybindings.md](docs/keybindings.md) for the full list of supported Vim keybindings.
+**Supported terminals:** Alacritty, Kitty, WezTerm, iTerm2, Terminal.app
 
 ## CLI Tool
 
@@ -85,16 +96,6 @@ ovim mode     # Get current mode
 ```
 
 See [docs/cli.md](docs/cli.md) for full CLI documentation and Karabiner integration examples.
-
-## Screenshots
-
-| Normal                                 | Insert                                 | Visual                                 |
-| -------------------------------------- | -------------------------------------- | -------------------------------------- |
-| ![Normal](docs/images/Component-2.png) | ![Insert](docs/images/Component-3.png) | ![Visual](docs/images/Component-4.png) |
-
-![Indicator Position](docs/images/change-indicator-position.gif)
-
-![Visual Mode](docs/images/visual-C-u-d.gif)
 
 ## License
 
