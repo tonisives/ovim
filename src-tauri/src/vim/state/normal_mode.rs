@@ -476,6 +476,37 @@ impl VimState {
     }
 
     pub(super) fn handle_operator_motion(&mut self, keycode: KeyCode, modifiers: &Modifiers) -> ProcessResult {
+        // Check for doubled operator (dd, yy, cc)
+        let doubled = match (&self.pending_operator, keycode) {
+            (Some(Operator::Delete), KeyCode::D) if !modifiers.shift => true,
+            (Some(Operator::Yank), KeyCode::Y) if !modifiers.shift => true,
+            (Some(Operator::Change), KeyCode::C) if !modifiers.shift => true,
+            _ => false,
+        };
+
+        if doubled {
+            let operator = self.pending_operator.take().unwrap();
+            let count = self.get_count();
+            self.pending_count = None;
+
+            let command = match operator {
+                Operator::Delete => VimCommand::DeleteLine,
+                Operator::Yank => VimCommand::YankLine,
+                Operator::Change => VimCommand::ChangeLine,
+            };
+
+            if operator == Operator::Change {
+                self.set_mode(VimMode::Insert);
+                return ProcessResult::ModeChanged(VimMode::Insert, Some(VimAction::Command {
+                    command, count, select: false
+                }));
+            } else {
+                return ProcessResult::SuppressWithAction(VimAction::Command {
+                    command, count, select: false
+                });
+            }
+        }
+
         // Check for text object modifier (i or a)
         if keycode == KeyCode::I && !modifiers.shift {
             self.pending_text_object = Some(TextObjectModifier::Inner);
