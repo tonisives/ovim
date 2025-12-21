@@ -499,6 +499,17 @@ body {
   max-width: 150px;
 }
 
+/* Editor row: dropdown + path input */
+.form-row.editor-row .form-group:first-child {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.form-row.editor-row .editor-path-group {
+  flex: 1;
+  max-width: 200px;
+}
+
 .form-group input[type="number"] {
   width: 100%;
   padding: 8px 12px;
