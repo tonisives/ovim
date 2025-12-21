@@ -130,6 +130,34 @@ export function IndicatorSettings({ settings, onUpdate }: Props) {
           </p>
         </div>
 
+        <div className="form-group checkbox-group">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={settings.indicator_visible}
+              onChange={(e) => onUpdate({ indicator_visible: e.target.checked })}
+            />
+            <span>Show floating indicator</span>
+          </label>
+          <p className="setting-description">
+            Display the mode indicator as a floating window on screen.
+          </p>
+        </div>
+
+        <div className="form-group checkbox-group">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={settings.show_mode_in_menu_bar}
+              onChange={(e) => onUpdate({ show_mode_in_menu_bar: e.target.checked })}
+            />
+            <span>Show mode in menu bar</span>
+          </label>
+          <p className="setting-description">
+            Display the current mode (N/I/V) in the menu bar icon.
+          </p>
+        </div>
+
         <div className="form-group">
           <label htmlFor="vim-key">Vim mode key</label>
           <div className="key-selector">

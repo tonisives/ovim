@@ -112,6 +112,12 @@ pub struct Settings {
     /// Indicator Y offset in pixels
     #[serde(default)]
     pub indicator_offset_y: i32,
+    /// Whether the indicator window is visible
+    #[serde(default = "default_true")]
+    pub indicator_visible: bool,
+    /// Show mode indicator in menu bar icon
+    #[serde(default)]
+    pub show_mode_in_menu_bar: bool,
     /// Mode-specific background colors
     #[serde(default)]
     pub mode_colors: ModeColors,
@@ -142,6 +148,10 @@ fn default_enabled() -> bool {
     true
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -153,6 +163,8 @@ impl Default for Settings {
             indicator_size: 1.0,
             indicator_offset_x: 0,
             indicator_offset_y: 0,
+            indicator_visible: true,
+            show_mode_in_menu_bar: false,
             mode_colors: ModeColors::default(),
             indicator_font: default_font_family(),
             ignored_apps: vec![],

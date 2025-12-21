@@ -30,6 +30,8 @@ export interface Settings {
   indicator_size: number
   indicator_offset_x: number
   indicator_offset_y: number
+  indicator_visible: boolean
+  show_mode_in_menu_bar: boolean
   mode_colors: ModeColors
   indicator_font: string
   top_widget: WidgetType

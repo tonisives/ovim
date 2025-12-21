@@ -42,6 +42,9 @@ anyhow = "1"
 # Directories
 dirs = "6"
 
+# Image decoding for tray icons
+image = "0.25"
+
 # UUID for session IDs
 uuid = { version = "1", features = ["v4"] }
 

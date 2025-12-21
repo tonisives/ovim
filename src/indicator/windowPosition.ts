@@ -11,7 +11,7 @@ const BASE_SIZE = 40
 export async function applyWindowSettings(settings: Settings): Promise<void> {
   const window = getCurrentWindow()
 
-  if (!settings.enabled) {
+  if (!settings.enabled || !settings.indicator_visible) {
     await window.hide()
     return
   }

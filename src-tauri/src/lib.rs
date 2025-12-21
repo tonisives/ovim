@@ -14,7 +14,9 @@ mod window;
 use std::sync::{Arc, Mutex};
 
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem},
+    tray::TrayIcon,
     AppHandle, Emitter, Listener, Manager, State,
 };
 
@@ -127,6 +129,33 @@ fn handle_set_mode(state: &mut VimState, app_handle: &AppHandle, mode_str: &str)
     }
 }
 
+fn update_tray_icon(tray: &TrayIcon, mode: &str, show_mode: bool) {
+    let icon_bytes: &[u8] = if show_mode {
+        match mode {
+            "insert" => include_bytes!("../icons/tray-icon-insert.png"),
+            "normal" => include_bytes!("../icons/tray-icon-normal.png"),
+            "visual" => include_bytes!("../icons/tray-icon-visual.png"),
+            _ => include_bytes!("../icons/tray-icon.png"),
+        }
+    } else {
+        include_bytes!("../icons/tray-icon.png")
+    };
+
+    match image::load_from_memory(icon_bytes) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            let icon = Image::new_owned(rgba.into_raw(), width, height);
+            if let Err(e) = tray.set_icon(Some(icon)) {
+                log::error!("Failed to set tray icon: {}", e);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to decode tray icon: {}", e);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_file_logger();
@@ -219,7 +248,19 @@ pub fn run() {
                         if let Err(e) = tray_clone.set_visible(new_settings.show_in_menu_bar) {
                             log::error!("Failed to update tray visibility: {}", e);
                         }
+                        // Update tray icon when show_mode_in_menu_bar changes
+                        update_tray_icon(&tray_clone, "insert", new_settings.show_mode_in_menu_bar);
                     }
+                });
+
+                // Listen for mode changes to update tray icon
+                let tray_for_mode = tray.clone();
+                let app_handle_for_tray = app.handle().clone();
+                app.listen("mode-change", move |event| {
+                    let mode = event.payload().trim_matches('"');
+                    let state: State<AppState> = app_handle_for_tray.state();
+                    let show_mode = state.settings.lock().map(|s| s.show_mode_in_menu_bar).unwrap_or(false);
+                    update_tray_icon(&tray_for_mode, mode, show_mode);
                 });
             }
 

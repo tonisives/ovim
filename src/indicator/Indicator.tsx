@@ -51,7 +51,7 @@ export function Indicator() {
   const opacity = settings?.indicator_opacity ?? 0.9
   const colors = settings?.mode_colors ?? defaultColors
   const color = colors[mode]
-  const bgColor = `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})`
+  const bgColor = `rgb(${color.r}, ${color.g}, ${color.b})`
 
   const fontFamily = settings?.indicator_font ?? "system-ui, -apple-system, sans-serif"
   const topWidget = settings?.top_widget ?? "None"
@@ -84,6 +84,7 @@ export function Indicator() {
         boxSizing: "border-box",
         overflow: "hidden",
         paddingBottom: "1px",
+        opacity,
       }}
     >
       {hasTop && <Widget type={topWidget} fontFamily={fontFamily} />}
