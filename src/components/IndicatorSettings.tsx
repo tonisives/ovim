@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { Settings, RgbColor, ModeColors, VimKeyModifiers } from "./SettingsApp";
-
-interface RecordedKey {
-  name: string;
-  display_name: string;
-  modifiers: VimKeyModifiers;
-}
+import type { Settings, RgbColor, ModeColors } from "./SettingsApp";
+import {
+  formatKeyWithModifiers,
+  hasAnyModifier,
+  recordKey,
+  cancelRecordKey,
+  getKeyDisplayName,
+} from "./keyRecording";
 
 const PRESET_KEYS = [
   { value: "caps_lock", label: "Caps Lock" },
@@ -14,20 +14,6 @@ const PRESET_KEYS = [
   { value: "right_control", label: "Right Control" },
   { value: "right_option", label: "Right Option" },
 ];
-
-function formatKeyWithModifiers(displayName: string, modifiers: VimKeyModifiers): string {
-  const parts: string[] = [];
-  if (modifiers.control) parts.push("Ctrl");
-  if (modifiers.option) parts.push("Opt");
-  if (modifiers.shift) parts.push("Shift");
-  if (modifiers.command) parts.push("Cmd");
-  parts.push(displayName);
-  return parts.join(" + ");
-}
-
-function hasAnyModifier(modifiers: VimKeyModifiers): boolean {
-  return modifiers.shift || modifiers.control || modifiers.option || modifiers.command;
-}
 
 interface Props {
   settings: Settings;
@@ -75,7 +61,7 @@ export function IndicatorSettings({ settings, onUpdate }: Props) {
   const [displayName, setDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<string | null>("get_key_display_name", { keyName: settings.vim_key })
+    getKeyDisplayName(settings.vim_key)
       .then((name) => {
         if (name && hasAnyModifier(settings.vim_key_modifiers)) {
           setDisplayName(formatKeyWithModifiers(name, settings.vim_key_modifiers));
@@ -89,7 +75,7 @@ export function IndicatorSettings({ settings, onUpdate }: Props) {
   const handleRecordKey = async () => {
     setIsRecording(true);
     try {
-      const recorded = await invoke<RecordedKey>("record_key");
+      const recorded = await recordKey();
       onUpdate({
         vim_key: recorded.name,
         vim_key_modifiers: recorded.modifiers,
@@ -104,7 +90,7 @@ export function IndicatorSettings({ settings, onUpdate }: Props) {
   };
 
   const handleCancelRecord = () => {
-    invoke("cancel_record_key").catch(() => {});
+    cancelRecordKey().catch(() => {});
     setIsRecording(false);
   };
 

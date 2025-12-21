@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use uuid::Uuid;
 
 use super::accessibility::FocusContext;
-use super::terminal::{spawn_terminal, SpawnInfo, TerminalType, WindowGeometry};
+use super::terminals::{spawn_terminal, SpawnInfo, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
 /// An active edit session

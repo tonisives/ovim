@@ -3,7 +3,7 @@
 mod accessibility;
 mod browser_scripting;
 mod session;
-mod terminal;
+mod terminals;
 
 pub use session::EditSessionManager;
 
@@ -13,7 +13,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use terminal::WindowGeometry;
+use terminals::WindowGeometry;
 
 /// Trigger the "Edit with Neovim" flow
 pub fn trigger_nvim_edit(
@@ -124,7 +124,7 @@ pub fn trigger_nvim_edit(
             log::info!("Waiting for process: {:?} (PID: {:?})", session.terminal_type, session.process_id);
 
             // Wait for process
-            if let Err(e) = terminal::wait_for_process(&session.terminal_type, session.process_id) {
+            if let Err(e) = terminals::wait_for_process(&session.terminal_type, session.process_id) {
                 log::error!("Error waiting for terminal process: {}", e);
                 manager_clone.cancel_session(&session_id);
                 return;
