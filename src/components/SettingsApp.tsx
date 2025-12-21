@@ -117,27 +117,46 @@ export function SettingsApp() {
     return <div className="loading">Loading settings...</div>;
   }
 
-  const tabs: { id: TabId; label: string; icon: string }[] = [
-    { id: "general", label: "General", icon: "gear" },
+  const inPlaceModeTabs: { id: TabId; label: string; icon: string }[] = [
     { id: "indicator", label: "Indicator", icon: "diamond" },
     { id: "widgets", label: "Widgets", icon: "ruler" },
     { id: "ignored", label: "Ignored Apps", icon: "pause" },
-    { id: "nvim", label: "Nvim Edit", icon: "edit" },
   ];
 
   return (
     <div className="settings-container">
       <div className="tabs">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={`tab ${activeTab === tab.id ? "active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            <span className="tab-icon">{getIcon(tab.icon)}</span>
-            {tab.label}
-          </button>
-        ))}
+        <button
+          className={`tab ${activeTab === "general" ? "active" : ""}`}
+          onClick={() => setActiveTab("general")}
+        >
+          <span className="tab-icon">{getIcon("gear")}</span>
+          General
+        </button>
+
+        <div className="tab-group">
+          <span className="tab-group-label">In-Place Mode</span>
+          <div className="tab-group-tabs">
+            {inPlaceModeTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={`tab ${activeTab === tab.id ? "active" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="tab-icon">{getIcon(tab.icon)}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          className={`tab ${activeTab === "nvim" ? "active" : ""}`}
+          onClick={() => setActiveTab("nvim")}
+        >
+          <span className="tab-icon">{getIcon("edit")}</span>
+          Edit Popup
+        </button>
       </div>
 
       <div className="tab-content" ref={contentRef}>

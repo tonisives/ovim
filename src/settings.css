@@ -102,6 +102,39 @@ body {
   font-size: 14px;
 }
 
+/* Tab group for In-Place Mode */
+.tab-group {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  background: var(--accent-bg);
+  border-radius: 6px 6px 0 0;
+  padding: 0 2px;
+  margin: 0 4px;
+}
+
+.tab-group-label {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-color);
+  white-space: nowrap;
+}
+
+.tab-group-tabs {
+  display: flex;
+  gap: 2px;
+  padding-top: 12px;
+}
+
+.tab-group .tab {
+  padding: 6px 12px;
+}
+
 /* Tab content */
 .tab-content {
   background: var(--bg-secondary);

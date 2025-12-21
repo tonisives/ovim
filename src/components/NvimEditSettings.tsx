@@ -83,7 +83,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
 
   return (
     <div className="settings-section">
-      <h2>Edit with Neovim</h2>
+      <h2>Edit Popup</h2>
       <p className="section-description">
         Press a shortcut while focused on any text field to edit its contents in Neovim.
       </p>
