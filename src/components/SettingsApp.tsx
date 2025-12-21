@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { GeneralSettings } from "./GeneralSettings";
 import { IndicatorSettings } from "./IndicatorSettings";
 import { WidgetSettings } from "./WidgetSettings";
@@ -24,12 +25,28 @@ export interface NvimEditSettings {
   popup_height: number;
 }
 
+export interface RgbColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
+export interface ModeColors {
+  insert: RgbColor;
+  normal: RgbColor;
+  visual: RgbColor;
+}
+
 export interface Settings {
   vim_key: string;
   vim_key_modifiers: VimKeyModifiers;
   indicator_position: number;
   indicator_opacity: number;
   indicator_size: number;
+  indicator_offset_x: number;
+  indicator_offset_y: number;
+  mode_colors: ModeColors;
+  indicator_font: string;
   ignored_apps: string[];
   launch_at_login: boolean;
   show_in_menu_bar: boolean;
@@ -41,15 +58,46 @@ export interface Settings {
 
 type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim";
 
+const MIN_HEIGHT = 400;
+const MAX_HEIGHT = 800;
+const WINDOW_WIDTH = 600;
+const TABS_HEIGHT = 45; // Height of tabs bar
+
 export function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("general");
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const resizeWindow = useCallback(async () => {
+    if (!contentRef.current) return;
+
+    // Get the scrollHeight of the content (actual content height)
+    const contentHeight = contentRef.current.scrollHeight;
+    // Add tabs height and padding buffer
+    const totalHeight = contentHeight + TABS_HEIGHT + 40;
+    // Clamp between min and max
+    const newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, totalHeight));
+
+    try {
+      const window = getCurrentWindow();
+      await window.setSize(new LogicalSize(WINDOW_WIDTH, newHeight));
+    } catch (e) {
+      console.error("Failed to resize window:", e);
+    }
+  }, []);
 
   useEffect(() => {
     invoke<Settings>("get_settings")
       .then(setSettings)
       .catch((e) => console.error("Failed to load settings:", e));
   }, []);
+
+  // Resize window when tab changes or settings change
+  useEffect(() => {
+    // Small delay to let content render
+    const timer = setTimeout(resizeWindow, 50);
+    return () => clearTimeout(timer);
+  }, [activeTab, settings, resizeWindow]);
 
   const updateSettings = async (updates: Partial<Settings>) => {
     if (!settings) return;
@@ -91,7 +139,7 @@ export function SettingsApp() {
         ))}
       </div>
 
-      <div className="tab-content">
+      <div className="tab-content" ref={contentRef}>
         {activeTab === "general" && (
           <GeneralSettings settings={settings} onUpdate={updateSettings} />
         )}

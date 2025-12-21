@@ -52,6 +52,42 @@ impl Default for NvimEditSettings {
     }
 }
 
+/// RGB color representation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RgbColor {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Default for RgbColor {
+    fn default() -> Self {
+        Self { r: 128, g: 128, b: 128 }
+    }
+}
+
+/// Mode-specific color settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModeColors {
+    /// Insert mode background color
+    pub insert: RgbColor,
+    /// Normal mode background color
+    pub normal: RgbColor,
+    /// Visual mode background color
+    pub visual: RgbColor,
+}
+
+impl Default for ModeColors {
+    fn default() -> Self {
+        Self {
+            insert: RgbColor { r: 74, g: 144, b: 217 },   // Blue
+            normal: RgbColor { r: 232, g: 148, b: 74 },   // Orange
+            visual: RgbColor { r: 155, g: 109, b: 215 },  // Purple
+        }
+    }
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -67,6 +103,18 @@ pub struct Settings {
     pub indicator_opacity: f32,
     /// Indicator size scale (0.5 - 2.0)
     pub indicator_size: f32,
+    /// Indicator X offset in pixels
+    #[serde(default)]
+    pub indicator_offset_x: i32,
+    /// Indicator Y offset in pixels
+    #[serde(default)]
+    pub indicator_offset_y: i32,
+    /// Mode-specific background colors
+    #[serde(default)]
+    pub mode_colors: ModeColors,
+    /// Font family for indicator
+    #[serde(default = "default_font_family")]
+    pub indicator_font: String,
     /// Bundle identifiers of apps where vim mode is disabled
     pub ignored_apps: Vec<String>,
     /// Launch at login
@@ -83,6 +131,10 @@ pub struct Settings {
     pub nvim_edit: NvimEditSettings,
 }
 
+fn default_font_family() -> String {
+    "system-ui, -apple-system, sans-serif".to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -91,6 +143,10 @@ impl Default for Settings {
             indicator_position: 1, // Top center
             indicator_opacity: 0.9,
             indicator_size: 1.0,
+            indicator_offset_x: 0,
+            indicator_offset_y: 0,
+            mode_colors: ModeColors::default(),
+            indicator_font: default_font_family(),
             ignored_apps: vec![],
             launch_at_login: false,
             show_in_menu_bar: true,

@@ -12,10 +12,26 @@ import {
 type VimMode = "insert" | "normal" | "visual"
 type WidgetType = "None" | "Time" | "Date" | "CharacterCount" | "LineCount" | "CharacterAndLineCount" | "Battery" | "CapsLock" | "KeystrokeBuffer"
 
+interface RgbColor {
+  r: number
+  g: number
+  b: number
+}
+
+interface ModeColors {
+  insert: RgbColor
+  normal: RgbColor
+  visual: RgbColor
+}
+
 interface Settings {
   indicator_position: number
   indicator_opacity: number
   indicator_size: number
+  indicator_offset_x: number
+  indicator_offset_y: number
+  mode_colors: ModeColors
+  indicator_font: string
   top_widget: WidgetType
   bottom_widget: WidgetType
 }
@@ -47,7 +63,7 @@ interface BatteryInfo {
   is_charging: boolean
 }
 
-function Widget({ type }: { type: WidgetType }) {
+function Widget({ type, fontFamily }: { type: WidgetType; fontFamily: string }) {
   const [time, setTime] = useState(formatTime)
   const [date, setDate] = useState(formatDate)
   const [selection, setSelection] = useState<SelectionInfo | null>(null)
@@ -189,7 +205,7 @@ function Widget({ type }: { type: WidgetType }) {
       style={{
         fontSize: "9px",
         opacity: 0.9,
-        fontFamily: "monospace",
+        fontFamily: fontFamily,
         whiteSpace: "nowrap",
         paddingTop: 2,
       }}
@@ -259,6 +275,10 @@ async function applyWindowSettings(settings: Settings) {
       y = padding + 30
   }
 
+  // Apply offsets
+  x += settings.indicator_offset_x ?? 0
+  y += settings.indicator_offset_y ?? 0
+
   try {
     await window.setSize(new LogicalSize(width, height))
     await window.setPosition(new LogicalPosition(Math.round(x), Math.round(y)))
@@ -308,45 +328,74 @@ function Indicator() {
   const modeChar = mode === "insert" ? "i" : mode === "normal" ? "n" : "v"
   const opacity = settings?.indicator_opacity ?? 0.9
 
-  const bgColor =
-    mode === "insert"
-      ? `rgba(74, 144, 217, ${opacity})`
-      : mode === "normal"
-        ? `rgba(232, 148, 74, ${opacity})`
-        : `rgba(155, 109, 215, ${opacity})`
+  // Default colors if settings not loaded
+  const defaultColors: ModeColors = {
+    insert: { r: 74, g: 144, b: 217 },
+    normal: { r: 232, g: 148, b: 74 },
+    visual: { r: 155, g: 109, b: 215 },
+  }
 
+  const colors = settings?.mode_colors ?? defaultColors
+  const color = mode === "insert" ? colors.insert : mode === "normal" ? colors.normal : colors.visual
+  const bgColor = `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})`
+
+  const fontFamily = settings?.indicator_font ?? "system-ui, -apple-system, sans-serif"
   const topWidget = settings?.top_widget ?? "None"
   const bottomWidget = settings?.bottom_widget ?? "None"
+
+  // Build grid template based on which widgets are active
+  const hasTop = topWidget !== "None"
+  const hasBottom = bottomWidget !== "None"
+  let gridTemplateRows = "1fr"
+  if (hasTop && hasBottom) {
+    gridTemplateRows = "auto 1fr auto"
+  } else if (hasTop) {
+    gridTemplateRows = "auto 1fr"
+  } else if (hasBottom) {
+    gridTemplateRows = "1fr auto"
+  }
 
   return (
     <div
       style={{
         width: "100%",
         height: "100%",
-        display: "flex",
-        flexDirection: "column",
+        display: "grid",
+        gridTemplateRows,
         alignItems: "center",
+        justifyItems: "center",
         background: bgColor,
         borderRadius: "8px",
-        fontFamily: "system-ui, -apple-system, sans-serif",
+        fontFamily: fontFamily,
         color: "white",
         boxSizing: "border-box",
+        overflow: "hidden",
+        paddingBottom: "1px",
       }}
     >
-      {topWidget !== "None" && <Widget type={topWidget} />}
+      {hasTop && <Widget type={topWidget} fontFamily={fontFamily} />}
       <div
         style={{
-          fontSize: "36px",
-          fontWeight: "bold",
-          textTransform: "uppercase",
-          lineHeight: 1,
-          display: "flex",
-          alignItems: "center",
+          display: "grid",
+          placeItems: "center",
+          width: "100%",
+          height: "100%",
         }}
       >
-        {modeChar}
+        <span
+          style={{
+            fontSize: "36px",
+            fontWeight: "bold",
+            textTransform: "uppercase",
+            lineHeight: "0.75em",
+            display: "block",
+            transform: "translateY(1px)",
+          }}
+        >
+          {modeChar}
+        </span>
       </div>
-      {bottomWidget !== "None" && <Widget type={bottomWidget} />}
+      {hasBottom && <Widget type={bottomWidget} fontFamily={fontFamily} />}
     </div>
   )
 }

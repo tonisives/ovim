@@ -37,7 +37,7 @@
         "title": "ovim Settings",
         "url": "/settings.html",
         "width": 600,
-        "height": 500,
+        "height": 400,
         "resizable": true,
         "decorations": true,
         "transparent": false,
