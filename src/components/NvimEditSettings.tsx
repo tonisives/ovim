@@ -1,20 +1,18 @@
 import { useState, useEffect } from "react"
-import { invoke } from "@tauri-apps/api/core"
 import type {
   Settings,
-  VimKeyModifiers,
   NvimEditSettings as NvimEditSettingsType,
 } from "./SettingsApp"
+import {
+  formatKeyWithModifiers,
+  recordKey,
+  cancelRecordKey,
+  getKeyDisplayName,
+} from "./keyRecording"
 
 interface Props {
   settings: Settings
   onUpdate: (updates: Partial<Settings>) => void
-}
-
-interface RecordedKey {
-  name: string
-  display_name: string
-  modifiers: VimKeyModifiers
 }
 
 const TERMINAL_OPTIONS = [
@@ -25,16 +23,6 @@ const TERMINAL_OPTIONS = [
   { value: "default", label: "Terminal.app" },
 ]
 
-function formatKeyWithModifiers(displayName: string, modifiers: VimKeyModifiers): string {
-  const parts: string[] = []
-  if (modifiers.control) parts.push("Ctrl")
-  if (modifiers.option) parts.push("Opt")
-  if (modifiers.shift) parts.push("Shift")
-  if (modifiers.command) parts.push("Cmd")
-  parts.push(displayName)
-  return parts.join(" + ")
-}
-
 export function NvimEditSettings({ settings, onUpdate }: Props) {
   const [isRecording, setIsRecording] = useState(false)
   const [displayName, setDisplayName] = useState<string | null>(null)
@@ -42,7 +30,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
   const nvimEdit = settings.nvim_edit
 
   useEffect(() => {
-    invoke<string | null>("get_key_display_name", { keyName: nvimEdit.shortcut_key })
+    getKeyDisplayName(nvimEdit.shortcut_key)
       .then((name) => {
         if (name) {
           setDisplayName(formatKeyWithModifiers(name, nvimEdit.shortcut_modifiers))
@@ -62,7 +50,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
   const handleRecordKey = async () => {
     setIsRecording(true)
     try {
-      const recorded = await invoke<RecordedKey>("record_key")
+      const recorded = await recordKey()
       updateNvimEdit({
         shortcut_key: recorded.name,
         shortcut_modifiers: recorded.modifiers,
@@ -77,7 +65,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
   }
 
   const handleCancelRecord = () => {
-    invoke("cancel_record_key").catch(() => {})
+    cancelRecordKey().catch(() => {})
     setIsRecording(false)
   }
 
