@@ -94,6 +94,46 @@ export function IndicatorSettings({ settings, onUpdate }: Props) {
 
         <div className="slider-group">
           <label>
+            X Offset: {settings.indicator_offset_x}px
+          </label>
+          <input
+            type="range"
+            min="-200"
+            max="200"
+            value={settings.indicator_offset_x}
+            onChange={(e) =>
+              onUpdate({ indicator_offset_x: Number(e.target.value) })
+            }
+          />
+          <div className="slider-labels">
+            <span>-200</span>
+            <span>0</span>
+            <span>+200</span>
+          </div>
+        </div>
+
+        <div className="slider-group">
+          <label>
+            Y Offset: {settings.indicator_offset_y}px
+          </label>
+          <input
+            type="range"
+            min="-200"
+            max="200"
+            value={settings.indicator_offset_y}
+            onChange={(e) =>
+              onUpdate({ indicator_offset_y: Number(e.target.value) })
+            }
+          />
+          <div className="slider-labels">
+            <span>-200</span>
+            <span>0</span>
+            <span>+200</span>
+          </div>
+        </div>
+
+        <div className="slider-group">
+          <label>
             Size: {settings.indicator_size.toFixed(1)}x
           </label>
           <input

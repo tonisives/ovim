@@ -28,6 +28,8 @@ interface Settings {
   indicator_position: number
   indicator_opacity: number
   indicator_size: number
+  indicator_offset_x: number
+  indicator_offset_y: number
   mode_colors: ModeColors
   indicator_font: string
   top_widget: WidgetType
@@ -272,6 +274,10 @@ async function applyWindowSettings(settings: Settings) {
     default:
       y = padding + 30
   }
+
+  // Apply offsets
+  x += settings.indicator_offset_x ?? 0
+  y += settings.indicator_offset_y ?? 0
 
   try {
     await window.setSize(new LogicalSize(width, height))

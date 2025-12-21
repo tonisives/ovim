@@ -103,6 +103,12 @@ pub struct Settings {
     pub indicator_opacity: f32,
     /// Indicator size scale (0.5 - 2.0)
     pub indicator_size: f32,
+    /// Indicator X offset in pixels
+    #[serde(default)]
+    pub indicator_offset_x: i32,
+    /// Indicator Y offset in pixels
+    #[serde(default)]
+    pub indicator_offset_y: i32,
     /// Mode-specific background colors
     #[serde(default)]
     pub mode_colors: ModeColors,
@@ -137,6 +143,8 @@ impl Default for Settings {
             indicator_position: 1, // Top center
             indicator_opacity: 0.9,
             indicator_size: 1.0,
+            indicator_offset_x: 0,
+            indicator_offset_y: 0,
             mode_colors: ModeColors::default(),
             indicator_font: default_font_family(),
             ignored_apps: vec![],

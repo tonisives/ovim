@@ -43,6 +43,8 @@ export interface Settings {
   indicator_position: number;
   indicator_opacity: number;
   indicator_size: number;
+  indicator_offset_x: number;
+  indicator_offset_y: number;
   mode_colors: ModeColors;
   indicator_font: string;
   ignored_apps: string[];
