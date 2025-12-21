@@ -98,6 +98,11 @@ ovim mode     # Get current mode
 
 See [docs/cli.md](docs/cli.md) for full CLI documentation and Karabiner integration examples.
 
+
+## Issues
+Please check logs at `/tmp/ovim-rust.log` and submit an [issue](https://github.com/tonisives/ovim/issues)
+
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
