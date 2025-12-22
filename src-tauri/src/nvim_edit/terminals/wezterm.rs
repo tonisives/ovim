@@ -3,7 +3,7 @@
 use std::process::Command;
 
 use super::applescript_utils::set_window_size;
-use super::process_utils::resolve_command_path;
+use super::process_utils::{resolve_command_path, resolve_terminal_path};
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
@@ -28,7 +28,12 @@ impl TerminalSpawner for WezTermSpawner {
         let resolved_editor = resolve_command_path(&editor_path);
         log::info!("Resolved editor path: {} -> {}", editor_path, resolved_editor);
 
-        let mut cmd = Command::new("wezterm");
+        // Resolve terminal path (uses user setting or auto-detects)
+        let terminal_cmd = settings.get_terminal_path();
+        let resolved_terminal = resolve_terminal_path(&terminal_cmd);
+        log::info!("Resolved terminal path: {} -> {}", terminal_cmd, resolved_terminal);
+
+        let mut cmd = Command::new(&resolved_terminal);
 
         // Use --always-new-process so wezterm blocks until the command exits.
         // WezTerm only supports --position for window placement (no --width/--height)

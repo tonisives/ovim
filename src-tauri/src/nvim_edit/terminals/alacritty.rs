@@ -5,7 +5,7 @@ use std::process::Command;
 use super::applescript_utils::{
     find_alacritty_window_by_title, focus_alacritty_window_by_index, set_window_bounds_atomic,
 };
-use super::process_utils::{find_editor_pid_for_file, resolve_command_path};
+use super::process_utils::{find_editor_pid_for_file, resolve_command_path, resolve_terminal_path};
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
@@ -85,8 +85,13 @@ impl TerminalSpawner for AlacrittySpawner {
         }
         cmd_args.push(file_path.to_string());
 
+        // Resolve terminal path (uses user setting or auto-detects)
+        let terminal_cmd = settings.get_terminal_path();
+        let resolved_terminal = resolve_terminal_path(&terminal_cmd);
+        log::info!("Resolved terminal path: {} -> {}", terminal_cmd, resolved_terminal);
+
         // Use `alacritty msg create-window` to create window in existing daemon
-        let result = Command::new("alacritty")
+        let result = Command::new(&resolved_terminal)
             .args(&cmd_args)
             .spawn();
 
@@ -115,7 +120,7 @@ impl TerminalSpawner for AlacrittySpawner {
                 }
                 fallback_args.push(file_path.to_string());
 
-                Command::new("alacritty")
+                Command::new(&resolved_terminal)
                     .args(&fallback_args)
                     .spawn()
                     .map_err(|e| format!("Failed to spawn alacritty: {}", e))?

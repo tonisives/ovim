@@ -2,7 +2,7 @@
 
 use std::process::Command;
 
-use super::process_utils::{find_editor_pid_for_file, resolve_command_path};
+use super::process_utils::{find_editor_pid_for_file, resolve_command_path, resolve_terminal_path};
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
@@ -31,15 +31,12 @@ impl TerminalSpawner for KittySpawner {
         let resolved_editor = resolve_command_path(&editor_path);
         log::info!("Resolved editor path: {} -> {}", editor_path, resolved_editor);
 
-        // Try to find kitty - check common locations on macOS
-        let kitty_path =
-            if std::path::Path::new("/Applications/kitty.app/Contents/MacOS/kitty").exists() {
-                "/Applications/kitty.app/Contents/MacOS/kitty"
-            } else {
-                "kitty" // Fall back to PATH
-            };
+        // Resolve terminal path (uses user setting or auto-detects)
+        let terminal_cmd = settings.get_terminal_path();
+        let resolved_terminal = resolve_terminal_path(&terminal_cmd);
+        log::info!("Resolved terminal path: {} -> {}", terminal_cmd, resolved_terminal);
 
-        let mut cmd = Command::new(kitty_path);
+        let mut cmd = Command::new(&resolved_terminal);
 
         // Use single instance to avoid multiple dock icons, close window when editor exits
         cmd.args(["--single-instance", "--wait-for-single-instance-window-close"]);

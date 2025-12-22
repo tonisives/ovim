@@ -31,9 +31,21 @@ impl TerminalSpawner for GhosttySpawner {
         let resolved_editor = resolve_command_path(&editor_path);
         log::info!("Resolved editor path: {} -> {}", editor_path, resolved_editor);
 
-        // On macOS, Ghostty must be launched via `open -na Ghostty.app --args ...`
-        let mut cmd = Command::new("open");
-        cmd.args(["-na", "Ghostty.app", "--args"]);
+        // On macOS, Ghostty can be launched via `open -na Ghostty.app --args ...`
+        // or directly via the binary if user provides custom path
+        let terminal_path = settings.get_terminal_path();
+        let use_direct_binary = !terminal_path.is_empty()
+            && terminal_path != "ghostty"
+            && terminal_path.starts_with('/');
+
+        let mut cmd = if use_direct_binary {
+            log::info!("Using direct Ghostty binary: {}", terminal_path);
+            Command::new(&terminal_path)
+        } else {
+            let mut c = Command::new("open");
+            c.args(["-na", "Ghostty.app", "--args"]);
+            c
+        };
 
         // Add window title
         cmd.args([&format!("--title={}", unique_title)]);

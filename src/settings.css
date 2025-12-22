@@ -500,14 +500,75 @@ body {
 }
 
 /* Editor row: dropdown + path input */
+.form-row.editor-row {
+  max-width: none;
+}
+
 .form-row.editor-row .form-group:first-child {
-  flex: 0 0 auto;
+  flex: 0 0 120px;
+  max-width: 120px;
+}
+
+.form-row.editor-row .form-group:first-child select {
   max-width: none;
 }
 
 .form-row.editor-row .editor-path-group {
   flex: 1;
-  max-width: 200px;
+  max-width: none;
+}
+
+/* Terminal row: dropdown + path input */
+.form-row.terminal-row {
+  max-width: none;
+}
+
+.form-row.terminal-row .form-group:first-child {
+  flex: 0 0 120px;
+  max-width: 120px;
+}
+
+.form-row.terminal-row .form-group:first-child select {
+  max-width: none;
+}
+
+.form-row.terminal-row .terminal-path-group {
+  flex: 1;
+  max-width: none;
+}
+
+/* Path input with browse button */
+.path-input-row {
+  display: flex;
+  gap: 4px;
+}
+
+.path-input-row input {
+  flex: 1;
+  min-width: 0;
+  max-width: none !important;
+}
+
+.browse-btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.browse-btn:hover:not(:disabled) {
+  background: var(--bg-primary);
+  border-color: var(--accent-color);
+}
+
+.browse-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .form-group input[type="number"] {
@@ -705,5 +766,147 @@ body {
 .font-preview-text {
   font-size: 24px;
   font-weight: bold;
+}
+
+/* Section header with badges */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.section-header h2 {
+  margin-bottom: 0;
+}
+
+/* Error badge in section header */
+.error-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-color);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--danger-color);
+}
+
+/* Validating badge */
+.validating-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Inline error badge next to labels */
+.inline-error-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0;
+  background: var(--danger-color);
+  border: none;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: bold;
+  color: white;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.inline-error-badge:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 6px rgba(255, 59, 48, 0.4);
+}
+
+/* Input error state */
+.input-error {
+  border-color: var(--danger-color) !important;
+}
+
+.input-error:focus {
+  box-shadow: 0 0 0 3px var(--danger-bg) !important;
+}
+
+/* Resolved path hint */
+.resolved-path {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #30d158;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .resolved-path {
+    color: #32d74b;
+  }
+}
+
+/* Error dialog overlay */
+.error-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Error dialog box */
+.error-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px 24px;
+  max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.error-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--danger-color);
+}
+
+.error-dialog p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.error-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.error-dialog-buttons button {
+  padding: 6px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.error-dialog-buttons button:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
 }
 

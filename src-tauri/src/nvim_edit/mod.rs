@@ -3,7 +3,7 @@
 mod accessibility;
 mod browser_scripting;
 mod session;
-mod terminals;
+pub mod terminals;
 
 pub use session::EditSessionManager;
 

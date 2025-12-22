@@ -11,6 +11,7 @@
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:event:default",
-    "opener:default"
+    "opener:default",
+    "dialog:default"
   ]
 }

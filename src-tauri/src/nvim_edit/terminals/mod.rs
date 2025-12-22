@@ -8,7 +8,7 @@ mod applescript_utils;
 mod ghostty;
 mod iterm;
 mod kitty;
-mod process_utils;
+pub mod process_utils;
 mod terminal_app;
 mod wezterm;
 

@@ -71,8 +71,12 @@ pub struct NvimEditSettings {
     pub shortcut_key: String,
     /// Shortcut modifiers
     pub shortcut_modifiers: VimKeyModifiers,
-    /// Terminal to use: "alacritty", "iterm", "kitty", "default"
+    /// Terminal to use: "alacritty", "iterm", "kitty", "wezterm", "ghostty", "default"
     pub terminal: String,
+    /// Path to terminal executable (empty = auto-detect)
+    /// Use this if the terminal is not found automatically
+    #[serde(default)]
+    pub terminal_path: String,
     /// Editor type: "neovim", "vim", "helix", or "custom"
     #[serde(default)]
     pub editor: EditorType,
@@ -99,6 +103,7 @@ impl Default for NvimEditSettings {
                 command: true, // Cmd+Shift+E
             },
             terminal: "alacritty".to_string(),
+            terminal_path: "".to_string(), // Empty means auto-detect
             editor: EditorType::default(),
             nvim_path: "".to_string(), // Empty means use editor type's default
             popup_mode: true,
@@ -115,6 +120,16 @@ impl NvimEditSettings {
             self.editor.default_executable().to_string()
         } else {
             self.nvim_path.clone()
+        }
+    }
+
+    /// Get the effective terminal executable path
+    /// Returns the user-specified path if set, otherwise the terminal name for auto-detection
+    pub fn get_terminal_path(&self) -> String {
+        if self.terminal_path.is_empty() {
+            self.terminal.clone()
+        } else {
+            self.terminal_path.clone()
         }
     }
 

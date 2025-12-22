@@ -79,14 +79,41 @@ fn find_process_by_name(name: &str) -> Option<u32> {
     }
 }
 
-/// Resolve a command name to its absolute path using `which`
+/// Common installation paths to check for binaries on macOS
+/// These are checked when the app is launched from GUI and has limited PATH
+const COMMON_BIN_PATHS: &[&str] = &[
+    "/opt/homebrew/bin",      // Apple Silicon Homebrew
+    "/usr/local/bin",         // Intel Homebrew / manual installs
+    "/usr/bin",               // System binaries
+    "/bin",                   // Core system binaries
+];
+
+/// Common application bundle paths for terminal emulators on macOS
+const TERMINAL_APP_PATHS: &[(&str, &str)] = &[
+    ("alacritty", "/Applications/Alacritty.app/Contents/MacOS/alacritty"),
+    ("kitty", "/Applications/kitty.app/Contents/MacOS/kitty"),
+    ("wezterm", "/Applications/WezTerm.app/Contents/MacOS/wezterm"),
+    ("ghostty", "/Applications/Ghostty.app/Contents/MacOS/ghostty"),
+];
+
+/// Resolve a command name to its absolute path
+/// Checks common installation locations for GUI launches with limited PATH
 pub fn resolve_command_path(cmd: &str) -> String {
     // If already absolute path, return as-is
     if cmd.starts_with('/') {
         return cmd.to_string();
     }
 
-    // Try to resolve using `which`
+    // Check common binary paths first (for GUI launches with minimal PATH)
+    for base in COMMON_BIN_PATHS {
+        let full_path = format!("{}/{}", base, cmd);
+        if std::path::Path::new(&full_path).exists() {
+            log::info!("Found {} at {}", cmd, full_path);
+            return full_path;
+        }
+    }
+
+    // Try to resolve using `which` (works if PATH is set correctly)
     if let Ok(output) = Command::new("which").arg(cmd).output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -98,4 +125,20 @@ pub fn resolve_command_path(cmd: &str) -> String {
 
     // Fallback: return original (might work if PATH is set)
     cmd.to_string()
+}
+
+/// Resolve a terminal command to its absolute path
+/// First checks common macOS application bundle locations, then falls back to resolve_command_path
+pub fn resolve_terminal_path(terminal_name: &str) -> String {
+    // Check for known terminal app bundle paths
+    let lowercase = terminal_name.to_lowercase();
+    for (name, app_path) in TERMINAL_APP_PATHS {
+        if lowercase == *name && std::path::Path::new(app_path).exists() {
+            log::info!("Found {} at {}", terminal_name, app_path);
+            return app_path.to_string();
+        }
+    }
+
+    // Fall back to general command resolution
+    resolve_command_path(terminal_name)
 }
