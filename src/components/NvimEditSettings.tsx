@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { invoke } from "@tauri-apps/api/core"
-import type {
-  Settings,
-  NvimEditSettings as NvimEditSettingsType,
-} from "./SettingsApp"
+import type { Settings, NvimEditSettings as NvimEditSettingsType } from "./SettingsApp"
 import {
   formatKeyWithModifiers,
   recordKey,
@@ -89,7 +86,13 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
     } finally {
       setIsValidating(false)
     }
-  }, [nvimEdit.enabled, nvimEdit.terminal, nvimEdit.terminal_path, nvimEdit.editor, nvimEdit.nvim_path])
+  }, [
+    nvimEdit.enabled,
+    nvimEdit.terminal,
+    nvimEdit.terminal_path,
+    nvimEdit.editor,
+    nvimEdit.nvim_path,
+  ])
 
   // Run validation on mount and when relevant settings change
   useEffect(() => {
@@ -118,19 +121,28 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
     const currentPath = nvimEdit.nvim_path
 
     // Check if current path is empty or matches a default editor path
-    const isDefaultPath = currentPath === "" ||
-      Object.values(DEFAULT_EDITOR_PATHS).includes(currentPath)
+    const isDefaultPath =
+      currentPath === "" || Object.values(DEFAULT_EDITOR_PATHS).includes(currentPath)
 
     if (isDefaultPath) {
       // Update both editor and path to the new editor's default
       updateNvimEdit({
         editor: newEditor,
-        nvim_path: "" // Empty means use default
+        nvim_path: "", // Empty means use default
       })
     } else {
       // User has a custom path, keep it
       updateNvimEdit({ editor: newEditor })
     }
+  }
+
+  const handleTerminalChange = (newTerminal: string) => {
+    // Always clear the path when switching terminals
+    // This is simpler and safer - the new terminal will use auto-detection
+    updateNvimEdit({
+      terminal: newTerminal,
+      terminal_path: "",
+    })
   }
 
   const handleRecordKey = async () => {
@@ -172,16 +184,15 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
         {isValidating && <span className="validating-badge">Checking...</span>}
       </div>
       <p className="section-description">
-        Press a shortcut while focused on any text field to edit its contents in your preferred terminal editor.
+        Press a shortcut while focused on any text field to edit its contents in your preferred
+        terminal editor.
       </p>
 
       {/* Error dialog */}
       {showErrorDialog && (
         <div className="error-dialog-overlay" onClick={() => setShowErrorDialog(null)}>
           <div className="error-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>
-              {showErrorDialog === "terminal" ? "Terminal Not Found" : "Editor Not Found"}
-            </h3>
+            <h3>{showErrorDialog === "terminal" ? "Terminal Not Found" : "Editor Not Found"}</h3>
             <p>
               {showErrorDialog === "terminal"
                 ? validation?.terminal_error
@@ -248,7 +259,9 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
             value={nvimEdit.editor}
             onChange={(e) => handleEditorChange(e.target.value)}
             disabled={!nvimEdit.enabled}
-            className={validation && !validation.editor_valid && nvimEdit.enabled ? "input-error" : ""}
+            className={
+              validation && !validation.editor_valid && nvimEdit.enabled ? "input-error" : ""
+            }
           >
             {EDITOR_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -259,16 +272,20 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
         </div>
 
         <div className="form-group editor-path-group">
-          <label htmlFor="nvim-path">Path {nvimEdit.editor !== "custom" && "(optional)"}</label>
+          <label htmlFor="nvim-path">Path {nvimEdit.editor !== "custom" && ""}</label>
           <div className="path-input-row">
             <input
               type="text"
               id="nvim-path"
               value={nvimEdit.nvim_path}
               onChange={(e) => updateNvimEdit({ nvim_path: e.target.value })}
-              placeholder={DEFAULT_EDITOR_PATHS[nvimEdit.editor] || ""}
+              placeholder={
+                validation?.editor_resolved_path || DEFAULT_EDITOR_PATHS[nvimEdit.editor] || ""
+              }
               disabled={!nvimEdit.enabled}
-              className={validation && !validation.editor_valid && nvimEdit.enabled ? "input-error" : ""}
+              className={
+                validation && !validation.editor_valid && nvimEdit.enabled ? "input-error" : ""
+              }
             />
             <button
               type="button"
@@ -289,11 +306,14 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
               ...
             </button>
           </div>
-          {validation && validation.editor_valid && nvimEdit.enabled && validation.editor_resolved_path && (
-            <span className="resolved-path" title={validation.editor_resolved_path}>
-              Found: {validation.editor_resolved_path.split('/').pop()}
-            </span>
-          )}
+          {validation &&
+            validation.editor_valid &&
+            nvimEdit.enabled &&
+            validation.editor_resolved_path && (
+              <span className="resolved-path" title={validation.editor_resolved_path}>
+                Found: {validation.editor_resolved_path.split("/").pop()}
+              </span>
+            )}
         </div>
       </div>
 
@@ -315,9 +335,11 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
           <select
             id="terminal"
             value={nvimEdit.terminal}
-            onChange={(e) => updateNvimEdit({ terminal: e.target.value })}
+            onChange={(e) => handleTerminalChange(e.target.value)}
             disabled={!nvimEdit.enabled}
-            className={validation && !validation.terminal_valid && nvimEdit.enabled ? "input-error" : ""}
+            className={
+              validation && !validation.terminal_valid && nvimEdit.enabled ? "input-error" : ""
+            }
           >
             {TERMINAL_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -328,7 +350,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
         </div>
 
         <div className="form-group terminal-path-group">
-          <label htmlFor="terminal-path">Path (optional)</label>
+          <label htmlFor="terminal-path">Path</label>
           <div className="path-input-row">
             <input
               type="text"
@@ -337,7 +359,9 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
               onChange={(e) => updateNvimEdit({ terminal_path: e.target.value })}
               placeholder={DEFAULT_TERMINAL_PATHS[nvimEdit.terminal] || "auto-detect"}
               disabled={!nvimEdit.enabled}
-              className={validation && !validation.terminal_valid && nvimEdit.enabled ? "input-error" : ""}
+              className={
+                validation && !validation.terminal_valid && nvimEdit.enabled ? "input-error" : ""
+              }
             />
             <button
               type="button"
@@ -349,7 +373,33 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
                   defaultPath: "/Applications",
                 })
                 if (file) {
-                  updateNvimEdit({ terminal_path: file })
+                  // Detect terminal type from path
+                  const lowerPath = file.toLowerCase()
+                  let detectedTerminal: string | null = null
+                  if (lowerPath.includes("alacritty")) {
+                    detectedTerminal = "alacritty"
+                  } else if (lowerPath.includes("kitty")) {
+                    detectedTerminal = "kitty"
+                  } else if (lowerPath.includes("wezterm")) {
+                    detectedTerminal = "wezterm"
+                  } else if (lowerPath.includes("ghostty")) {
+                    detectedTerminal = "ghostty"
+                  } else if (lowerPath.includes("iterm")) {
+                    detectedTerminal = "iterm"
+                  } else if (lowerPath.includes("terminal.app")) {
+                    detectedTerminal = "default"
+                  }
+
+                  if (detectedTerminal) {
+                    updateNvimEdit({ terminal_path: file, terminal: detectedTerminal })
+                  } else {
+                    // Not a recognized terminal - don't update, show alert
+                    const appName = file.split("/").pop()?.replace(".app", "") || file
+                    const supportedList = TERMINAL_OPTIONS.map((t) => t.label).join(", ")
+                    alert(
+                      `"${appName}" is not a supported terminal.\n\nSupported terminals: ${supportedList}`,
+                    )
+                  }
                 }
               }}
               disabled={!nvimEdit.enabled}
@@ -358,11 +408,14 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
               ...
             </button>
           </div>
-          {validation && validation.terminal_valid && nvimEdit.enabled && validation.terminal_resolved_path && (
-            <span className="resolved-path" title={validation.terminal_resolved_path}>
-              Found: {validation.terminal_resolved_path.split('/').pop()}
-            </span>
-          )}
+          {validation &&
+            validation.terminal_valid &&
+            nvimEdit.enabled &&
+            validation.terminal_resolved_path && (
+              <span className="resolved-path" title={validation.terminal_resolved_path}>
+                Found: {validation.terminal_resolved_path.split("/").pop()}
+              </span>
+            )}
         </div>
       </div>
       {nvimEdit.terminal !== "alacritty" && (

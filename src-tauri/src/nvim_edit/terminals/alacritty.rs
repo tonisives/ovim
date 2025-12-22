@@ -90,15 +90,19 @@ impl TerminalSpawner for AlacrittySpawner {
         let resolved_terminal = resolve_terminal_path(&terminal_cmd);
         log::info!("Resolved terminal path: {} -> {}", terminal_cmd, resolved_terminal);
 
-        // Use `alacritty msg create-window` to create window in existing daemon
-        let result = Command::new(&resolved_terminal)
+        // Try `alacritty msg create-window` first - this works if Alacritty daemon is running
+        // We use status() to wait for the command to complete and check exit code
+        let msg_result = Command::new(&resolved_terminal)
             .args(&cmd_args)
-            .spawn();
+            .status();
 
-        // If msg create-window fails (no daemon running), fall back to regular spawn
-        let cmd = match result {
-            Ok(child) => child,
-            Err(_) => {
+        // If msg create-window failed (no daemon running), fall back to regular spawn
+        let child = match msg_result {
+            Ok(status) if status.success() => {
+                log::info!("msg create-window succeeded");
+                None // No child process to track - window was created in existing daemon
+            }
+            _ => {
                 log::info!("msg create-window failed, falling back to regular spawn");
                 // Build fallback args (without msg create-window)
                 let mut fallback_args: Vec<String> = vec![
@@ -120,10 +124,12 @@ impl TerminalSpawner for AlacrittySpawner {
                 }
                 fallback_args.push(file_path.to_string());
 
-                Command::new(&resolved_terminal)
-                    .args(&fallback_args)
-                    .spawn()
-                    .map_err(|e| format!("Failed to spawn alacritty: {}", e))?
+                Some(
+                    Command::new(&resolved_terminal)
+                        .args(&fallback_args)
+                        .spawn()
+                        .map_err(|e| format!("Failed to spawn alacritty: {}", e))?,
+                )
             }
         };
 
@@ -134,7 +140,7 @@ impl TerminalSpawner for AlacrittySpawner {
         Ok(SpawnInfo {
             terminal_type: TerminalType::Alacritty,
             process_id: pid,
-            child: Some(cmd),
+            child,
             window_title: Some(unique_title),
         })
     }
