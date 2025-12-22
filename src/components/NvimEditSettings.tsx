@@ -133,6 +133,15 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
     }
   }
 
+  const handleTerminalChange = (newTerminal: string) => {
+    // Always clear the path when switching terminals
+    // This is simpler and safer - the new terminal will use auto-detection
+    updateNvimEdit({
+      terminal: newTerminal,
+      terminal_path: ""
+    })
+  }
+
   const handleRecordKey = async () => {
     setIsRecording(true)
     try {
@@ -315,7 +324,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
           <select
             id="terminal"
             value={nvimEdit.terminal}
-            onChange={(e) => updateNvimEdit({ terminal: e.target.value })}
+            onChange={(e) => handleTerminalChange(e.target.value)}
             disabled={!nvimEdit.enabled}
             className={validation && !validation.terminal_valid && nvimEdit.enabled ? "input-error" : ""}
           >
@@ -349,7 +358,31 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
                   defaultPath: "/Applications",
                 })
                 if (file) {
-                  updateNvimEdit({ terminal_path: file })
+                  // Detect terminal type from path
+                  const lowerPath = file.toLowerCase()
+                  let detectedTerminal: string | null = null
+                  if (lowerPath.includes("alacritty")) {
+                    detectedTerminal = "alacritty"
+                  } else if (lowerPath.includes("kitty")) {
+                    detectedTerminal = "kitty"
+                  } else if (lowerPath.includes("wezterm")) {
+                    detectedTerminal = "wezterm"
+                  } else if (lowerPath.includes("ghostty")) {
+                    detectedTerminal = "ghostty"
+                  } else if (lowerPath.includes("iterm")) {
+                    detectedTerminal = "iterm"
+                  } else if (lowerPath.includes("terminal.app")) {
+                    detectedTerminal = "default"
+                  }
+
+                  if (detectedTerminal) {
+                    updateNvimEdit({ terminal_path: file, terminal: detectedTerminal })
+                  } else {
+                    // Not a recognized terminal - don't update, show alert
+                    const appName = file.split('/').pop()?.replace('.app', '') || file
+                    const supportedList = TERMINAL_OPTIONS.map(t => t.label).join(', ')
+                    alert(`"${appName}" is not a supported terminal.\n\nSupported terminals: ${supportedList}`)
+                  }
                 }
               }}
               disabled={!nvimEdit.enabled}

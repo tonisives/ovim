@@ -124,12 +124,51 @@ impl NvimEditSettings {
     }
 
     /// Get the effective terminal executable path
-    /// Returns the user-specified path if set, otherwise the terminal name for auto-detection
+    /// Returns the user-specified path if set and matches terminal type,
+    /// otherwise the terminal name for auto-detection
     pub fn get_terminal_path(&self) -> String {
         if self.terminal_path.is_empty() {
-            self.terminal.clone()
-        } else {
+            return self.terminal.clone();
+        }
+
+        // Validate that the path matches the terminal type
+        if self.terminal_path_matches_type() {
             self.terminal_path.clone()
+        } else {
+            // Path doesn't match terminal type, use auto-detection
+            log::warn!(
+                "Terminal path '{}' doesn't match terminal type '{}', using auto-detection",
+                self.terminal_path,
+                self.terminal
+            );
+            self.terminal.clone()
+        }
+    }
+
+    /// Check if terminal_path matches the terminal type
+    fn terminal_path_matches_type(&self) -> bool {
+        let path_lower = self.terminal_path.to_lowercase();
+        match self.terminal.as_str() {
+            "alacritty" => path_lower.contains("alacritty"),
+            "kitty" => path_lower.contains("kitty"),
+            "wezterm" => path_lower.contains("wezterm"),
+            "ghostty" => path_lower.contains("ghostty"),
+            "iterm" => path_lower.contains("iterm"),
+            "default" => path_lower.contains("terminal"),
+            _ => true,
+        }
+    }
+
+    /// Clean up any invalid state (e.g., mismatched paths)
+    pub fn sanitize(&mut self) {
+        // Check if terminal_path matches terminal type
+        if !self.terminal_path.is_empty() && !self.terminal_path_matches_type() {
+            log::warn!(
+                "Clearing mismatched terminal_path '{}' for terminal type '{}'",
+                self.terminal_path,
+                self.terminal
+            );
+            self.terminal_path = String::new();
         }
     }
 
@@ -291,6 +330,14 @@ impl Settings {
 
     /// Load settings from disk (YAML format, with JSON migration)
     pub fn load() -> Self {
+        let mut settings = Self::load_raw();
+        // Sanitize settings to fix any invalid state
+        settings.nvim_edit.sanitize();
+        settings
+    }
+
+    /// Load raw settings without sanitization
+    fn load_raw() -> Self {
         // First, try to load from YAML
         if let Some(yaml_path) = Self::file_path() {
             if let Ok(contents) = std::fs::read_to_string(&yaml_path) {

@@ -130,6 +130,31 @@ pub fn resolve_command_path(cmd: &str) -> String {
 /// Resolve a terminal command to its absolute path
 /// First checks common macOS application bundle locations, then falls back to resolve_command_path
 pub fn resolve_terminal_path(terminal_name: &str) -> String {
+    // If it's a .app bundle path, extract the binary from inside
+    if terminal_name.ends_with(".app") {
+        // Get the app name without .app extension
+        let app_name = std::path::Path::new(terminal_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+
+        // Try to find the binary inside Contents/MacOS
+        let binary_path = format!("{}/Contents/MacOS/{}", terminal_name, app_name);
+        if std::path::Path::new(&binary_path).exists() {
+            log::info!("Resolved .app bundle {} to binary {}", terminal_name, binary_path);
+            return binary_path;
+        }
+
+        // Some apps have lowercase binary names
+        let lowercase_binary = format!("{}/Contents/MacOS/{}", terminal_name, app_name.to_lowercase());
+        if std::path::Path::new(&lowercase_binary).exists() {
+            log::info!("Resolved .app bundle {} to binary {}", terminal_name, lowercase_binary);
+            return lowercase_binary;
+        }
+
+        log::warn!("Could not find binary in .app bundle: {}", terminal_name);
+    }
+
     // Check for known terminal app bundle paths
     let lowercase = terminal_name.to_lowercase();
     for (name, app_path) in TERMINAL_APP_PATHS {
