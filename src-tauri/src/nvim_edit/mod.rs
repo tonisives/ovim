@@ -290,6 +290,10 @@ fn complete_edit_session_no_focus(
     let edited_text = std::fs::read_to_string(&session.temp_file)
         .map_err(|e| format!("Failed to read temp file: {}", e))?;
 
+    // Strip trailing newline that nvim adds (fixeol option)
+    // This ensures we don't add extra newlines when pasting back
+    let edited_text = edited_text.strip_suffix('\n').unwrap_or(&edited_text).to_string();
+
     log::info!("Read {} chars from temp file", edited_text.len());
 
     // Clean up temp file
