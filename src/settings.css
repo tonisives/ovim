@@ -434,8 +434,13 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 /* Key display for nvim edit settings */
@@ -558,7 +563,9 @@ body {
   color: var(--text-primary);
   font-size: 13px;
   cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .browse-btn:hover:not(:disabled) {
@@ -597,6 +604,7 @@ body {
   border-radius: 6px;
   padding: 10px 12px;
   margin-top: 8px;
+  margin-bottom: 8px;
   font-size: 12px;
   line-height: 1.4;
 }
@@ -605,6 +613,34 @@ body {
   background: rgba(255, 179, 64, 0.15);
   border: 1px solid rgba(255, 179, 64, 0.4);
   color: #ffb340;
+}
+
+.alert-info {
+  background: rgba(64, 156, 255, 0.15);
+  border: 1px solid rgba(64, 156, 255, 0.4);
+  color: #409cff;
+}
+
+.edit-script-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--accent-color);
+  border-radius: 6px;
+  background: var(--accent-color);
+  color: white;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.edit-script-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.edit-script-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Permission warning */
@@ -839,7 +875,9 @@ body {
   font-weight: bold;
   color: white;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
 }
 
 .inline-error-badge:hover {
@@ -925,11 +963,12 @@ body {
   color: var(--text-primary);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .error-dialog-buttons button:hover {
   background: var(--hover-bg);
   border-color: var(--accent-color);
 }
-

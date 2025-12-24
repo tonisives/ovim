@@ -214,6 +214,7 @@ pub fn run() {
             commands::cancel_record_key,
             commands::webview_log,
             commands::validate_nvim_edit_paths,
+            commands::open_launcher_script,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

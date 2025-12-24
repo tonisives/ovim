@@ -92,6 +92,9 @@ pub struct NvimEditSettings {
     /// Enable live sync (BETA) - sync text field as you type in editor
     #[serde(default)]
     pub live_sync_enabled: bool,
+    /// Use custom launcher script instead of built-in terminal spawning
+    #[serde(default)]
+    pub use_custom_script: bool,
 }
 
 impl Default for NvimEditSettings {
@@ -113,6 +116,7 @@ impl Default for NvimEditSettings {
             popup_width: 0, // 0 = match text field width
             popup_height: 300,
             live_sync_enabled: true, // BETA feature, enabled by default
+            use_custom_script: false,
         }
     }
 }
@@ -325,6 +329,12 @@ impl Settings {
     /// Get the path to the YAML settings file
     pub fn file_path() -> Option<PathBuf> {
         dirs::config_dir().map(|p| p.join("ovim").join("settings.yaml"))
+    }
+
+    /// Get the path to the terminal launcher script
+    /// Uses the same directory as other settings (~/Library/Application Support/ovim/)
+    pub fn launcher_script_path() -> Option<PathBuf> {
+        dirs::config_dir().map(|p| p.join("ovim").join("terminal-launcher.sh"))
     }
 
     /// Get the path to the legacy JSON settings file

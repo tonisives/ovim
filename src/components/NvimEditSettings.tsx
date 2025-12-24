@@ -28,6 +28,7 @@ const TERMINAL_OPTIONS = [
   { value: "kitty", label: "Kitty" },
   { value: "wezterm", label: "WezTerm" },
   { value: "iterm", label: "iTerm2" },
+  { value: "ghostty", label: "Ghostty" },
   { value: "default", label: "Terminal.app" },
 ]
 
@@ -35,6 +36,7 @@ const DEFAULT_TERMINAL_PATHS: Record<string, string> = {
   alacritty: "/Applications/Alacritty.app/Contents/MacOS/alacritty",
   kitty: "/Applications/kitty.app/Contents/MacOS/kitty",
   wezterm: "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+  ghostty: "/Applications/Ghostty.app/Contents/MacOS/ghostty",
   iterm: "",
   default: "",
 }
@@ -419,6 +421,44 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
       {nvimEdit.terminal !== "alacritty" && (
         <div className="alert alert-warning">
           Limited support. Please use Alacritty for best performance and tested compatibility.
+        </div>
+      )}
+
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={nvimEdit.use_custom_script ?? false}
+            onChange={(e) => updateNvimEdit({ use_custom_script: e.target.checked })}
+            disabled={!nvimEdit.enabled}
+          />
+          Use custom launcher script
+        </label>
+        <span className="hint">
+          Use a script to spawn the editor. Customize PATH, use tmux popups, etc.
+        </span>
+      </div>
+
+      {nvimEdit.use_custom_script && (
+        <div className="form-group">
+          <div className="path-input-row">
+            <button
+              type="button"
+              className="edit-script-btn"
+              onClick={async () => {
+                try {
+                  await invoke("open_launcher_script")
+                } catch (e) {
+                  console.error("Failed to open launcher script:", e)
+                  alert(`Failed to open launcher script: ${e}`)
+                }
+              }}
+              disabled={!nvimEdit.enabled}
+            >
+              Edit Launcher Script
+            </button>
+          </div>
+          <span className="hint">~/Library/Application Support/ovim/terminal-launcher.sh</span>
         </div>
       )}
 
