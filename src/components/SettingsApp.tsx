@@ -1,6 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { GeneralSettings } from "./GeneralSettings";
 import { IndicatorSettings } from "./IndicatorSettings";
 import { WidgetSettings } from "./WidgetSettings";
@@ -63,48 +62,17 @@ export interface Settings {
   nvim_edit: NvimEditSettings;
 }
 
-type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim";
-
-const MIN_HEIGHT = 400;
-const MAX_HEIGHT = 800;
-const WINDOW_WIDTH = 600;
-const TABS_HEIGHT = 45; // Height of tabs bar
+type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim-config" | "nvim-window";
 
 export function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("general");
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  const resizeWindow = useCallback(async () => {
-    if (!contentRef.current) return;
-
-    // Get the scrollHeight of the content (actual content height)
-    const contentHeight = contentRef.current.scrollHeight;
-    // Add tabs height and padding buffer
-    const totalHeight = contentHeight + TABS_HEIGHT + 40;
-    // Clamp between min and max
-    const newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, totalHeight));
-
-    try {
-      const window = getCurrentWindow();
-      await window.setSize(new LogicalSize(WINDOW_WIDTH, newHeight));
-    } catch (e) {
-      console.error("Failed to resize window:", e);
-    }
-  }, []);
 
   useEffect(() => {
     invoke<Settings>("get_settings")
       .then(setSettings)
       .catch((e) => console.error("Failed to load settings:", e));
   }, []);
-
-  // Resize window when tab changes or settings change
-  useEffect(() => {
-    // Small delay to let content render
-    const timer = setTimeout(resizeWindow, 50);
-    return () => clearTimeout(timer);
-  }, [activeTab, settings, resizeWindow]);
 
   const updateSettings = async (updates: Partial<Settings>) => {
     if (!settings) return;
@@ -127,6 +95,11 @@ export function SettingsApp() {
     { id: "indicator", label: "Indicator", icon: "diamond" },
     { id: "widgets", label: "Widgets", icon: "ruler" },
     { id: "ignored", label: "Ignored Apps", icon: "pause" },
+  ];
+
+  const editPopupTabs: { id: TabId; label: string; icon: string }[] = [
+    { id: "nvim-config", label: "Config", icon: "gear" },
+    { id: "nvim-window", label: "Window", icon: "window" },
   ];
 
   return (
@@ -156,16 +129,24 @@ export function SettingsApp() {
           </div>
         </div>
 
-        <button
-          className={`tab ${activeTab === "nvim" ? "active" : ""}`}
-          onClick={() => setActiveTab("nvim")}
-        >
-          <span className="tab-icon">{getIcon("edit")}</span>
-          Edit Popup
-        </button>
+        <div className="tab-group">
+          <span className="tab-group-label">Edit Popup</span>
+          <div className="tab-group-tabs">
+            {editPopupTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={`tab ${activeTab === tab.id ? "active" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="tab-icon">{getIcon(tab.icon)}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <div className="tab-content" ref={contentRef}>
+      <div className="tab-content">
         {activeTab === "general" && (
           <GeneralSettings settings={settings} onUpdate={updateSettings} />
         )}
@@ -178,8 +159,8 @@ export function SettingsApp() {
         {activeTab === "ignored" && (
           <IgnoredAppsSettings settings={settings} onUpdate={updateSettings} />
         )}
-        {activeTab === "nvim" && (
-          <NvimEditSettings settings={settings} onUpdate={updateSettings} />
+        {(activeTab === "nvim-config" || activeTab === "nvim-window") && (
+          <NvimEditSettings settings={settings} onUpdate={updateSettings} activeTab={activeTab} />
         )}
       </div>
 
@@ -194,6 +175,7 @@ function getIcon(name: string): string {
     ruler: "\u25A6",
     pause: "\u23F8",
     edit: "\u270E",
+    window: "\u25A1",
   };
   return icons[name] || "";
 }
