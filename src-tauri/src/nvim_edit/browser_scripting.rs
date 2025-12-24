@@ -43,7 +43,120 @@ pub fn detect_browser_type(bundle_id: &str) -> Option<BrowserType> {
 }
 
 /// JavaScript to get the focused element's viewport-relative position and viewport height
-const GET_ELEMENT_RECT_JS: &str = r#"(function() { var el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; if (el.tagName === 'IFRAME') { try { var iframeDoc = el.contentDocument || el.contentWindow.document; if (iframeDoc && iframeDoc.activeElement && iframeDoc.activeElement !== iframeDoc.body) { var iframeRect = el.getBoundingClientRect(); var innerEl = iframeDoc.activeElement; var innerRect = innerEl.getBoundingClientRect(); return JSON.stringify({ x: Math.round(iframeRect.left + innerRect.left), y: Math.round(iframeRect.top + innerRect.top), width: Math.round(innerRect.width), height: Math.round(innerRect.height), viewportHeight: window.innerHeight }); } } catch(e) {} } if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; } var rect = el.getBoundingClientRect(); if (rect.width === 0 && rect.height === 0) return null; return JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height), viewportHeight: window.innerHeight }); })()"#;
+const GET_ELEMENT_RECT_JS: &str = r#"(function() { function findDeepActiveElement(el) { if (el.shadowRoot && el.shadowRoot.activeElement) { return findDeepActiveElement(el.shadowRoot.activeElement); } return el; } var el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; if (el.tagName === 'IFRAME') { try { var iframeDoc = el.contentDocument || el.contentWindow.document; if (iframeDoc && iframeDoc.activeElement && iframeDoc.activeElement !== iframeDoc.body) { var iframeRect = el.getBoundingClientRect(); var innerEl = findDeepActiveElement(iframeDoc.activeElement); var innerRect = innerEl.getBoundingClientRect(); return JSON.stringify({ x: Math.round(iframeRect.left + innerRect.left), y: Math.round(iframeRect.top + innerRect.top), width: Math.round(innerRect.width), height: Math.round(innerRect.height), viewportHeight: window.innerHeight }); } } catch(e) {} } el = findDeepActiveElement(el); var rect = el.getBoundingClientRect(); if (rect.width === 0 && rect.height === 0) return null; return JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height), viewportHeight: window.innerHeight }); })()"#;
+
+/// JavaScript to set text on the focused element (for live sync in webviews)
+/// This handles input, textarea, and contenteditable elements
+/// Returns "ok" on success, error message on failure
+fn build_set_element_text_js(text: &str) -> String {
+    // Escape the text for JavaScript string literal
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t");
+
+    format!(
+        r#"(function() {{
+    // Recursively traverse shadow DOM to find the actual focused element
+    function findDeepActiveElement(el) {{
+        if (el.shadowRoot && el.shadowRoot.activeElement) {{
+            return findDeepActiveElement(el.shadowRoot.activeElement);
+        }}
+        return el;
+    }}
+
+    var el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) return 'no_element';
+
+    // Handle iframe
+    if (el.tagName === 'IFRAME') {{
+        try {{
+            var iframeDoc = el.contentDocument || el.contentWindow.document;
+            if (iframeDoc && iframeDoc.activeElement) {{
+                el = iframeDoc.activeElement;
+            }}
+        }} catch(e) {{ return 'iframe_error'; }}
+    }}
+
+    // Handle shadow DOM (recursively for nested shadow roots like Reddit uses)
+    el = findDeepActiveElement(el);
+
+    var text = '{}';
+
+    // Handle contenteditable (including Lexical, ProseMirror, etc.)
+    if (el.isContentEditable) {{
+        // Select all content first
+        var selection = window.getSelection();
+        var range = document.createRange();
+        range.selectNodeContents(el);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        // Use InputEvent with insertText - works with modern rich text editors like Lexical
+        // Only dispatch beforeinput - Lexical handles this and generates its own input event
+        var inputEvent = new InputEvent('beforeinput', {{
+            inputType: 'insertText',
+            data: text,
+            bubbles: true,
+            cancelable: true
+        }});
+        el.dispatchEvent(inputEvent);
+        return 'ok';
+    }}
+
+    // Handle input/textarea
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
+        // For React/Vue controlled inputs, we need to use native setter
+        var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            el.tagName === 'INPUT' ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype,
+            'value'
+        ).set;
+        nativeInputValueSetter.call(el, text);
+
+        // Dispatch input event to notify frameworks
+        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        return 'ok';
+    }}
+
+    return 'unsupported_element';
+}})()"#,
+        escaped
+    )
+}
+
+/// Set text on the focused element in a browser using AppleScript + JavaScript
+/// Returns Ok(()) on success, Err with message on failure
+pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result<(), String> {
+    let js = build_set_element_text_js(text);
+
+    let script = match browser_type {
+        BrowserType::Safari => build_safari_execute_script(&js),
+        BrowserType::Chrome | BrowserType::Brave | BrowserType::Arc => {
+            build_chrome_execute_script(browser_type.app_name(), &js)
+        }
+    };
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("AppleScript failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if stdout == "ok" {
+        Ok(())
+    } else {
+        Err(format!("JavaScript returned: {}", stdout))
+    }
+}
 
 /// Get the focused element frame from a browser using AppleScript
 pub fn get_browser_element_frame(browser_type: BrowserType) -> Option<ElementFrame> {
@@ -149,6 +262,42 @@ fn build_chrome_script(app_name: &str) -> String {
 end tell"#,
         app_name,
         GET_ELEMENT_RECT_JS.replace('"', "\\\"")
+    )
+}
+
+/// Build AppleScript to execute arbitrary JavaScript in Safari
+fn build_safari_execute_script(js: &str) -> String {
+    format!(
+        r#"tell application "Safari"
+    if (count of windows) = 0 then return "no_window"
+    tell front window
+        if (count of tabs) = 0 then return "no_tab"
+        try
+            return do JavaScript "{}" in current tab
+        on error errMsg
+            return "error: " & errMsg
+        end try
+    end tell
+end tell"#,
+        js.replace('"', "\\\"")
+    )
+}
+
+/// Build AppleScript to execute arbitrary JavaScript in Chrome-based browsers
+fn build_chrome_execute_script(app_name: &str, js: &str) -> String {
+    format!(
+        r#"tell application "{}"
+    if (count of windows) = 0 then return "no_window"
+    tell active tab of front window
+        try
+            return execute javascript "{}"
+        on error errMsg
+            return "error: " & errMsg
+        end try
+    end tell
+end tell"#,
+        app_name,
+        js.replace('"', "\\\"")
     )
 }
 

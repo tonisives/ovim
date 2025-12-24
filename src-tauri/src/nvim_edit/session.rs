@@ -20,6 +20,8 @@ pub struct EditSession {
     pub terminal_type: TerminalType,
     pub process_id: Option<u32>,
     pub window_title: Option<String>,
+    /// Socket path for RPC communication with nvim
+    pub socket_path: PathBuf,
 }
 
 /// Manager for edit sessions
@@ -53,6 +55,12 @@ impl EditSessionManager {
         let session_id = Uuid::new_v4();
         let temp_file = cache_dir.join(format!("edit_{}.txt", session_id));
 
+        // Generate socket path for RPC
+        let socket_path = cache_dir.join(format!("nvim_{}.sock", session_id));
+
+        // Clean up any stale socket file
+        let _ = std::fs::remove_file(&socket_path);
+
         // Write text to temp file
         std::fs::write(&temp_file, &text)
             .map_err(|e| format!("Failed to write temp file: {}", e))?;
@@ -62,13 +70,13 @@ impl EditSessionManager {
             .and_then(|m| m.modified())
             .map_err(|e| format!("Failed to get file mtime: {}", e))?;
 
-        // Spawn terminal with configured editor
+        // Spawn terminal with RPC socket for live buffer sync
         let SpawnInfo {
             terminal_type,
             process_id,
             child: _,
             window_title,
-        } = spawn_terminal(&settings, &temp_file, geometry)?;
+        } = spawn_terminal(&settings, &temp_file, geometry, Some(&socket_path))?;
 
         // Create session
         let session = EditSession {
@@ -80,6 +88,7 @@ impl EditSessionManager {
             terminal_type,
             process_id,
             window_title,
+            socket_path,
         };
 
         // Store session
@@ -101,6 +110,7 @@ impl EditSessionManager {
             terminal_type: s.terminal_type.clone(),
             process_id: s.process_id,
             window_title: s.window_title.clone(),
+            socket_path: s.socket_path.clone(),
         })
     }
 
@@ -108,8 +118,9 @@ impl EditSessionManager {
     pub fn cancel_session(&self, id: &Uuid) {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(session) = sessions.remove(id) {
-            // Clean up temp file
+            // Clean up temp file and socket
             let _ = std::fs::remove_file(&session.temp_file);
+            let _ = std::fs::remove_file(&session.socket_path);
         }
     }
 

@@ -1,5 +1,6 @@
 //! Alacritty terminal spawner
 
+use std::path::Path;
 use std::process::Command;
 
 use super::applescript_utils::{
@@ -21,6 +22,7 @@ impl TerminalSpawner for AlacrittySpawner {
         settings: &NvimEditSettings,
         file_path: &str,
         geometry: Option<WindowGeometry>,
+        socket_path: Option<&Path>,
     ) -> Result<SpawnInfo, String> {
         // Generate a unique window title so we can find it
         let unique_title = format!("ovim-edit-{}", std::process::id());
@@ -29,6 +31,17 @@ impl TerminalSpawner for AlacrittySpawner {
         let editor_path = settings.editor_path();
         let editor_args = settings.editor_args();
         let process_name = settings.editor_process_name();
+
+        // Build socket args for nvim RPC if socket_path provided and using nvim
+        let socket_args: Vec<String> = if let Some(socket) = socket_path {
+            if editor_path.contains("nvim") || editor_path == "nvim" {
+                vec!["--listen".to_string(), socket.to_string_lossy().to_string()]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
 
         // Resolve editor path to absolute path (msg create-window doesn't inherit PATH)
         let resolved_editor = resolve_command_path(&editor_path);
@@ -63,7 +76,7 @@ impl TerminalSpawner for AlacrittySpawner {
             (80, 24)
         };
 
-        // Build the command arguments: editor path, editor args, file path
+        // Build the command arguments: editor path, socket args, editor args, file path
         let mut cmd_args: Vec<String> = vec![
             "msg".to_string(),
             "create-window".to_string(),
@@ -80,6 +93,7 @@ impl TerminalSpawner for AlacrittySpawner {
             "-e".to_string(),
             resolved_editor.clone(),
         ];
+        cmd_args.extend(socket_args.iter().cloned());
         for arg in &editor_args {
             cmd_args.push(arg.to_string());
         }
@@ -119,6 +133,7 @@ impl TerminalSpawner for AlacrittySpawner {
                     "-e".to_string(),
                     resolved_editor.clone(),
                 ];
+                fallback_args.extend(socket_args.iter().cloned());
                 for arg in &editor_args {
                     fallback_args.push(arg.to_string());
                 }

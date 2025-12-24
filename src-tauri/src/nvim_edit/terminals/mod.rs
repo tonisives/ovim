@@ -1,4 +1,4 @@
-//! Terminal spawning for external editor feature
+//! Terminal spawning for Edit Popup feature
 //!
 //! This module provides a unified interface for spawning different terminal emulators
 //! with various text editors (Neovim, Vim, Helix, etc.)
@@ -72,30 +72,38 @@ pub trait TerminalSpawner {
     fn terminal_type(&self) -> TerminalType;
 
     /// Spawn a terminal with the configured editor editing the given file
+    ///
+    /// If `socket_path` is provided, the editor will be started with RPC enabled
+    /// (e.g., nvim --listen <socket_path>) for live buffer sync.
     fn spawn(
         &self,
         settings: &NvimEditSettings,
         file_path: &str,
         geometry: Option<WindowGeometry>,
+        socket_path: Option<&Path>,
     ) -> Result<SpawnInfo, String>;
 }
 
 /// Spawn a terminal with the configured editor editing the given file
+///
+/// If `socket_path` is provided, the editor will be started with RPC enabled
+/// for live buffer sync.
 pub fn spawn_terminal(
     settings: &NvimEditSettings,
     temp_file: &Path,
     geometry: Option<WindowGeometry>,
+    socket_path: Option<&Path>,
 ) -> Result<SpawnInfo, String> {
     let terminal_type = TerminalType::from_string(&settings.terminal);
     let file_path = temp_file.to_string_lossy();
 
     match terminal_type {
-        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry),
-        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry),
-        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry),
-        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry),
-        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry),
-        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry),
+        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path),
+        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path),
+        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path),
+        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path),
+        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path),
+        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path),
     }
 }
 

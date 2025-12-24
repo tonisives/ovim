@@ -32,6 +32,10 @@ core-foundation = "0.10"
 # Async runtime
 tokio = { version = "1", features = ["sync", "rt", "net", "io-util", "macros"] }
 
+# Neovim RPC for live buffer sync
+nvim-rs = { version = "0.9", features = ["use_tokio"] }
+async-trait = "0.1"
+
 # Logging
 log = "0.4"
 env_logger = "0.11"

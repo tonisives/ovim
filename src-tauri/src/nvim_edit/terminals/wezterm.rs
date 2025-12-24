@@ -1,5 +1,6 @@
 //! WezTerm terminal spawner
 
+use std::path::Path;
 use std::process::Command;
 
 use super::applescript_utils::set_window_size;
@@ -19,10 +20,22 @@ impl TerminalSpawner for WezTermSpawner {
         settings: &NvimEditSettings,
         file_path: &str,
         geometry: Option<WindowGeometry>,
+        socket_path: Option<&Path>,
     ) -> Result<SpawnInfo, String> {
         // Get editor path and args from settings
         let editor_path = settings.editor_path();
         let editor_args = settings.editor_args();
+
+        // Build socket args for nvim RPC if socket_path provided and using nvim
+        let socket_args: Vec<String> = if let Some(socket) = socket_path {
+            if editor_path.contains("nvim") || editor_path == "nvim" {
+                vec!["--listen".to_string(), socket.to_string_lossy().to_string()]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
 
         // Resolve editor path
         let resolved_editor = resolve_command_path(&editor_path);
@@ -50,6 +63,9 @@ impl TerminalSpawner for WezTermSpawner {
         }
 
         cmd.arg(&resolved_editor);
+        for arg in &socket_args {
+            cmd.arg(arg);
+        }
         for arg in &editor_args {
             cmd.arg(arg);
         }

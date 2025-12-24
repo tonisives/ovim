@@ -793,6 +793,29 @@ body {
   color: var(--danger-color);
 }
 
+/* Beta badge for experimental features */
+.beta-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  margin-left: 8px;
+  background: rgba(175, 82, 222, 0.15);
+  border: 1px solid rgba(175, 82, 222, 0.4);
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #af52de;
+}
+
+@media (prefers-color-scheme: dark) {
+  .beta-badge {
+    background: rgba(191, 90, 242, 0.2);
+    border-color: rgba(191, 90, 242, 0.5);
+    color: #bf5af2;
+  }
+}
+
 /* Validating badge */
 .validating-badge {
   font-size: 11px;

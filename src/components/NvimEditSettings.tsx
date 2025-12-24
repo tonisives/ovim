@@ -210,7 +210,7 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
             checked={nvimEdit.enabled}
             onChange={(e) => updateNvimEdit({ enabled: e.target.checked })}
           />
-          Enable external editor feature
+          Enable Edit Popup feature
         </label>
       </div>
 
@@ -464,6 +464,22 @@ export function NvimEditSettings({ settings, onUpdate }: Props) {
           </div>
         </div>
       )}
+
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={nvimEdit.live_sync_enabled}
+            onChange={(e) => updateNvimEdit({ live_sync_enabled: e.target.checked })}
+            disabled={!nvimEdit.enabled}
+          />
+          Live sync text field
+          <span className="beta-badge">BETA</span>
+        </label>
+        <span className="hint">
+          Sync changes to the original text field as you type in the editor. Only works with Neovim.
+        </span>
+      </div>
     </div>
   )
 }

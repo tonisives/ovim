@@ -25,6 +25,7 @@ export interface NvimEditSettings {
   popup_mode: boolean;
   popup_width: number;
   popup_height: number;
+  live_sync_enabled: boolean;
 }
 
 export interface RgbColor {

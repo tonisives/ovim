@@ -1,5 +1,6 @@
 //! Ghostty terminal spawner
 
+use std::path::Path;
 use std::process::Command;
 
 use super::process_utils::{find_editor_pid_for_file, resolve_command_path};
@@ -18,6 +19,7 @@ impl TerminalSpawner for GhosttySpawner {
         settings: &NvimEditSettings,
         file_path: &str,
         geometry: Option<WindowGeometry>,
+        socket_path: Option<&Path>,
     ) -> Result<SpawnInfo, String> {
         // Generate a unique window title so we can find it
         let unique_title = format!("ovim-edit-{}", std::process::id());
@@ -26,6 +28,17 @@ impl TerminalSpawner for GhosttySpawner {
         let editor_path = settings.editor_path();
         let editor_args = settings.editor_args();
         let process_name = settings.editor_process_name();
+
+        // Build socket args for nvim RPC if socket_path provided and using nvim
+        let socket_args: Vec<String> = if let Some(socket) = socket_path {
+            if editor_path.contains("nvim") || editor_path == "nvim" {
+                vec!["--listen".to_string(), socket.to_string_lossy().to_string()]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
 
         // Resolve editor path to absolute path
         let resolved_editor = resolve_command_path(&editor_path);
@@ -66,6 +79,9 @@ impl TerminalSpawner for GhosttySpawner {
         // Execute editor using -e flag
         cmd.arg("-e");
         cmd.arg(&resolved_editor);
+        for arg in &socket_args {
+            cmd.arg(arg);
+        }
         for arg in &editor_args {
             cmd.arg(arg);
         }

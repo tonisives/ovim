@@ -10,7 +10,7 @@ pub struct VimKeyModifiers {
     pub command: bool,
 }
 
-/// Supported editor types for external editing
+/// Supported editor types for Edit Popup
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum EditorType {
@@ -61,7 +61,7 @@ impl EditorType {
     }
 }
 
-/// Settings for "Edit with External Editor" feature
+/// Settings for Edit Popup feature
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NvimEditSettings {
@@ -89,6 +89,9 @@ pub struct NvimEditSettings {
     pub popup_width: u32,
     /// Popup window height in pixels
     pub popup_height: u32,
+    /// Enable live sync (BETA) - sync text field as you type in editor
+    #[serde(default)]
+    pub live_sync_enabled: bool,
 }
 
 impl Default for NvimEditSettings {
@@ -109,6 +112,7 @@ impl Default for NvimEditSettings {
             popup_mode: true,
             popup_width: 0, // 0 = match text field width
             popup_height: 300,
+            live_sync_enabled: true, // BETA feature, enabled by default
         }
     }
 }
@@ -275,7 +279,7 @@ pub struct Settings {
     pub bottom_widget: String,
     /// Bundle identifiers of Electron apps for selection observing
     pub electron_apps: Vec<String>,
-    /// Settings for "Edit with Neovim" feature
+    /// Settings for Edit Popup feature
     pub nvim_edit: NvimEditSettings,
 }
 

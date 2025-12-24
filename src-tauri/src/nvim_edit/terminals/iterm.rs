@@ -1,5 +1,6 @@
 //! iTerm2 terminal spawner
 
+use std::path::Path;
 use std::process::Command;
 
 use super::process_utils::find_editor_pid_for_file;
@@ -18,17 +19,31 @@ impl TerminalSpawner for ITermSpawner {
         settings: &NvimEditSettings,
         file_path: &str,
         geometry: Option<WindowGeometry>,
+        socket_path: Option<&Path>,
     ) -> Result<SpawnInfo, String> {
         // Get editor path and args from settings
         let editor_path = settings.editor_path();
         let editor_args = settings.editor_args();
         let process_name = settings.editor_process_name();
 
-        // Build the command string for AppleScript
-        let args_str = if editor_args.is_empty() {
+        // Build socket args for nvim RPC if socket_path provided and using nvim
+        let socket_args: Vec<String> = if let Some(socket) = socket_path {
+            if editor_path.contains("nvim") || editor_path == "nvim" {
+                vec!["--listen".to_string(), socket.to_string_lossy().to_string()]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        // Build the command string for AppleScript (socket args + editor args)
+        let mut all_args: Vec<String> = socket_args;
+        all_args.extend(editor_args.iter().map(|s| s.to_string()));
+        let args_str = if all_args.is_empty() {
             String::new()
         } else {
-            format!(" {}", editor_args.join(" "))
+            format!(" {}", all_args.join(" "))
         };
 
         // Use AppleScript to open iTerm and run editor with position/size
