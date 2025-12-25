@@ -1,22 +1,10 @@
 import { useState, useEffect, useCallback } from "react"
-import { open } from "@tauri-apps/plugin-dialog"
 import { invoke } from "@tauri-apps/api/core"
 import type { Settings, NvimEditSettings as NvimEditSettingsType } from "./SettingsApp"
-import {
-  formatKeyWithModifiers,
-  recordKey,
-  cancelRecordKey,
-  getKeyDisplayName,
-} from "./keyRecording"
-
-interface PathValidation {
-  terminal_valid: boolean
-  terminal_resolved_path: string
-  terminal_error: string | null
-  editor_valid: boolean
-  editor_resolved_path: string
-  editor_error: string | null
-}
+import { useKeyRecording } from "../hooks/useKeyRecording"
+import { type PathValidation } from "./nvimEdit/constants"
+import { ConfigTab } from "./nvimEdit/ConfigTab"
+import { WindowTab } from "./nvimEdit/WindowTab"
 
 interface Props {
   settings: Settings
@@ -24,46 +12,32 @@ interface Props {
   activeTab: "nvim-config" | "nvim-window"
 }
 
-const TERMINAL_OPTIONS = [
-  { value: "alacritty", label: "Alacritty" },
-  { value: "kitty", label: "Kitty" },
-  { value: "wezterm", label: "WezTerm" },
-  { value: "iterm", label: "iTerm2" },
-  { value: "ghostty", label: "Ghostty" },
-  { value: "default", label: "Terminal.app" },
-]
-
-const DEFAULT_TERMINAL_PATHS: Record<string, string> = {
-  alacritty: "/Applications/Alacritty.app/Contents/MacOS/alacritty",
-  kitty: "/Applications/kitty.app/Contents/MacOS/kitty",
-  wezterm: "/Applications/WezTerm.app/Contents/MacOS/wezterm",
-  ghostty: "/Applications/Ghostty.app/Contents/MacOS/ghostty",
-  iterm: "",
-  default: "",
-}
-
-const EDITOR_OPTIONS = [
-  { value: "neovim", label: "Neovim" },
-  { value: "vim", label: "Vim" },
-  { value: "helix", label: "Helix" },
-  { value: "custom", label: "Custom" },
-]
-
-const DEFAULT_EDITOR_PATHS: Record<string, string> = {
-  neovim: "nvim",
-  vim: "vim",
-  helix: "hx",
-  custom: "",
-}
-
 export function NvimEditSettings({ settings, onUpdate, activeTab }: Props) {
-  const [isRecording, setIsRecording] = useState(false)
-  const [displayName, setDisplayName] = useState<string | null>(null)
   const [validation, setValidation] = useState<PathValidation | null>(null)
   const [isValidating, setIsValidating] = useState(false)
   const [showErrorDialog, setShowErrorDialog] = useState<"terminal" | "editor" | null>(null)
 
   const nvimEdit = settings.nvim_edit
+
+  const updateNvimEdit = useCallback(
+    (updates: Partial<NvimEditSettingsType>) => {
+      onUpdate({
+        nvim_edit: { ...nvimEdit, ...updates },
+      })
+    },
+    [nvimEdit, onUpdate],
+  )
+
+  const { isRecording, displayName, handleRecordKey, handleCancelRecord } = useKeyRecording({
+    key: nvimEdit.shortcut_key,
+    modifiers: nvimEdit.shortcut_modifiers,
+    onKeyRecorded: (key, modifiers) => {
+      updateNvimEdit({
+        shortcut_key: key,
+        shortcut_modifiers: modifiers,
+      })
+    },
+  })
 
   // Validate paths when settings change
   const validatePaths = useCallback(async () => {
@@ -95,80 +69,10 @@ export function NvimEditSettings({ settings, onUpdate, activeTab }: Props) {
     nvimEdit.nvim_path,
   ])
 
-  // Run validation on mount and when relevant settings change
   useEffect(() => {
     validatePaths()
   }, [validatePaths])
 
-  useEffect(() => {
-    getKeyDisplayName(nvimEdit.shortcut_key)
-      .then((name) => {
-        if (name) {
-          setDisplayName(formatKeyWithModifiers(name, nvimEdit.shortcut_modifiers))
-        } else {
-          setDisplayName(null)
-        }
-      })
-      .catch(() => setDisplayName(null))
-  }, [nvimEdit.shortcut_key, nvimEdit.shortcut_modifiers])
-
-  const updateNvimEdit = (updates: Partial<NvimEditSettingsType>) => {
-    onUpdate({
-      nvim_edit: { ...nvimEdit, ...updates },
-    })
-  }
-
-  const handleEditorChange = (newEditor: string) => {
-    const currentPath = nvimEdit.nvim_path
-
-    // Check if current path is empty or matches a default editor path
-    const isDefaultPath =
-      currentPath === "" || Object.values(DEFAULT_EDITOR_PATHS).includes(currentPath)
-
-    if (isDefaultPath) {
-      // Update both editor and path to the new editor's default
-      updateNvimEdit({
-        editor: newEditor,
-        nvim_path: "", // Empty means use default
-      })
-    } else {
-      // User has a custom path, keep it
-      updateNvimEdit({ editor: newEditor })
-    }
-  }
-
-  const handleTerminalChange = (newTerminal: string) => {
-    // Always clear the path when switching terminals
-    // This is simpler and safer - the new terminal will use auto-detection
-    updateNvimEdit({
-      terminal: newTerminal,
-      terminal_path: "",
-    })
-  }
-
-  const handleRecordKey = async () => {
-    setIsRecording(true)
-    try {
-      const recorded = await recordKey()
-      updateNvimEdit({
-        shortcut_key: recorded.name,
-        shortcut_modifiers: recorded.modifiers,
-      })
-      const formatted = formatKeyWithModifiers(recorded.display_name, recorded.modifiers)
-      setDisplayName(formatted)
-    } catch (e) {
-      console.error("Failed to record key:", e)
-    } finally {
-      setIsRecording(false)
-    }
-  }
-
-  const handleCancelRecord = () => {
-    cancelRecordKey().catch(() => {})
-    setIsRecording(false)
-  }
-
-  // Count validation errors
   const errorCount = validation
     ? (validation.terminal_valid ? 0 : 1) + (validation.editor_valid ? 0 : 1)
     : 0
@@ -189,7 +93,6 @@ export function NvimEditSettings({ settings, onUpdate, activeTab }: Props) {
         terminal editor.
       </p>
 
-      {/* Error dialog */}
       {showErrorDialog && (
         <div className="error-dialog-overlay" onClick={() => setShowErrorDialog(null)}>
           <div className="error-dialog" onClick={(e) => e.stopPropagation()}>
@@ -206,332 +109,20 @@ export function NvimEditSettings({ settings, onUpdate, activeTab }: Props) {
         </div>
       )}
 
-      {/* Config Tab */}
       {activeTab === "nvim-config" && (
-        <>
-          <div className="form-group">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={nvimEdit.enabled}
-                onChange={(e) => updateNvimEdit({ enabled: e.target.checked })}
-              />
-              Enable Edit Popup feature
-            </label>
-          </div>
-
-          <div className="form-group">
-            <label>Keyboard shortcut</label>
-            <div className="key-display">
-              {isRecording ? (
-                <button type="button" className="record-key-btn recording" onClick={handleCancelRecord}>
-                  Press any key...
-                </button>
-              ) : (
-                <>
-                  <span className="current-key">{displayName || nvimEdit.shortcut_key}</span>
-                  <button
-                    type="button"
-                    className="record-key-btn"
-                    onClick={handleRecordKey}
-                    disabled={!nvimEdit.enabled}
-                  >
-                    Record Key
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="form-row editor-row">
-            <div className="form-group">
-              <label htmlFor="editor">
-                Editor
-                {validation && !validation.editor_valid && nvimEdit.enabled && (
-                  <button
-                    type="button"
-                    className="inline-error-badge"
-                    onClick={() => setShowErrorDialog("editor")}
-                    title={validation.editor_error || "Editor not found"}
-                  >
-                    !
-                  </button>
-                )}
-              </label>
-              <select
-                id="editor"
-                value={nvimEdit.editor}
-                onChange={(e) => handleEditorChange(e.target.value)}
-                disabled={!nvimEdit.enabled}
-                className={
-                  validation && !validation.editor_valid && nvimEdit.enabled ? "input-error" : ""
-                }
-              >
-                {EDITOR_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group editor-path-group">
-              <label htmlFor="nvim-path">Path {nvimEdit.editor !== "custom" && ""}</label>
-              <div className="path-input-row">
-                <input
-                  type="text"
-                  id="nvim-path"
-                  value={nvimEdit.nvim_path}
-                  onChange={(e) => updateNvimEdit({ nvim_path: e.target.value })}
-                  placeholder={
-                    validation?.editor_resolved_path || DEFAULT_EDITOR_PATHS[nvimEdit.editor] || ""
-                  }
-                  disabled={!nvimEdit.enabled}
-                  className={
-                    validation && !validation.editor_valid && nvimEdit.enabled ? "input-error" : ""
-                  }
-                />
-                <button
-                  type="button"
-                  className="browse-btn"
-                  onClick={async () => {
-                    const file = await open({
-                      multiple: false,
-                      directory: false,
-                      defaultPath: "/opt/homebrew/bin",
-                    })
-                    if (file) {
-                      updateNvimEdit({ nvim_path: file })
-                    }
-                  }}
-                  disabled={!nvimEdit.enabled}
-                  title="Browse for editor"
-                >
-                  ...
-                </button>
-              </div>
-              {validation &&
-                validation.editor_valid &&
-                nvimEdit.enabled &&
-                validation.editor_resolved_path && (
-                  <span className="resolved-path" title={validation.editor_resolved_path}>
-                    Found: {validation.editor_resolved_path.split("/").pop()}
-                  </span>
-                )}
-            </div>
-          </div>
-
-          <div className="form-row terminal-row">
-            <div className="form-group">
-              <label htmlFor="terminal">
-                Terminal
-                {validation && !validation.terminal_valid && nvimEdit.enabled && (
-                  <button
-                    type="button"
-                    className="inline-error-badge"
-                    onClick={() => setShowErrorDialog("terminal")}
-                    title={validation.terminal_error || "Terminal not found"}
-                  >
-                    !
-                  </button>
-                )}
-              </label>
-              <select
-                id="terminal"
-                value={nvimEdit.terminal}
-                onChange={(e) => handleTerminalChange(e.target.value)}
-                disabled={!nvimEdit.enabled}
-                className={
-                  validation && !validation.terminal_valid && nvimEdit.enabled ? "input-error" : ""
-                }
-              >
-                {TERMINAL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group terminal-path-group">
-              <label htmlFor="terminal-path">Path</label>
-              <div className="path-input-row">
-                <input
-                  type="text"
-                  id="terminal-path"
-                  value={nvimEdit.terminal_path}
-                  onChange={(e) => updateNvimEdit({ terminal_path: e.target.value })}
-                  placeholder={DEFAULT_TERMINAL_PATHS[nvimEdit.terminal] || "auto-detect"}
-                  disabled={!nvimEdit.enabled}
-                  className={
-                    validation && !validation.terminal_valid && nvimEdit.enabled ? "input-error" : ""
-                  }
-                />
-                <button
-                  type="button"
-                  className="browse-btn"
-                  onClick={async () => {
-                    const file = await open({
-                      multiple: false,
-                      directory: false,
-                      defaultPath: "/Applications",
-                    })
-                    if (file) {
-                      // Detect terminal type from path
-                      const lowerPath = file.toLowerCase()
-                      let detectedTerminal: string | null = null
-                      if (lowerPath.includes("alacritty")) {
-                        detectedTerminal = "alacritty"
-                      } else if (lowerPath.includes("kitty")) {
-                        detectedTerminal = "kitty"
-                      } else if (lowerPath.includes("wezterm")) {
-                        detectedTerminal = "wezterm"
-                      } else if (lowerPath.includes("ghostty")) {
-                        detectedTerminal = "ghostty"
-                      } else if (lowerPath.includes("iterm")) {
-                        detectedTerminal = "iterm"
-                      } else if (lowerPath.includes("terminal.app")) {
-                        detectedTerminal = "default"
-                      }
-
-                      if (detectedTerminal) {
-                        updateNvimEdit({ terminal_path: file, terminal: detectedTerminal })
-                      } else {
-                        // Not a recognized terminal - don't update, show alert
-                        const appName = file.split("/").pop()?.replace(".app", "") || file
-                        const supportedList = TERMINAL_OPTIONS.map((t) => t.label).join(", ")
-                        alert(
-                          `"${appName}" is not a supported terminal.\n\nSupported terminals: ${supportedList}`,
-                        )
-                      }
-                    }
-                  }}
-                  disabled={!nvimEdit.enabled}
-                  title="Browse for terminal"
-                >
-                  ...
-                </button>
-              </div>
-              {validation &&
-                validation.terminal_valid &&
-                nvimEdit.enabled &&
-                validation.terminal_resolved_path && (
-                  <span className="resolved-path" title={validation.terminal_resolved_path}>
-                    Found: {validation.terminal_resolved_path.split("/").pop()}
-                  </span>
-                )}
-            </div>
-          </div>
-
-          {nvimEdit.terminal !== "alacritty" && (
-            <div className="alert alert-warning">
-              Limited support. Please use Alacritty for best performance and tested compatibility.
-            </div>
-          )}
-
-          <div className="form-group">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={nvimEdit.use_custom_script ?? false}
-                onChange={(e) => updateNvimEdit({ use_custom_script: e.target.checked })}
-                disabled={!nvimEdit.enabled}
-              />
-              Use custom launcher script
-            </label>
-            <span className="hint">
-              Use a script to spawn the editor. Customize PATH, use tmux popups, etc.
-            </span>
-          </div>
-
-          {nvimEdit.use_custom_script && (
-            <div className="form-group">
-              <div className="path-input-row">
-                <button
-                  type="button"
-                  className="edit-script-btn"
-                  onClick={async () => {
-                    try {
-                      await invoke("open_launcher_script")
-                    } catch (e) {
-                      console.error("Failed to open launcher script:", e)
-                      alert(`Failed to open launcher script: ${e}`)
-                    }
-                  }}
-                  disabled={!nvimEdit.enabled}
-                >
-                  Edit Launcher Script
-                </button>
-              </div>
-              <span className="hint">~/Library/Application Support/ovim/terminal-launcher.sh</span>
-            </div>
-          )}
-        </>
+        <ConfigTab
+          nvimEdit={nvimEdit}
+          validation={validation}
+          isRecording={isRecording}
+          displayName={displayName}
+          onUpdate={updateNvimEdit}
+          onRecordKey={handleRecordKey}
+          onCancelRecord={handleCancelRecord}
+          onShowErrorDialog={setShowErrorDialog}
+        />
       )}
 
-      {/* Window Tab */}
-      {activeTab === "nvim-window" && (
-        <>
-          <div className="form-group">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={nvimEdit.popup_mode}
-                onChange={(e) => updateNvimEdit({ popup_mode: e.target.checked })}
-                disabled={!nvimEdit.enabled}
-              />
-              Open as popup below text field
-            </label>
-            <span className="hint">
-              Position the terminal window directly below the text field instead of opening fullscreen
-            </span>
-          </div>
-
-          {nvimEdit.popup_mode && (
-            <div className="form-row">
-              <div className="form-group">
-                <label htmlFor="popup-width">Popup width (px)</label>
-                <input
-                  type="number"
-                  id="popup-width"
-                  value={nvimEdit.popup_width}
-                  onChange={(e) => updateNvimEdit({ popup_width: parseInt(e.target.value) || 0 })}
-                  min={0}
-                  disabled={!nvimEdit.enabled}
-                />
-                <span className="hint">0 = match text field width</span>
-              </div>
-              <div className="form-group">
-                <label htmlFor="popup-height">Popup height (px)</label>
-                <input
-                  type="number"
-                  id="popup-height"
-                  value={nvimEdit.popup_height}
-                  onChange={(e) => updateNvimEdit({ popup_height: parseInt(e.target.value) || 300 })}
-                  min={100}
-                  disabled={!nvimEdit.enabled}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="form-group">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={nvimEdit.live_sync_enabled}
-                onChange={(e) => updateNvimEdit({ live_sync_enabled: e.target.checked })}
-                disabled={!nvimEdit.enabled}
-              />
-              Live sync text field
-              <span className="beta-badge">BETA</span>
-            </label>
-            <span className="hint">
-              Sync changes to the original text field as you type in the editor. Only works with Neovim.
-            </span>
-          </div>
-        </>
-      )}
+      {activeTab === "nvim-window" && <WindowTab nvimEdit={nvimEdit} onUpdate={updateNvimEdit} />}
     </div>
   )
 }
