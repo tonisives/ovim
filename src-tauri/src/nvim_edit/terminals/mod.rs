@@ -10,6 +10,7 @@ mod ghostty;
 mod iterm;
 mod kitty;
 pub mod process_utils;
+mod script_env;
 mod terminal_app;
 mod wezterm;
 
@@ -22,9 +23,10 @@ pub use terminal_app::TerminalAppSpawner;
 pub use wezterm::WezTermSpawner;
 
 use crate::config::{NvimEditSettings, Settings};
+use script_env::capture_script_environment;
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Child;
 
 /// Window position and size for popup mode
 #[derive(Debug, Clone, Default)]
@@ -157,123 +159,6 @@ pub fn spawn_terminal(
         TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
         TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
     }
-}
-
-/// Capture environment variables from the launcher script.
-///
-/// Sources the script and captures any environment variable changes.
-/// Returns only the variables that differ from the current process environment.
-fn capture_script_environment() -> Result<HashMap<String, String>, String> {
-    let script_path = ensure_launcher_script()?;
-
-    // Get current environment for comparison
-    let current_env: HashMap<String, String> = std::env::vars().collect();
-
-    // Source the script and capture resulting environment
-    // We use a subshell to prevent 'exit' in the script from terminating our capture
-    // The script's exports are captured, then we print env
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(format!(
-            r#"
-            # Source script in a way that captures exports but ignores exit
-            eval "$(grep -E '^export ' {:?} 2>/dev/null || true)"
-            env
-            "#,
-            script_path
-        ))
-        .output()
-        .map_err(|e| format!("Failed to run launcher script: {}", e))?;
-
-    if !output.status.success() {
-        // Script may have exited with non-zero, but we still want the env
-        log::debug!("Launcher script exited with non-zero status (this is normal for built-in terminals)");
-    }
-
-    let output_str = String::from_utf8_lossy(&output.stdout);
-
-    // Parse the environment output and find differences
-    // Note: env output can have multiline values, so we need to handle that
-    // A new env var starts with a valid name (alphanumeric + underscore, not starting with digit)
-    // followed by '='
-    let mut custom_env = HashMap::new();
-    let mut current_key: Option<String> = None;
-    let mut current_value = String::new();
-
-    for line in output_str.lines() {
-        // Check if this line starts a new environment variable
-        // Valid env var names: start with letter or _, contain only alphanumeric and _
-        if let Some(eq_pos) = line.find('=') {
-            let potential_key = &line[..eq_pos];
-            let is_valid_key = !potential_key.is_empty()
-                && potential_key.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_')
-                && potential_key.chars().all(|c| c.is_alphanumeric() || c == '_');
-
-            if is_valid_key {
-                // Save previous key-value pair if any
-                if let Some(key) = current_key.take() {
-                    let is_new_or_changed = match current_env.get(&key) {
-                        Some(existing) => existing != &current_value,
-                        None => match current_env.get(&key) {
-                            Some(current) => current != &current_value,
-                            None => true,
-                        },
-                    };
-                    if is_new_or_changed && !key.starts_with("BASH_") && key != "_" && key != "SHLVL" && key != "PWD" {
-                        custom_env.insert(key, current_value.clone());
-                    }
-                }
-                // Start new key-value
-                current_key = Some(potential_key.to_string());
-                current_value = line[eq_pos + 1..].to_string();
-                continue;
-            }
-        }
-
-        // This line is a continuation of the previous value
-        if current_key.is_some() {
-            current_value.push('\n');
-            current_value.push_str(line);
-        }
-    }
-
-    // Don't forget the last key-value pair
-    if let Some(key) = current_key {
-        let is_new_or_changed = match current_env.get(&key) {
-            Some(current) => current != &current_value,
-            None => true,
-        };
-        if is_new_or_changed && !key.starts_with("BASH_") && key != "_" && key != "SHLVL" && key != "PWD" {
-            custom_env.insert(key, current_value);
-        }
-    }
-
-    // Now filter to only include vars that differ from current process env
-    let custom_env: HashMap<String, String> = custom_env
-        .into_iter()
-        .filter(|(k, v)| {
-            match current_env.get(k) {
-                Some(current_val) => current_val != v,
-                None => true,
-            }
-        })
-        .collect();
-
-    log::info!("Captured custom env vars: {:?}", custom_env.keys().collect::<Vec<_>>());
-    if let Some(path) = custom_env.get("PATH") {
-        log::info!("Custom PATH: {}", path);
-    }
-
-    // Debug: write to file
-    let debug_info = format!(
-        "Captured {} env vars\nKeys: {:?}\nPATH: {:?}\n",
-        custom_env.len(),
-        custom_env.keys().collect::<Vec<_>>(),
-        custom_env.get("PATH")
-    );
-    let _ = std::fs::write("/tmp/ovim-env-debug.log", debug_info);
-
-    Ok(custom_env)
 }
 
 /// Wait for the terminal/nvim process to exit
