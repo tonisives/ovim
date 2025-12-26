@@ -22,8 +22,9 @@ pub use terminal_app::TerminalAppSpawner;
 pub use wezterm::WezTermSpawner;
 
 use crate::config::{NvimEditSettings, Settings};
+use std::collections::HashMap;
 use std::path::Path;
-use std::process::Child;
+use std::process::{Child, Command};
 
 /// Window position and size for popup mode
 #[derive(Debug, Clone, Default)]
@@ -92,12 +93,16 @@ pub trait TerminalSpawner {
     ///
     /// If `socket_path` is provided, the editor will be started with RPC enabled
     /// (e.g., nvim --listen <socket_path>) for live buffer sync.
+    ///
+    /// If `custom_env` is provided, these environment variables will be applied
+    /// to the spawned process (from the launcher script).
     fn spawn(
         &self,
         settings: &NvimEditSettings,
         file_path: &str,
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
+        custom_env: Option<&HashMap<String, String>>,
     ) -> Result<SpawnInfo, String>;
 }
 
@@ -106,8 +111,9 @@ pub trait TerminalSpawner {
 /// If `socket_path` is provided, the editor will be started with RPC enabled
 /// for live buffer sync.
 ///
-/// If `use_custom_script` is enabled, the launcher script handles the entire
-/// spawn process, allowing custom PATH, tmux popups, etc.
+/// If `use_custom_script` is enabled:
+/// - For `terminal=custom`: the launcher script handles everything (spawning, positioning)
+/// - For built-in terminals: script is sourced for environment (PATH, etc.), app handles spawning
 pub fn spawn_terminal(
     settings: &NvimEditSettings,
     temp_file: &Path,
@@ -117,39 +123,157 @@ pub fn spawn_terminal(
     let terminal_type = TerminalType::from_string(&settings.terminal);
     let file_path = temp_file.to_string_lossy();
 
-    // If custom script is enabled, use the CustomSpawner which runs the launcher script
-    if settings.use_custom_script {
-        return CustomSpawner.spawn(settings, &file_path, geometry, socket_path);
+    // If custom script is enabled with terminal=custom, let the script handle everything
+    if settings.use_custom_script && terminal_type == TerminalType::Custom {
+        return CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None);
     }
 
-    // For built-in terminals, run the launcher script first (if exists) to set up environment
-    run_launcher_script_for_env(settings, &file_path, &geometry, socket_path, &terminal_type);
+    // Capture custom environment from launcher script if enabled
+    let custom_env = if settings.use_custom_script {
+        match capture_script_environment() {
+            Ok(env) => {
+                if !env.is_empty() {
+                    log::info!("Captured {} environment variables from launcher script", env.len());
+                    Some(env)
+                } else {
+                    None
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to capture environment from launcher script: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     match terminal_type {
-        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path),
-        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path),
-        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path),
-        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path),
-        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path),
-        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path),
-        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path),
+        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
+        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
+        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
+        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
+        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
+        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
+        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
     }
 }
 
-/// Run the launcher script to set up environment (PATH, etc.) for built-in terminals.
-/// The script's environment changes won't affect the parent process, but we can
-/// capture them and apply to the terminal spawn.
-fn run_launcher_script_for_env(
-    _settings: &NvimEditSettings,
-    _file_path: &str,
-    _geometry: &Option<WindowGeometry>,
-    _socket_path: Option<&Path>,
-    _terminal_type: &TerminalType,
-) {
-    // For now, built-in terminals don't inherit from the launcher script
-    // because each spawner creates its own process.
-    // The launcher script is primarily for Custom terminal type.
-    // Future enhancement: could source the script and capture env vars.
+/// Capture environment variables from the launcher script.
+///
+/// Sources the script and captures any environment variable changes.
+/// Returns only the variables that differ from the current process environment.
+fn capture_script_environment() -> Result<HashMap<String, String>, String> {
+    let script_path = ensure_launcher_script()?;
+
+    // Get current environment for comparison
+    let current_env: HashMap<String, String> = std::env::vars().collect();
+
+    // Source the script and capture resulting environment
+    // We use a subshell to prevent 'exit' in the script from terminating our capture
+    // The script's exports are captured, then we print env
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg(format!(
+            r#"
+            # Source script in a way that captures exports but ignores exit
+            eval "$(grep -E '^export ' {:?} 2>/dev/null || true)"
+            env
+            "#,
+            script_path
+        ))
+        .output()
+        .map_err(|e| format!("Failed to run launcher script: {}", e))?;
+
+    if !output.status.success() {
+        // Script may have exited with non-zero, but we still want the env
+        log::debug!("Launcher script exited with non-zero status (this is normal for built-in terminals)");
+    }
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+
+    // Parse the environment output and find differences
+    // Note: env output can have multiline values, so we need to handle that
+    // A new env var starts with a valid name (alphanumeric + underscore, not starting with digit)
+    // followed by '='
+    let mut custom_env = HashMap::new();
+    let mut current_key: Option<String> = None;
+    let mut current_value = String::new();
+
+    for line in output_str.lines() {
+        // Check if this line starts a new environment variable
+        // Valid env var names: start with letter or _, contain only alphanumeric and _
+        if let Some(eq_pos) = line.find('=') {
+            let potential_key = &line[..eq_pos];
+            let is_valid_key = !potential_key.is_empty()
+                && potential_key.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_')
+                && potential_key.chars().all(|c| c.is_alphanumeric() || c == '_');
+
+            if is_valid_key {
+                // Save previous key-value pair if any
+                if let Some(key) = current_key.take() {
+                    let is_new_or_changed = match current_env.get(&key) {
+                        Some(existing) => existing != &current_value,
+                        None => match current_env.get(&key) {
+                            Some(current) => current != &current_value,
+                            None => true,
+                        },
+                    };
+                    if is_new_or_changed && !key.starts_with("BASH_") && key != "_" && key != "SHLVL" && key != "PWD" {
+                        custom_env.insert(key, current_value.clone());
+                    }
+                }
+                // Start new key-value
+                current_key = Some(potential_key.to_string());
+                current_value = line[eq_pos + 1..].to_string();
+                continue;
+            }
+        }
+
+        // This line is a continuation of the previous value
+        if current_key.is_some() {
+            current_value.push('\n');
+            current_value.push_str(line);
+        }
+    }
+
+    // Don't forget the last key-value pair
+    if let Some(key) = current_key {
+        let is_new_or_changed = match current_env.get(&key) {
+            Some(current) => current != &current_value,
+            None => true,
+        };
+        if is_new_or_changed && !key.starts_with("BASH_") && key != "_" && key != "SHLVL" && key != "PWD" {
+            custom_env.insert(key, current_value);
+        }
+    }
+
+    // Now filter to only include vars that differ from current process env
+    let custom_env: HashMap<String, String> = custom_env
+        .into_iter()
+        .filter(|(k, v)| {
+            match current_env.get(k) {
+                Some(current_val) => current_val != v,
+                None => true,
+            }
+        })
+        .collect();
+
+    log::info!("Captured custom env vars: {:?}", custom_env.keys().collect::<Vec<_>>());
+    if let Some(path) = custom_env.get("PATH") {
+        log::info!("Custom PATH: {}", path);
+    }
+
+    // Debug: write to file
+    let debug_info = format!(
+        "Captured {} env vars\nKeys: {:?}\nPATH: {:?}\n",
+        custom_env.len(),
+        custom_env.keys().collect::<Vec<_>>(),
+        custom_env.get("PATH")
+    );
+    let _ = std::fs::write("/tmp/ovim-env-debug.log", debug_info);
+
+    Ok(custom_env)
 }
 
 /// Wait for the terminal/nvim process to exit
@@ -185,12 +309,15 @@ pub fn wait_for_process(
 pub fn default_launcher_script() -> &'static str {
     r#"#!/bin/bash
 # ovim terminal launcher script
-# Customize PATH, environment, or terminal behavior here.
+#
+# This script is used to customize the environment for the edit popup.
+# Any environment variables you export here (like PATH) will be inherited
+# by the terminal and editor.
 
 # Example: Add homebrew and local bins to PATH
 # export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
-# Available environment variables:
+# Available environment variables (when terminal=custom):
 #   OVIM_FILE     - temp file path to edit
 #   OVIM_EDITOR   - configured editor executable
 #   OVIM_WIDTH    - popup width in pixels
@@ -200,16 +327,21 @@ pub fn default_launcher_script() -> &'static str {
 #   OVIM_SOCKET   - RPC socket path (for live sync)
 #   OVIM_TERMINAL - selected terminal type
 
-# For custom terminal (OVIM_TERMINAL=custom), handle spawning yourself:
+# For custom terminal (terminal=custom in settings), handle spawning yourself:
 if [ "$OVIM_TERMINAL" = "custom" ]; then
     # Example: tmux popup
-    # tmux popup -E -w 80% -h 80% "$OVIM_EDITOR $OVIM_FILE"
+    # tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
 
-    # Default: just run editor directly
-    exec $OVIM_EDITOR $OVIM_FILE
+    # Example: run in current terminal (no popup)
+    # exec $OVIM_EDITOR --listen "$OVIM_SOCKET" "$OVIM_FILE"
+
+    echo "Error: terminal=custom requires implementing spawn logic in this script" >&2
+    echo "See the examples above for how to spawn your custom terminal." >&2
+    exit 1
 fi
 
-# For built-in terminals, exit 0 to let ovim handle spawning
+# For built-in terminals (alacritty, kitty, etc.), just set environment here.
+# ovim handles spawning and positioning the terminal window.
 exit 0
 "#
 }

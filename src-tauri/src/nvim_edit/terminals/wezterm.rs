@@ -1,5 +1,6 @@
 //! WezTerm terminal spawner
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -21,6 +22,7 @@ impl TerminalSpawner for WezTermSpawner {
         file_path: &str,
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
+        custom_env: Option<&HashMap<String, String>>,
     ) -> Result<SpawnInfo, String> {
         // Get editor path and args from settings
         let editor_path = settings.editor_path();
@@ -70,6 +72,11 @@ impl TerminalSpawner for WezTermSpawner {
             cmd.arg(arg);
         }
         cmd.arg(file_path);
+
+        // Apply custom environment variables
+        if let Some(env) = custom_env {
+            cmd.envs(env.iter());
+        }
 
         let child = cmd
             .spawn()

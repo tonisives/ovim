@@ -1,5 +1,9 @@
 //! Custom terminal spawner - uses user-defined launcher script
+//!
+//! When terminal=custom, this spawner runs the user's launcher script which
+//! must handle all spawning logic (e.g., tmux popup, custom terminal, etc.)
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -20,6 +24,7 @@ impl TerminalSpawner for CustomSpawner {
         file_path: &str,
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
+        _custom_env: Option<&HashMap<String, String>>,
     ) -> Result<SpawnInfo, String> {
         // Ensure launcher script exists
         let script_path = ensure_launcher_script()?;
