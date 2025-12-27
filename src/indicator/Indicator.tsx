@@ -1,9 +1,14 @@
 import { useEffect, useState, useCallback } from "react"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
+import { openUrl } from "@tauri-apps/plugin-opener"
 import { Widget } from "./widgets"
 import { applyWindowSettings } from "./windowPosition"
 import type { VimMode, Settings, ModeColors } from "./types"
+
+interface PendingUpdate {
+  version: string
+}
 
 const defaultColors: ModeColors = {
   insert: { r: 74, g: 144, b: 217 },
@@ -16,6 +21,7 @@ export function Indicator() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [isHoverable, setIsHoverable] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null)
 
   useEffect(() => {
     invoke<Settings>("get_settings")
@@ -100,6 +106,33 @@ export function Indicator() {
     }
   }, []) // No dependencies - run once
 
+  // Listen for update-installed events
+  useEffect(() => {
+    const unlisten = listen<PendingUpdate>("update-installed", (event) => {
+      setPendingUpdate(event.payload)
+      // Make window clickable when update is available
+      invoke("set_indicator_clickable", { clickable: true }).catch((e) =>
+        console.error("Failed to make indicator clickable:", e)
+      )
+    })
+
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [])
+
+  const handleRestartClick = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Open GitHub releases page
+    const url = `https://github.com/tonisives/ovim/releases/tag/v${pendingUpdate?.version}`
+    await openUrl(url).catch((err) => console.error("Failed to open releases:", err))
+    // Small delay to ensure browser opens before restart
+    setTimeout(() => {
+      invoke("restart_app").catch((e) => console.error("Failed to restart:", e))
+    }, 500)
+  }
+
   const modeChar = mode === "insert" ? "i" : mode === "normal" ? "n" : "v"
   const opacity = settings?.indicator_opacity ?? 0.9
   const colors = settings?.mode_colors ?? defaultColors
@@ -154,6 +187,34 @@ export function Indicator() {
       }}
       onClick={isHoverable ? handleOpenSettings : undefined}
     >
+      {/* Update badge overlay - covers entire indicator */}
+      {pendingUpdate && (
+        <button
+          onClick={handleRestartClick}
+          title={`Update to v${pendingUpdate.version} ready - click to restart`}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            borderRadius: "8px",
+            background: "#30d158",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "20px",
+            fontWeight: "bold",
+            color: "white",
+            zIndex: 10,
+            padding: 0,
+          }}
+        >
+          ↑
+        </button>
+      )}
       {hasTop && <Widget type={topWidget} fontFamily={fontFamily} />}
       <div
         style={{

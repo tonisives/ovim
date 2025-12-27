@@ -7,8 +7,55 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Update version in repo before building
+  update-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.target_commitish || 'main' }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Update version if release starts with 'v'
+        shell: bash
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          echo "Release tag: $TAG_NAME"
+
+          if [[ "$TAG_NAME" =~ ^v ]]; then
+            VERSION="${TAG_NAME:1}"
+            echo "Updating version to: $VERSION"
+
+            # Update package.json
+            pnpm version --no-git-tag-version "$VERSION"
+
+            # Update tauri.conf.json
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+
+            # Update Cargo.toml
+            sed -i "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml
+
+            # Commit and push
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+            git commit -m "chore: bump version to $VERSION"
+            git push
+          fi
+
   # Build GUI app with Tauri (unsigned)
   build:
+    needs: update-version
     permissions:
       contents: write
     strategy:
@@ -26,6 +73,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.target_commitish || 'main' }}
+
+      - name: Pull latest (includes version bump)
+        run: git pull origin ${{ github.event.release.target_commitish || 'main' }}
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
@@ -43,17 +95,15 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Update version if release starts with 'v'
-        shell: bash
-        run: ./etc/update-version.sh "${{ github.ref_name }}"
-
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build Tauri app (unsigned)
+      - name: Build Tauri app with updater artifacts
         run: pnpm tauri build ${{ matrix.args }}
         env:
           CI: true
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload unsigned app bundle
         uses: actions/upload-artifact@v4
@@ -61,6 +111,15 @@ jobs:
           name: app-bundle-${{ matrix.arch }}
           path: |
             src-tauri/target/*/release/bundle/macos/*.app
+          retention-days: 1
+
+      - name: Upload updater artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-${{ matrix.arch }}
+          path: |
+            src-tauri/target/*/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig
           retention-days: 1
 
   # Sign and notarize the app
@@ -171,9 +230,83 @@ jobs:
         run: |
           gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.dmg" --clobber --repo "${{ github.repository }}"
 
+      - name: Download updater artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: updater-${{ matrix.arch }}
+          path: updater
+
+      - name: Upload updater artifacts to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find and rename the tar.gz and sig files
+          TAR_GZ=$(find updater -name "*.app.tar.gz" | head -1)
+          SIG=$(find updater -name "*.app.tar.gz.sig" | head -1)
+
+          if [ -n "$TAR_GZ" ]; then
+            cp "$TAR_GZ" "ovim_${{ matrix.arch }}.app.tar.gz"
+            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz" --clobber --repo "${{ github.repository }}"
+          fi
+
+          if [ -n "$SIG" ]; then
+            cp "$SIG" "ovim_${{ matrix.arch }}.app.tar.gz.sig"
+            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz.sig" --clobber --repo "${{ github.repository }}"
+          fi
+
+  # Generate latest.json for updater
+  generate-latest-json:
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download signatures
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Download signature files
+          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_aarch64.app.tar.gz.sig" -o sig-arm.txt
+          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_x64.app.tar.gz.sig" -o sig-intel.txt
+
+          echo "SIG_ARM=$(cat sig-arm.txt)" >> $GITHUB_ENV
+          echo "SIG_INTEL=$(cat sig-intel.txt)" >> $GITHUB_ENV
+
+      - name: Create latest.json
+        run: |
+          VERSION="${{ github.ref_name }}"
+          # Remove 'v' prefix if present for version field
+          VERSION_NUM="${VERSION#v}"
+
+          cat > latest.json << EOF
+          {
+            "version": "${VERSION_NUM}",
+            "notes": "See release notes at https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIG_ARM}",
+                "url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_aarch64.app.tar.gz"
+              },
+              "darwin-x86_64": {
+                "signature": "${SIG_INTEL}",
+                "url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_x64.app.tar.gz"
+              }
+            }
+          }
+          EOF
+
+          cat latest.json
+
+      - name: Upload latest.json to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" latest.json --clobber --repo "${{ github.repository }}"
+
   # Update Homebrew tap with new SHA256 checksums
   update-homebrew:
-    needs: [sign]
+    needs: [sign, generate-latest-json]
     runs-on: ubuntu-latest
     permissions:
       contents: read

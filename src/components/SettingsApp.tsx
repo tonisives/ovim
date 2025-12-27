@@ -60,6 +60,7 @@ export interface Settings {
   bottom_widget: string;
   electron_apps: string[];
   nvim_edit: NvimEditSettings;
+  auto_update_enabled: boolean;
 }
 
 type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim";

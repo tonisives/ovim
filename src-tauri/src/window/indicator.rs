@@ -12,11 +12,8 @@ pub fn setup_indicator_window(window: &WebviewWindow) -> Result<(), String> {
         let ns_window = window.ns_window().map_err(|e| e.to_string())? as id;
 
         unsafe {
-            // Make window ignore mouse events (click-through)
-            use objc::*;
-            let _: () = msg_send![ns_window, setIgnoresMouseEvents: true];
-
             // Set window level to floating
+            use objc::*;
             let _: () = msg_send![ns_window, setLevel: 3i64]; // NSFloatingWindowLevel
 
             // Set collection behavior to appear on all spaces
@@ -25,6 +22,25 @@ pub fn setup_indicator_window(window: &WebviewWindow) -> Result<(), String> {
                 NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
                     | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
             );
+        }
+    }
+
+    Ok(())
+}
+
+/// Set whether the indicator window ignores mouse events
+#[allow(unused_variables)]
+pub fn set_indicator_ignores_mouse(window: &WebviewWindow, ignore: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    #[allow(deprecated)]
+    {
+        use cocoa::base::id;
+
+        let ns_window = window.ns_window().map_err(|e| e.to_string())? as id;
+
+        unsafe {
+            use objc::*;
+            let _: () = msg_send![ns_window, setIgnoresMouseEvents: ignore];
         }
     }
 
