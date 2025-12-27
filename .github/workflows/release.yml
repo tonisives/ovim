@@ -144,9 +144,6 @@ jobs:
           name: updater-unsigned-${{ matrix.arch }}
           path: updater
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli
-
       - name: Sign updater artifact
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -154,7 +151,7 @@ jobs:
         run: |
           TAR_GZ=$(find updater -name "*.app.tar.gz" | head -1)
           echo "Signing: $TAR_GZ"
-          cargo tauri signer sign "$TAR_GZ" --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          npx --yes @tauri-apps/cli@latest signer sign "$TAR_GZ" --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
           ls -la updater/
 
       - name: Upload signed updater artifacts
