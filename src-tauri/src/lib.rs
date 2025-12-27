@@ -6,6 +6,7 @@ mod config;
 pub mod ipc;
 mod keyboard;
 mod keyboard_handler;
+pub mod launcher_callback;
 mod nvim_edit;
 mod vim;
 mod widgets;
@@ -106,6 +107,31 @@ fn handle_ipc_command(
             IpcResponse::Ok
         }
         IpcCommand::SetMode(mode_str) => handle_set_mode(state, app_handle, &mode_str),
+        IpcCommand::LauncherHandled {
+            session_id,
+            editor_pid,
+        } => {
+            if launcher_callback::signal_handled(&session_id, editor_pid) {
+                log::info!(
+                    "Launcher signaled handled for session {}, pid: {:?}",
+                    session_id,
+                    editor_pid
+                );
+                IpcResponse::Ok
+            } else {
+                log::warn!("Unknown launcher session: {}", session_id);
+                IpcResponse::Error(format!("Unknown session: {}", session_id))
+            }
+        }
+        IpcCommand::LauncherFallthrough { session_id } => {
+            if launcher_callback::signal_fallthrough(&session_id) {
+                log::info!("Launcher signaled fallthrough for session {}", session_id);
+                IpcResponse::Ok
+            } else {
+                log::warn!("Unknown launcher session: {}", session_id);
+                IpcResponse::Error(format!("Unknown session: {}", session_id))
+            }
+        }
     }
 }
 
@@ -220,6 +246,9 @@ pub fn run() {
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Initialize launcher callback registry
+            launcher_callback::init();
 
             let settings_item =
                 MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;

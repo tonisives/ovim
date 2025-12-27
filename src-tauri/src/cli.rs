@@ -12,6 +12,13 @@ pub enum IpcCommand {
     Insert,
     Normal,
     Visual,
+    LauncherHandled {
+        session_id: String,
+        editor_pid: Option<u32>,
+    },
+    LauncherFallthrough {
+        session_id: String,
+    },
 }
 
 /// IPC response from main app to CLI
@@ -62,17 +69,30 @@ fn print_usage() {
     eprintln!("Usage: ovim <command>");
     eprintln!();
     eprintln!("Commands:");
-    eprintln!("  mode          Get current mode");
-    eprintln!("  toggle        Toggle between insert and normal mode");
-    eprintln!("  insert, i     Switch to insert mode");
-    eprintln!("  normal, n     Switch to normal mode");
-    eprintln!("  visual, v     Switch to visual mode");
-    eprintln!("  set <mode>    Set mode to insert/normal/visual");
+    eprintln!("  mode              Get current mode");
+    eprintln!("  toggle            Toggle between insert and normal mode");
+    eprintln!("  insert, i         Switch to insert mode");
+    eprintln!("  normal, n         Switch to normal mode");
+    eprintln!("  visual, v         Switch to visual mode");
+    eprintln!("  set <mode>        Set mode to insert/normal/visual");
+    eprintln!();
+    eprintln!("Launcher script commands:");
+    eprintln!("  launcher-handled --session <id> [--pid <pid>]");
+    eprintln!("                    Signal that script handled editor spawning");
+    eprintln!("  launcher-fallthrough --session <id>");
+    eprintln!("                    Signal to use normal terminal flow");
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  ovim toggle     # Toggle mode (useful for Karabiner)");
-    eprintln!("  ovim normal     # Enter normal mode");
-    eprintln!("  ovim insert     # Enter insert mode");
+    eprintln!("  ovim toggle       # Toggle mode (useful for Karabiner)");
+    eprintln!("  ovim normal       # Enter normal mode");
+    eprintln!("  ovim insert       # Enter insert mode");
+}
+
+fn get_arg_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -98,6 +118,30 @@ async fn main() {
                 std::process::exit(1);
             }
             IpcCommand::SetMode(args[2].clone())
+        }
+        "launcher-handled" => {
+            let session_id = match get_arg_value(&args, "--session") {
+                Some(id) => id,
+                None => {
+                    eprintln!("Error: 'launcher-handled' requires --session <id>");
+                    std::process::exit(1);
+                }
+            };
+            let editor_pid = get_arg_value(&args, "--pid").and_then(|p| p.parse().ok());
+            IpcCommand::LauncherHandled {
+                session_id,
+                editor_pid,
+            }
+        }
+        "launcher-fallthrough" => {
+            let session_id = match get_arg_value(&args, "--session") {
+                Some(id) => id,
+                None => {
+                    eprintln!("Error: 'launcher-fallthrough' requires --session <id>");
+                    std::process::exit(1);
+                }
+            };
+            IpcCommand::LauncherFallthrough { session_id }
         }
         "help" | "-h" | "--help" => {
             print_usage();

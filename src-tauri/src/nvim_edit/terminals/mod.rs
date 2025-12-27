@@ -179,91 +179,54 @@ pub fn wait_for_process(
     }
 }
 
-/// Get the default launcher script content
-pub fn default_launcher_script() -> &'static str {
-    r#"#!/bin/bash
-# ovim terminal launcher script
-#
-# This script runs before the terminal/editor spawns. You can use it to:
-# 1. Set up environment variables (PATH, etc.) for the editor
-# 2. Optionally spawn the editor yourself (for custom terminals like tmux)
-#
-# Exit codes:
-#   exit 0  - If no editor spawned: fall through to normal terminal flow
-#           - If editor spawned: ovim will wait for that editor process
-#   exit 1+ - Error, abort the edit popup
-#
-# Available environment variables:
-#   OVIM_FILE     - temp file path to edit
-#   OVIM_EDITOR   - configured editor executable
-#   OVIM_SOCKET   - RPC socket path (for live sync)
-#   OVIM_TERMINAL - selected terminal type
-#   OVIM_WIDTH    - popup width in pixels
-#   OVIM_HEIGHT   - popup height in pixels
-#   OVIM_X        - popup x position
-#   OVIM_Y        - popup y position
-
-# Example: Add homebrew and local bins to PATH
-# export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
-
-# Example: Spawn in tmux popup (blocks until editor closes)
-# tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
-# exit 0
-
-# Example: Focus existing tmux window and spawn there
-# tmux send-keys -t :editor "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE" Enter
-# exit 0
-
-# Default: exit 0 to continue with normal terminal flow
-exit 0
-"#
-}
-
-/// Ensure the launcher script exists, creating it with default content if not
+/// Get the launcher script path, ensuring it exists
+/// The script is copied from bundled resources on first use
 pub fn ensure_launcher_script() -> Result<std::path::PathBuf, String> {
     let script_path = Settings::launcher_script_path()
         .ok_or("Could not determine config directory")?;
 
     if !script_path.exists() {
-        // Create parent directory if needed
-        if let Some(parent) = script_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
-        }
-
-        // Write default script
-        std::fs::write(&script_path, default_launcher_script())
-            .map_err(|e| format!("Failed to write launcher script: {}", e))?;
-
-        // Make executable
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&script_path)
-                .map_err(|e| format!("Failed to get script permissions: {}", e))?
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&script_path, perms)
-                .map_err(|e| format!("Failed to set script permissions: {}", e))?;
-        }
-
-        log::info!("Created launcher script at {:?}", script_path);
+        return Err(format!(
+            "Launcher script not found at {:?}. It should be installed on app startup.",
+            script_path
+        ));
     }
 
     Ok(script_path)
 }
 
-/// Copy sample scripts from app bundle to config directory
-/// Called on app startup to ensure users have access to sample scripts
-pub fn install_sample_scripts(app_handle: &tauri::AppHandle) -> Result<(), String> {
+/// Copy a script file and make it executable
+#[cfg(unix)]
+fn copy_script(source: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    std::fs::copy(source, dest)
+        .map_err(|e| format!("Failed to copy {:?}: {}", source.file_name().unwrap_or_default(), e))?;
+
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(metadata) = std::fs::metadata(dest) {
+        let mut perms = metadata.permissions();
+        perms.set_mode(0o755);
+        let _ = std::fs::set_permissions(dest, perms);
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn copy_script(source: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    std::fs::copy(source, dest)
+        .map_err(|e| format!("Failed to copy {:?}: {}", source.file_name().unwrap_or_default(), e))?;
+    Ok(())
+}
+
+/// Install scripts from app bundle to config directory
+/// Called on app startup to ensure users have access to launcher and sample scripts
+pub fn install_scripts(app_handle: &tauri::AppHandle) -> Result<(), String> {
     let config_dir = dirs::config_dir()
         .ok_or("Could not determine config directory")?
-        .join("ovim")
-        .join("samples");
+        .join("ovim");
 
-    // Create samples directory if needed
+    // Create config directory if needed
     std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create samples directory: {}", e))?;
+        .map_err(|e| format!("Failed to create config directory: {}", e))?;
 
     // Get the resource path from the app bundle
     let resource_path = app_handle
@@ -271,33 +234,38 @@ pub fn install_sample_scripts(app_handle: &tauri::AppHandle) -> Result<(), Strin
         .resource_dir()
         .map_err(|e| format!("Failed to get resource directory: {}", e))?;
 
-    let samples_source = resource_path.join("scripts").join("samples");
+    let scripts_source = resource_path.join("scripts");
 
-    // Copy each sample script if it doesn't exist
+    // Install the default launcher script if it doesn't exist
+    let launcher_source = scripts_source.join("terminal-launcher.sh");
+    let launcher_dest = config_dir.join("terminal-launcher.sh");
+    if launcher_source.exists() && !launcher_dest.exists() {
+        match copy_script(&launcher_source, &launcher_dest) {
+            Ok(()) => log::info!("Installed launcher script: {:?}", launcher_dest),
+            Err(e) => log::warn!("{}", e),
+        }
+    }
+
+    // Install sample scripts
+    let samples_source = scripts_source.join("samples");
+    let samples_dest = config_dir.join("samples");
+
     if samples_source.exists() {
+        std::fs::create_dir_all(&samples_dest)
+            .map_err(|e| format!("Failed to create samples directory: {}", e))?;
+
         if let Ok(entries) = std::fs::read_dir(&samples_source) {
             for entry in entries.flatten() {
                 let source = entry.path();
                 if source.is_file() {
                     let filename = source.file_name().unwrap();
-                    let dest = config_dir.join(filename);
+                    let dest = samples_dest.join(filename);
 
                     // Only copy if destination doesn't exist (don't overwrite user modifications)
                     if !dest.exists() {
-                        if let Err(e) = std::fs::copy(&source, &dest) {
-                            log::warn!("Failed to copy sample script {:?}: {}", filename, e);
-                        } else {
-                            // Make executable
-                            #[cfg(unix)]
-                            {
-                                use std::os::unix::fs::PermissionsExt;
-                                if let Ok(metadata) = std::fs::metadata(&dest) {
-                                    let mut perms = metadata.permissions();
-                                    perms.set_mode(0o755);
-                                    let _ = std::fs::set_permissions(&dest, perms);
-                                }
-                            }
-                            log::info!("Installed sample script: {:?}", dest);
+                        match copy_script(&source, &dest) {
+                            Ok(()) => log::info!("Installed sample script: {:?}", dest),
+                            Err(e) => log::warn!("{}", e),
                         }
                     }
                 }
@@ -307,5 +275,39 @@ pub fn install_sample_scripts(app_handle: &tauri::AppHandle) -> Result<(), Strin
         log::debug!("No bundled sample scripts found at {:?}", samples_source);
     }
 
+    // Copy the ovim CLI binary to config dir (always overwrite to keep in sync)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let cli_source = exe_dir.join("ovim");
+            let cli_dest = config_dir.join("ovim");
+
+            if cli_source.exists() {
+                match std::fs::copy(&cli_source, &cli_dest) {
+                    Ok(_) => {
+                        // Make executable
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            if let Ok(metadata) = std::fs::metadata(&cli_dest) {
+                                let mut perms = metadata.permissions();
+                                perms.set_mode(0o755);
+                                let _ = std::fs::set_permissions(&cli_dest, perms);
+                            }
+                        }
+                        log::info!("Installed ovim CLI: {:?}", cli_dest);
+                    }
+                    Err(e) => log::warn!("Failed to copy ovim CLI: {}", e),
+                }
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Get the path to the ovim CLI in the config directory
+pub fn get_ovim_cli_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir()
+        .map(|p| p.join("ovim").join("ovim"))
+        .filter(|p| p.exists())
 }
