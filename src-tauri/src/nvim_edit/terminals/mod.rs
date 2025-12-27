@@ -14,7 +14,7 @@ mod terminal_app;
 mod wezterm;
 
 pub use alacritty::AlacrittySpawner;
-pub use custom::CustomSpawner;
+pub use custom::{CustomSpawner, LauncherResult, run_launcher_script};
 pub use ghostty::GhosttySpawner;
 pub use iterm::ITermSpawner;
 pub use kitty::KittySpawner;
@@ -112,7 +112,11 @@ pub trait TerminalSpawner {
 /// If `socket_path` is provided, the editor will be started with RPC enabled
 /// for live buffer sync.
 ///
-/// If `use_custom_script` is enabled, the launcher script handles everything (spawning, positioning).
+/// If `use_custom_script` is enabled, the launcher script runs first:
+/// - If the script spawns an editor (detected by PID), we use that
+/// - If the script exits with 0 and no editor spawned, fall through to normal terminal
+/// - If the script fails (non-zero exit), return error
+///
 /// The terminal selection is passed via OVIM_TERMINAL env var for the script to use if needed.
 pub fn spawn_terminal(
     settings: &NvimEditSettings,
@@ -123,9 +127,16 @@ pub fn spawn_terminal(
     let terminal_type = TerminalType::from_string(&settings.terminal);
     let file_path = temp_file.to_string_lossy();
 
-    // If custom script is enabled, let the script handle everything
+    // If custom script is enabled, run it first
     if settings.use_custom_script {
-        return CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None);
+        match run_launcher_script(settings, &file_path, geometry.as_ref(), socket_path) {
+            LauncherResult::Handled(info) => return Ok(info),
+            LauncherResult::Fallthrough => {
+                log::info!("Launcher script returned fallthrough, continuing with normal terminal spawn");
+                // Continue to normal terminal spawning below
+            }
+            LauncherResult::Error(e) => return Err(e),
+        }
     }
 
     match terminal_type {
@@ -173,38 +184,37 @@ pub fn default_launcher_script() -> &'static str {
     r#"#!/bin/bash
 # ovim terminal launcher script
 #
-# This script is used to customize the environment for the edit popup.
-# Any environment variables you export here (like PATH) will be inherited
-# by the terminal and editor.
-
-# Example: Add homebrew and local bins to PATH
-# export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
-
-# Available environment variables (when terminal=custom):
+# This script runs before the terminal/editor spawns. You can use it to:
+# 1. Set up environment variables (PATH, etc.) for the editor
+# 2. Optionally spawn the editor yourself (for custom terminals like tmux)
+#
+# Exit codes:
+#   exit 0  - If no editor spawned: fall through to normal terminal flow
+#           - If editor spawned: ovim will wait for that editor process
+#   exit 1+ - Error, abort the edit popup
+#
+# Available environment variables:
 #   OVIM_FILE     - temp file path to edit
 #   OVIM_EDITOR   - configured editor executable
+#   OVIM_SOCKET   - RPC socket path (for live sync)
+#   OVIM_TERMINAL - selected terminal type
 #   OVIM_WIDTH    - popup width in pixels
 #   OVIM_HEIGHT   - popup height in pixels
 #   OVIM_X        - popup x position
 #   OVIM_Y        - popup y position
-#   OVIM_SOCKET   - RPC socket path (for live sync)
-#   OVIM_TERMINAL - selected terminal type
 
-# For custom terminal (terminal=custom in settings), handle spawning yourself:
-if [ "$OVIM_TERMINAL" = "custom" ]; then
-    # Example: tmux popup
-    # tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
+# Example: Add homebrew and local bins to PATH
+# export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
-    # Example: run in current terminal (no popup)
-    # exec $OVIM_EDITOR --listen "$OVIM_SOCKET" "$OVIM_FILE"
+# Example: Spawn in tmux popup (blocks until editor closes)
+# tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
+# exit 0
 
-    echo "Error: terminal=custom requires implementing spawn logic in this script" >&2
-    echo "See the examples above for how to spawn your custom terminal." >&2
-    exit 1
-fi
+# Example: Focus existing tmux window and spawn there
+# tmux send-keys -t :editor "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE" Enter
+# exit 0
 
-# For built-in terminals (alacritty, kitty, etc.), just set environment here.
-# ovim handles spawning and positioning the terminal window.
+# Default: exit 0 to continue with normal terminal flow
 exit 0
 "#
 }
