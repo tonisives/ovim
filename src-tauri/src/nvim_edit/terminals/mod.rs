@@ -10,7 +10,6 @@ mod ghostty;
 mod iterm;
 mod kitty;
 pub mod process_utils;
-mod script_env;
 mod terminal_app;
 mod wezterm;
 
@@ -23,7 +22,6 @@ pub use terminal_app::TerminalAppSpawner;
 pub use wezterm::WezTermSpawner;
 
 use crate::config::{NvimEditSettings, Settings};
-use script_env::capture_script_environment;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Child;
@@ -113,9 +111,8 @@ pub trait TerminalSpawner {
 /// If `socket_path` is provided, the editor will be started with RPC enabled
 /// for live buffer sync.
 ///
-/// If `use_custom_script` is enabled:
-/// - For `terminal=custom`: the launcher script handles everything (spawning, positioning)
-/// - For built-in terminals: script is sourced for environment (PATH, etc.), app handles spawning
+/// If `use_custom_script` is enabled, the launcher script handles everything (spawning, positioning).
+/// The terminal selection is passed via OVIM_TERMINAL env var for the script to use if needed.
 pub fn spawn_terminal(
     settings: &NvimEditSettings,
     temp_file: &Path,
@@ -125,39 +122,19 @@ pub fn spawn_terminal(
     let terminal_type = TerminalType::from_string(&settings.terminal);
     let file_path = temp_file.to_string_lossy();
 
-    // If custom script is enabled with terminal=custom, let the script handle everything
-    if settings.use_custom_script && terminal_type == TerminalType::Custom {
+    // If custom script is enabled, let the script handle everything
+    if settings.use_custom_script {
         return CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None);
     }
 
-    // Capture custom environment from launcher script if enabled
-    let custom_env = if settings.use_custom_script {
-        match capture_script_environment() {
-            Ok(env) => {
-                if !env.is_empty() {
-                    log::info!("Captured {} environment variables from launcher script", env.len());
-                    Some(env)
-                } else {
-                    None
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to capture environment from launcher script: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
     match terminal_type {
-        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
-        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
-        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
-        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
-        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
-        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
-        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, custom_env.as_ref()),
+        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path, None),
+        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path, None),
+        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path, None),
+        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path, None),
+        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, None),
+        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None),
+        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, None),
     }
 }
 

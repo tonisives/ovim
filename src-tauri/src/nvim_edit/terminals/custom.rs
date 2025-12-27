@@ -1,7 +1,12 @@
 //! Custom terminal spawner - uses user-defined launcher script
 //!
-//! When terminal=custom, this spawner runs the user's launcher script which
-//! must handle all spawning logic (e.g., tmux popup, custom terminal, etc.)
+//! When use_custom_script is enabled, this spawner runs the user's launcher script
+//! which handles all spawning logic (e.g., tmux popup, custom terminal, etc.)
+//!
+//! The script is responsible for:
+//! - Focusing the correct window
+//! - Spawning the editor
+//! - Any custom window management
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -31,6 +36,7 @@ impl TerminalSpawner for CustomSpawner {
 
         let editor_path = settings.editor_path();
         let process_name = settings.editor_process_name();
+        let terminal = &settings.terminal;
 
         // Build environment variables
         let width = geometry.as_ref().map_or(800, |g| g.width);
@@ -46,13 +52,15 @@ impl TerminalSpawner for CustomSpawner {
             script_path
         );
         log::info!(
-            "Environment: OVIM_FILE={}, OVIM_EDITOR={}, OVIM_SOCKET={}",
+            "Environment: OVIM_FILE={}, OVIM_EDITOR={}, OVIM_SOCKET={}, OVIM_TERMINAL={}",
             file_path,
             editor_path,
-            socket
+            socket,
+            terminal
         );
 
         // Spawn the launcher script with environment variables
+        // The script handles focusing, spawning, and window management
         let child = Command::new(&script_path)
             .env("OVIM_FILE", file_path)
             .env("OVIM_EDITOR", &editor_path)
@@ -61,7 +69,7 @@ impl TerminalSpawner for CustomSpawner {
             .env("OVIM_X", x.to_string())
             .env("OVIM_Y", y.to_string())
             .env("OVIM_SOCKET", &socket)
-            .env("OVIM_TERMINAL", "custom")
+            .env("OVIM_TERMINAL", terminal)
             .spawn()
             .map_err(|e| format!("Failed to spawn launcher script: {}", e))?;
 
