@@ -131,6 +131,8 @@ jobs:
   sign-updater:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +140,9 @@ jobs:
           - arch: 'aarch64'
           - arch: 'x64'
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download unsigned tar.gz
         uses: actions/download-artifact@v4
         with:
@@ -154,18 +159,26 @@ jobs:
           npx --yes @tauri-apps/cli@latest signer sign "$TAR_GZ" --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
           ls -la updater/
 
-      - name: Upload signed updater artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: updater-${{ matrix.arch }}
-          path: |
-            updater/*.app.tar.gz
-            updater/*.app.tar.gz.sig
-          retention-days: 1
+      - name: Upload updater artifacts to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAR_GZ=$(find updater -name "*.app.tar.gz" | head -1)
+          SIG=$(find updater -name "*.app.tar.gz.sig" | head -1)
+
+          if [ -n "$TAR_GZ" ]; then
+            cp "$TAR_GZ" "ovim_${{ matrix.arch }}.app.tar.gz"
+            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz" --clobber --repo "${{ github.repository }}"
+          fi
+
+          if [ -n "$SIG" ]; then
+            cp "$SIG" "ovim_${{ matrix.arch }}.app.tar.gz.sig"
+            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz.sig" --clobber --repo "${{ github.repository }}"
+          fi
 
   # Sign and notarize the app
   sign:
-    needs: [build, sign-updater]
+    needs: build
     permissions:
       contents: write
     strategy:
@@ -271,33 +284,9 @@ jobs:
         run: |
           gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.dmg" --clobber --repo "${{ github.repository }}"
 
-      - name: Download updater artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: updater-${{ matrix.arch }}
-          path: updater
-
-      - name: Upload updater artifacts to release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Find and rename the tar.gz and sig files
-          TAR_GZ=$(find updater -name "*.app.tar.gz" | head -1)
-          SIG=$(find updater -name "*.app.tar.gz.sig" | head -1)
-
-          if [ -n "$TAR_GZ" ]; then
-            cp "$TAR_GZ" "ovim_${{ matrix.arch }}.app.tar.gz"
-            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz" --clobber --repo "${{ github.repository }}"
-          fi
-
-          if [ -n "$SIG" ]; then
-            cp "$SIG" "ovim_${{ matrix.arch }}.app.tar.gz.sig"
-            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz.sig" --clobber --repo "${{ github.repository }}"
-          fi
-
   # Generate latest.json for updater
   generate-latest-json:
-    needs: sign
+    needs: [sign, sign-updater]
     runs-on: ubuntu-latest
     permissions:
       contents: write
