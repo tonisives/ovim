@@ -25,6 +25,7 @@ use crate::config::{NvimEditSettings, Settings};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Child;
+use tauri::Manager;
 
 /// Window position and size for popup mode
 #[derive(Debug, Clone, Default)]
@@ -111,8 +112,10 @@ pub trait TerminalSpawner {
 /// If `socket_path` is provided, the editor will be started with RPC enabled
 /// for live buffer sync.
 ///
-/// If `use_custom_script` is enabled, the launcher script handles everything (spawning, positioning).
-/// The terminal selection is passed via OVIM_TERMINAL env var for the script to use if needed.
+/// If `use_custom_script` is enabled:
+/// - First runs the launcher script
+/// - If script exits with 0, continues with built-in terminal spawning
+/// - If script exits non-zero or blocks, assumes script handled spawning
 pub fn spawn_terminal(
     settings: &NvimEditSettings,
     temp_file: &Path,
@@ -122,9 +125,18 @@ pub fn spawn_terminal(
     let terminal_type = TerminalType::from_string(&settings.terminal);
     let file_path = temp_file.to_string_lossy();
 
-    // If custom script is enabled, let the script handle everything
+    // If custom script is enabled, run it first
     if settings.use_custom_script {
-        return CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None);
+        match custom::CustomSpawner::run_script(settings, &file_path, geometry.as_ref(), socket_path)? {
+            custom::CustomScriptResult::Handled(spawn_info) => {
+                // Script handled spawning
+                return Ok(spawn_info);
+            }
+            custom::CustomScriptResult::UseBuiltIn => {
+                // Script exited with 0, continue with built-in spawning below
+                log::info!("Custom script delegated to built-in terminal: {}", settings.terminal);
+            }
+        }
     }
 
     match terminal_type {
@@ -176,34 +188,15 @@ pub fn default_launcher_script() -> &'static str {
 # Any environment variables you export here (like PATH) will be inherited
 # by the terminal and editor.
 
-# Example: Add homebrew and local bins to PATH
-# export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
+# Add homebrew and local bins to PATH
+export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
-# Available environment variables (when terminal=custom):
-#   OVIM_FILE     - temp file path to edit
-#   OVIM_EDITOR   - configured editor executable
-#   OVIM_WIDTH    - popup width in pixels
-#   OVIM_HEIGHT   - popup height in pixels
-#   OVIM_X        - popup x position
-#   OVIM_Y        - popup y position
-#   OVIM_SOCKET   - RPC socket path (for live sync)
-#   OVIM_TERMINAL - selected terminal type
+# For custom terminal spawning, implement your logic here.
+# See sample scripts in ~/Library/Application Support/ovim/samples/
+# Example: tmux popup
+# tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
 
-# For custom terminal (terminal=custom in settings), handle spawning yourself:
-if [ "$OVIM_TERMINAL" = "custom" ]; then
-    # Example: tmux popup
-    # tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
-
-    # Example: run in current terminal (no popup)
-    # exec $OVIM_EDITOR --listen "$OVIM_SOCKET" "$OVIM_FILE"
-
-    echo "Error: terminal=custom requires implementing spawn logic in this script" >&2
-    echo "See the examples above for how to spawn your custom terminal." >&2
-    exit 1
-fi
-
-# For built-in terminals (alacritty, kitty, etc.), just set environment here.
-# ovim handles spawning and positioning the terminal window.
+# Exit 0 tells ovim to continue with built-in terminal spawning
 exit 0
 "#
 }
@@ -240,4 +233,61 @@ pub fn ensure_launcher_script() -> Result<std::path::PathBuf, String> {
     }
 
     Ok(script_path)
+}
+
+/// Copy sample scripts from app bundle to config directory
+/// Called on app startup to ensure users have access to sample scripts
+pub fn install_sample_scripts(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let config_dir = dirs::config_dir()
+        .ok_or("Could not determine config directory")?
+        .join("ovim")
+        .join("samples");
+
+    // Create samples directory if needed
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("Failed to create samples directory: {}", e))?;
+
+    // Get the resource path from the app bundle
+    let resource_path = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource directory: {}", e))?;
+
+    let samples_source = resource_path.join("scripts").join("samples");
+
+    // Copy each sample script if it doesn't exist
+    if samples_source.exists() {
+        if let Ok(entries) = std::fs::read_dir(&samples_source) {
+            for entry in entries.flatten() {
+                let source = entry.path();
+                if source.is_file() {
+                    let filename = source.file_name().unwrap();
+                    let dest = config_dir.join(filename);
+
+                    // Only copy if destination doesn't exist (don't overwrite user modifications)
+                    if !dest.exists() {
+                        if let Err(e) = std::fs::copy(&source, &dest) {
+                            log::warn!("Failed to copy sample script {:?}: {}", filename, e);
+                        } else {
+                            // Make executable
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::PermissionsExt;
+                                if let Ok(metadata) = std::fs::metadata(&dest) {
+                                    let mut perms = metadata.permissions();
+                                    perms.set_mode(0o755);
+                                    let _ = std::fs::set_permissions(&dest, perms);
+                                }
+                            }
+                            log::info!("Installed sample script: {:?}", dest);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        log::debug!("No bundled sample scripts found at {:?}", samples_source);
+    }
+
+    Ok(())
 }
