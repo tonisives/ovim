@@ -3121,7 +3121,7 @@ dependencies = [
 
 [[package]]
 name = "ovim-rust"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "anyhow",
  "async-trait",
