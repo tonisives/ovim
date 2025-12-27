@@ -112,10 +112,8 @@ pub trait TerminalSpawner {
 /// If `socket_path` is provided, the editor will be started with RPC enabled
 /// for live buffer sync.
 ///
-/// If `use_custom_script` is enabled:
-/// - First runs the launcher script
-/// - If script exits with 0, continues with built-in terminal spawning
-/// - If script exits non-zero or blocks, assumes script handled spawning
+/// If `use_custom_script` is enabled, the launcher script handles everything (spawning, positioning).
+/// The terminal selection is passed via OVIM_TERMINAL env var for the script to use if needed.
 pub fn spawn_terminal(
     settings: &NvimEditSettings,
     temp_file: &Path,
@@ -125,18 +123,9 @@ pub fn spawn_terminal(
     let terminal_type = TerminalType::from_string(&settings.terminal);
     let file_path = temp_file.to_string_lossy();
 
-    // If custom script is enabled, run it first
+    // If custom script is enabled, let the script handle everything
     if settings.use_custom_script {
-        match custom::CustomSpawner::run_script(settings, &file_path, geometry.as_ref(), socket_path)? {
-            custom::CustomScriptResult::Handled(spawn_info) => {
-                // Script handled spawning
-                return Ok(spawn_info);
-            }
-            custom::CustomScriptResult::UseBuiltIn => {
-                // Script exited with 0, continue with built-in spawning below
-                log::info!("Custom script delegated to built-in terminal: {}", settings.terminal);
-            }
-        }
+        return CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None);
     }
 
     match terminal_type {
@@ -188,15 +177,34 @@ pub fn default_launcher_script() -> &'static str {
 # Any environment variables you export here (like PATH) will be inherited
 # by the terminal and editor.
 
-# Add homebrew and local bins to PATH
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
+# Example: Add homebrew and local bins to PATH
+# export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
-# For custom terminal spawning, implement your logic here.
-# See sample scripts in ~/Library/Application Support/ovim/samples/
-# Example: tmux popup
-# tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
+# Available environment variables (when terminal=custom):
+#   OVIM_FILE     - temp file path to edit
+#   OVIM_EDITOR   - configured editor executable
+#   OVIM_WIDTH    - popup width in pixels
+#   OVIM_HEIGHT   - popup height in pixels
+#   OVIM_X        - popup x position
+#   OVIM_Y        - popup y position
+#   OVIM_SOCKET   - RPC socket path (for live sync)
+#   OVIM_TERMINAL - selected terminal type
 
-# Exit 0 tells ovim to continue with built-in terminal spawning
+# For custom terminal (terminal=custom in settings), handle spawning yourself:
+if [ "$OVIM_TERMINAL" = "custom" ]; then
+    # Example: tmux popup
+    # tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
+
+    # Example: run in current terminal (no popup)
+    # exec $OVIM_EDITOR --listen "$OVIM_SOCKET" "$OVIM_FILE"
+
+    echo "Error: terminal=custom requires implementing spawn logic in this script" >&2
+    echo "See the examples above for how to spawn your custom terminal." >&2
+    exit 1
+fi
+
+# For built-in terminals (alacritty, kitty, etc.), just set environment here.
+# ovim handles spawning and positioning the terminal window.
 exit 0
 "#
 }
