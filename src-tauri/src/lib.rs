@@ -25,7 +25,7 @@ use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
 use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture};
 use keyboard_handler::create_keyboard_callback;
-use nvim_edit::terminals::install_sample_scripts;
+use nvim_edit::terminals::install_scripts;
 use nvim_edit::EditSessionManager;
 use vim::{VimMode, VimState};
 use window::setup_indicator_window;
@@ -306,9 +306,9 @@ pub fn run() {
                 request_accessibility_permission();
             }
 
-            // Install sample scripts to config directory
-            if let Err(e) = install_sample_scripts(app.handle()) {
-                log::warn!("Failed to install sample scripts: {}", e);
+            // Install launcher and sample scripts to config directory
+            if let Err(e) = install_scripts(app.handle()) {
+                log::warn!("Failed to install scripts: {}", e);
             }
 
             let vim_state_for_ipc = Arc::clone(&vim_state);
