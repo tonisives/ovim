@@ -108,6 +108,8 @@ jobs:
         run: pnpm tauri build ${{ matrix.args }}
         env:
           CI: true
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload unsigned app bundle
         uses: actions/upload-artifact@v4
