@@ -26,6 +26,9 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Update version if release starts with 'v'
         shell: bash
         run: |
@@ -45,10 +48,13 @@ jobs:
             # Update Cargo.toml
             sed -i "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml
 
+            # Update Cargo.lock to reflect new version
+            cd src-tauri && cargo update --workspace && cd ..
+
             # Commit and push
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+            git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
             git commit -m "chore: bump version to $VERSION"
             git push
           fi
