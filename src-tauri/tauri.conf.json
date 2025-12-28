@@ -46,6 +46,20 @@
         "transparent": false,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "click-overlay",
+        "title": "",
+        "url": "/click-overlay.html",
+        "width": 1920,
+        "height": 1080,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "fullscreen": false
       }
     ],
     "security": {

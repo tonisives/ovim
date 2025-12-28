@@ -1,6 +1,7 @@
 // Allow unexpected_cfgs from the objc crate's macros which use cfg(feature = "cargo-clippy")
 #![allow(unexpected_cfgs)]
 
+mod click_mode;
 mod commands;
 mod config;
 pub mod ipc;
@@ -22,6 +23,7 @@ use tauri::{
     AppHandle, Emitter, Listener, Manager, State,
 };
 
+use click_mode::SharedClickModeManager;
 use commands::RecordedKey;
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
@@ -30,13 +32,19 @@ use keyboard_handler::create_keyboard_callback;
 use nvim_edit::terminals::install_scripts;
 use nvim_edit::EditSessionManager;
 use vim::{VimMode, VimState};
-use window::setup_indicator_window;
+use window::{setup_click_overlay_window, setup_indicator_window};
 
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::OnceLock;
 
 static LOG_FILE: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+/// Get a reference to the global app handle (for emitting events from keyboard handler)
+pub fn get_app_handle() -> Option<&'static AppHandle> {
+    APP_HANDLE.get()
+}
 
 fn init_file_logger() {
     let file = OpenOptions::new()
@@ -78,6 +86,7 @@ pub struct AppState {
     pub record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>>,
     #[allow(dead_code)]
     edit_session_manager: Arc<EditSessionManager>,
+    pub click_mode_manager: SharedClickModeManager,
 }
 
 fn handle_ipc_command(
@@ -196,6 +205,7 @@ pub fn run() {
     let record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>> =
         Arc::new(Mutex::new(None));
     let edit_session_manager = Arc::new(EditSessionManager::new());
+    let click_mode_manager = click_mode::create_manager();
 
     let keyboard_capture = KeyboardCapture::new();
     keyboard_capture.set_callback(create_keyboard_callback(
@@ -203,6 +213,7 @@ pub fn run() {
         Arc::clone(&settings),
         Arc::clone(&record_key_tx),
         Arc::clone(&edit_session_manager),
+        Arc::clone(&click_mode_manager),
     ));
 
     let app_state = AppState {
@@ -211,6 +222,7 @@ pub fn run() {
         keyboard_capture,
         record_key_tx,
         edit_session_manager,
+        click_mode_manager,
     };
 
     let mode_rx = Arc::new(Mutex::new(mode_rx));
@@ -251,10 +263,21 @@ pub fn run() {
             commands::check_for_update,
             commands::restart_app,
             commands::set_indicator_clickable,
+            // Click mode commands
+            commands::activate_click_mode,
+            commands::deactivate_click_mode,
+            commands::get_click_mode_state,
+            commands::click_mode_click_element,
+            commands::click_mode_right_click_element,
+            commands::click_mode_input_hint,
+            commands::get_click_mode_elements,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Store app handle for global access (used by keyboard handler for events)
+            let _ = APP_HANDLE.set(app.handle().clone());
 
             // Initialize launcher callback registry
             launcher_callback::init();
@@ -309,6 +332,13 @@ pub fn run() {
             if let Some(indicator_window) = app.get_webview_window("indicator") {
                 if let Err(e) = setup_indicator_window(&indicator_window) {
                     log::error!("Failed to setup indicator window: {}", e);
+                }
+            }
+
+            // Set up click overlay window (hidden initially)
+            if let Some(click_overlay) = app.get_webview_window("click-overlay") {
+                if let Err(e) = setup_click_overlay_window(&click_overlay) {
+                    log::error!("Failed to setup click overlay window: {}", e);
                 }
             }
 

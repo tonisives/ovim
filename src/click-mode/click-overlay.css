@@ -1,0 +1,53 @@
+/* Click overlay animations and styles */
+
+@keyframes hint-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes input-indicator-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+.click-overlay-container {
+  animation: overlay-fade-in 0.1s ease-out;
+}
+
+@keyframes overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.input-indicator {
+  animation: input-indicator-pop 0.15s ease-out;
+}
+
+.hint-label {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Ensure transparent window background */
+html, body, #root {
+  background: transparent !important;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}

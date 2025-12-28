@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use super::click_mode::ClickModeSettings;
 use super::colors::ModeColors;
 use super::nvim_edit::NvimEditSettings;
 
@@ -63,6 +64,9 @@ pub struct Settings {
     pub electron_apps: Vec<String>,
     /// Settings for Edit Popup feature
     pub nvim_edit: NvimEditSettings,
+    /// Settings for Click Mode feature
+    #[serde(default)]
+    pub click_mode: ClickModeSettings,
     /// Enable automatic update checking
     #[serde(default = "default_true")]
     pub auto_update_enabled: bool,
@@ -102,6 +106,7 @@ impl Default for Settings {
             bottom_widget: "None".to_string(),
             electron_apps: vec![],
             nvim_edit: NvimEditSettings::default(),
+            click_mode: ClickModeSettings::default(),
             auto_update_enabled: true,
         }
     }
