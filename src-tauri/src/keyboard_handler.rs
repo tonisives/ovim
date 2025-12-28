@@ -3,11 +3,16 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use tauri::{Emitter, Manager};
+
+use crate::click_mode::SharedClickModeManager;
 use crate::commands::{RecordedKey, RecordedModifiers};
 use crate::config::Settings;
 use crate::keyboard::{KeyCode, KeyEvent};
 use crate::nvim_edit::{self, EditSessionManager};
 use crate::vim::{ProcessResult, VimAction, VimMode, VimState};
+use crate::window::{position_click_overlay_fullscreen, setup_click_overlay_window};
+use crate::get_app_handle;
 
 #[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
@@ -71,8 +76,17 @@ pub fn create_keyboard_callback(
     settings: Arc<Mutex<Settings>>,
     record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>>,
     edit_session_manager: Arc<EditSessionManager>,
+    click_mode_manager: SharedClickModeManager,
 ) -> impl Fn(KeyEvent) -> Option<KeyEvent> + Send + 'static {
     move |event| {
+        // Check if click mode is active - if so, route keys there first
+        {
+            let click_manager = click_mode_manager.lock().unwrap();
+            if click_manager.is_active() {
+                drop(click_manager);
+                return handle_click_mode_key(event, Arc::clone(&click_mode_manager));
+            }
+        }
         // Check if we're recording a key (only on key down)
         if event.is_key_down {
             let mut record_tx = record_key_tx.lock().unwrap();
@@ -119,6 +133,72 @@ pub fn create_keyboard_callback(
                                 nvim_edit::trigger_nvim_edit(manager, nvim_settings_clone)
                             {
                                 log::error!("Failed to trigger nvim edit: {}", e);
+                            }
+                        });
+
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // Check if this is the configured click mode shortcut
+        if event.is_key_down {
+            let settings_guard = settings.lock().unwrap();
+            let click_settings = &settings_guard.click_mode;
+
+            if click_settings.enabled {
+                let click_key = KeyCode::from_name(&click_settings.shortcut_key);
+                let mods = &click_settings.shortcut_modifiers;
+
+                let modifiers_match = event.modifiers.shift == mods.shift
+                    && event.modifiers.control == mods.control
+                    && event.modifiers.option == mods.option
+                    && event.modifiers.command == mods.command;
+
+                if let Some(configured_key) = click_key {
+                    if event.keycode() == Some(configured_key) && modifiers_match {
+                        drop(settings_guard);
+
+                        // Activate click mode
+                        let manager = Arc::clone(&click_mode_manager);
+                        thread::spawn(move || {
+                            let mut mgr = manager.lock().unwrap();
+                            match mgr.activate() {
+                                Ok(elements) => {
+                                    log::info!(
+                                        "Click mode activated with {} elements",
+                                        elements.len()
+                                    );
+                                    // Show and position the overlay window, then send elements
+                                    if let Some(app) = get_app_handle() {
+                                        if let Some(overlay) = app.get_webview_window("click-overlay") {
+                                            // Position overlay to cover all screens
+                                            if let Err(e) = position_click_overlay_fullscreen(&overlay) {
+                                                log::warn!("Failed to position overlay: {}", e);
+                                            }
+                                            // Ensure window is set up correctly
+                                            if let Err(e) = setup_click_overlay_window(&overlay) {
+                                                log::warn!("Failed to setup overlay: {}", e);
+                                            }
+                                            // Show the overlay
+                                            if let Err(e) = overlay.show() {
+                                                log::error!("Failed to show click overlay: {}", e);
+                                            }
+                                            if let Err(e) = overlay.set_focus() {
+                                                log::warn!("Failed to focus click overlay: {}", e);
+                                            }
+                                        }
+                                        // Send elements to frontend
+                                        if let Err(e) = app.emit("click-mode-activated", &elements) {
+                                            log::error!("Failed to emit click-mode-activated: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to activate click mode: {}", e);
+                                    mgr.deactivate();
+                                }
                             }
                         });
 
@@ -216,4 +296,112 @@ pub fn create_keyboard_callback(
             }
         }
     }
+}
+
+/// Hide the click overlay window
+fn hide_click_overlay() {
+    if let Some(app) = get_app_handle() {
+        if let Some(overlay) = app.get_webview_window("click-overlay") {
+            if let Err(e) = overlay.hide() {
+                log::error!("Failed to hide click overlay: {}", e);
+            }
+        }
+        let _ = app.emit("click-mode-deactivated", ());
+    }
+}
+
+/// Handle keyboard input when click mode is active
+fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Option<KeyEvent> {
+    // Only handle key down events
+    if !event.is_key_down {
+        return None; // Suppress key up events in click mode
+    }
+
+    let keycode = match event.keycode() {
+        Some(kc) => kc,
+        None => return None,
+    };
+
+    // Handle Escape to cancel click mode
+    if keycode == KeyCode::Escape {
+        let mut mgr = manager.lock().unwrap();
+        mgr.deactivate();
+        log::info!("Click mode cancelled via Escape");
+        hide_click_overlay();
+        return None;
+    }
+
+    // Handle Delete (Backspace on macOS) to clear last input
+    if keycode == KeyCode::Delete {
+        let mut mgr = manager.lock().unwrap();
+        mgr.clear_last_input();
+        log::debug!("Click mode: cleared last input");
+        // Send updated filtered elements to frontend
+        let filtered = mgr.get_filtered_elements();
+        if let Some(app) = get_app_handle() {
+            let _ = app.emit("click-mode-filtered", &filtered);
+        }
+        return None;
+    }
+
+    // Handle Enter to confirm selection (in search mode)
+    if keycode == KeyCode::Return {
+        // TODO: Implement selection confirmation
+        return None;
+    }
+
+    // Handle letter/number keys for hint input
+    if let Some(c) = keycode.to_char() {
+        if c.is_alphanumeric() {
+            let mut mgr = manager.lock().unwrap();
+            let shift_held = event.modifiers.shift;
+
+            match mgr.handle_hint_input(c) {
+                Ok(Some(element)) => {
+                    // Exact match found - perform click (or right-click if Shift held)
+                    let click_type = if shift_held { "right-click" } else { "click" };
+                    log::info!(
+                        "Click mode: {} on element '{}' ({})",
+                        click_type,
+                        element.hint,
+                        element.title
+                    );
+                    let element_id = element.id;
+
+                    // Perform click or right-click based on Shift modifier
+                    let result = if shift_held {
+                        mgr.right_click_element(element_id)
+                    } else {
+                        mgr.click_element(element_id)
+                    };
+
+                    if let Err(e) = result {
+                        log::error!("Failed to {} element: {}", click_type, e);
+                    }
+
+                    // Deactivate click mode after successful click
+                    mgr.deactivate();
+                    hide_click_overlay();
+                }
+                Ok(None) => {
+                    // Partial match - continue waiting for more input
+                    log::debug!("Click mode: partial match, waiting for more input");
+                    // Send updated filtered elements to frontend
+                    let filtered = mgr.get_filtered_elements();
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-filtered", &filtered);
+                    }
+                }
+                Err(e) => {
+                    // No match - could beep or flash
+                    log::debug!("Click mode: no match - {}", e);
+                }
+            }
+
+            return None;
+        }
+    }
+
+    // Suppress all other keys while in click mode
+    None
 }

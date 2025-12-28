@@ -1,6 +1,6 @@
 //! "Edit with Neovim" feature - open any text field in nvim via a keyboard shortcut
 
-mod accessibility;
+pub mod accessibility;
 mod browser_scripting;
 mod rpc;
 mod session;
