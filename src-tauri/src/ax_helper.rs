@@ -61,8 +61,10 @@ const CLICKABLE_ROLES: &[&str] = &[
     "AXSlider",
 ];
 
-const MAX_DEPTH: usize = 10;
-const MAX_ELEMENTS: usize = 200;
+// Reduced depth and element limits to minimize crashes
+// Deep accessibility trees in apps like System Settings can throw ObjC exceptions
+const MAX_DEPTH: usize = 6;
+const MAX_ELEMENTS: usize = 150;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RawElement {
@@ -212,6 +214,12 @@ fn collect_elements(
     }
 
     let role = element.get_string_attribute("AXRole").unwrap_or_default();
+
+    // Skip menu hierarchies entirely - they often have unstable accessibility state
+    // and can throw ObjC exceptions when queried during transitions
+    if role == "AXMenu" || role == "AXMenuBar" {
+        return;
+    }
     let is_clickable = is_clickable_role(&role) || has_press_action(element);
 
     if is_clickable && is_visible(element) {
@@ -374,7 +382,8 @@ fn main() {
 
     // Delay to let UI stabilize - accessibility API can crash during transitions
     // Longer delay helps avoid crashes from UI animations/transitions
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    // System Settings especially needs more time to stabilize
+    std::thread::sleep(std::time::Duration::from_millis(500));
 
     match query_elements(pid) {
         Ok(elements) => {

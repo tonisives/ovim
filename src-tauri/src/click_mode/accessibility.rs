@@ -484,8 +484,9 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
 
     for attempt in 0..3 {
         if attempt > 0 {
+            // Longer delay between retries to let UI stabilize
             log::info!("Retry attempt {} after waiting...", attempt);
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
         let output = match std::process::Command::new(&helper_path)
