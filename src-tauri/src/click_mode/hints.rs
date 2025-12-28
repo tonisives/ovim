@@ -10,8 +10,8 @@ pub const DEFAULT_HINT_CHARS: &str = "asdfghjklqwertyuiopzxcvbnm";
 
 /// Generate hint labels for a given number of elements
 ///
-/// Uses single characters first (a, s, d, f...), then two-character
-/// combinations if needed (aa, as, ad...).
+/// All hints have the same length to avoid prefix conflicts.
+/// Uses shortest possible length that can generate enough unique hints.
 ///
 /// # Arguments
 /// * `count` - Number of hints needed
@@ -29,37 +29,45 @@ pub fn generate_hints(count: usize, chars: &str) -> Vec<String> {
         return (0..count).map(|i| i.to_string()).collect();
     }
 
+    let base = chars.len();
+
+    // Calculate minimum hint length needed
+    // With N chars, we can have N^1 single-char, N^2 two-char, etc.
+    let hint_length = if count <= base {
+        1
+    } else if count <= base * base {
+        2
+    } else {
+        3 // Should be enough for most cases (26^3 = 17576)
+    };
+
     let mut hints = Vec::with_capacity(count);
 
-    // Single character hints first
-    for c in &chars {
-        if hints.len() >= count {
-            break;
-        }
-        hints.push(c.to_string().to_uppercase());
-    }
-
-    // Two character hints if needed
-    if hints.len() < count {
-        'outer: for c1 in &chars {
-            for c2 in &chars {
-                if hints.len() >= count {
-                    break 'outer;
-                }
-                hints.push(format!("{}{}", c1, c2).to_uppercase());
+    match hint_length {
+        1 => {
+            for c in chars.iter().take(count) {
+                hints.push(c.to_string().to_uppercase());
             }
         }
-    }
-
-    // Three character hints if still needed (unlikely but possible)
-    if hints.len() < count {
-        'outer: for c1 in &chars {
-            for c2 in &chars {
-                for c3 in &chars {
+        2 => {
+            'outer: for c1 in &chars {
+                for c2 in &chars {
                     if hints.len() >= count {
                         break 'outer;
                     }
-                    hints.push(format!("{}{}{}", c1, c2, c3).to_uppercase());
+                    hints.push(format!("{}{}", c1, c2).to_uppercase());
+                }
+            }
+        }
+        _ => {
+            'outer: for c1 in &chars {
+                for c2 in &chars {
+                    for c3 in &chars {
+                        if hints.len() >= count {
+                            break 'outer;
+                        }
+                        hints.push(format!("{}{}{}", c1, c2, c3).to_uppercase());
+                    }
                 }
             }
         }
@@ -118,12 +126,37 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_two_char_hints() {
-        let hints = generate_hints(7, "ab");
-        assert_eq!(
-            hints,
-            vec!["A", "B", "AA", "AB", "BA", "BB", "AAA"]
-        );
+    fn test_generate_two_char_hints_when_needed() {
+        // With 2 chars (a, b), we can only have 2 single-char hints
+        // So 3+ elements need 2-char hints for ALL elements
+        let hints = generate_hints(3, "ab");
+        assert_eq!(hints, vec!["AA", "AB", "BA"]);
+    }
+
+    #[test]
+    fn test_generate_two_char_hints_exact_boundary() {
+        // Exactly at boundary - 2 elements with 2 chars = single char hints
+        let hints = generate_hints(2, "ab");
+        assert_eq!(hints, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_no_prefix_conflicts() {
+        // With 26 chars and 27 elements, all should be 2-char
+        let hints = generate_hints(27, DEFAULT_HINT_CHARS);
+        assert_eq!(hints.len(), 27);
+        // All hints should be 2 chars
+        assert!(hints.iter().all(|h| h.len() == 2));
+        // First hint should be "AA" (first char repeated)
+        assert_eq!(hints[0], "AA");
+        // No hint should be a prefix of another
+        for (i, h1) in hints.iter().enumerate() {
+            for (j, h2) in hints.iter().enumerate() {
+                if i != j {
+                    assert!(!h2.starts_with(h1), "{} is prefix of {}", h1, h2);
+                }
+            }
+        }
     }
 
     #[test]
@@ -152,13 +185,14 @@ mod tests {
 
     #[test]
     fn test_filter_by_prefix() {
+        // All hints same length now, so filtering works differently
         let hints = vec![
-            "A".to_string(),
+            "AA".to_string(),
             "AB".to_string(),
             "AC".to_string(),
-            "B".to_string(),
+            "BA".to_string(),
         ];
         let filtered = filter_by_prefix(&hints, "a");
-        assert_eq!(filtered, vec![0, 1, 2]);
+        assert_eq!(filtered, vec![0, 1, 2]); // AA, AB, AC match "a"
     }
 }

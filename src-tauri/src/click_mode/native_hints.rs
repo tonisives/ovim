@@ -267,26 +267,31 @@ unsafe fn create_nsstring(s: &str) -> *mut objc::runtime::Object {
 }
 
 /// Update hint visibility based on input filter
+/// Dispatches to main thread for thread safety
 pub fn filter_hints(input: &str, elements: &[ClickableElement]) {
-    let windows = match HINT_WINDOWS.try_lock() {
-        Ok(w) => w,
-        Err(_) => return,
-    };
     let input_upper = input.to_uppercase();
+    let hints: Vec<String> = elements.iter().map(|e| e.hint.clone()).collect();
 
-    unsafe {
-        for (i, SendableId(window)) in windows.iter().enumerate() {
-            if i < elements.len() && !window.is_null() {
-                let hint = &elements[i].hint;
-                let visible = input.is_empty() || hint.starts_with(&input_upper);
+    Queue::main().exec_async(move || {
+        let windows = match HINT_WINDOWS.try_lock() {
+            Ok(w) => w,
+            Err(_) => return,
+        };
 
-                if visible {
-                    let _: () = msg_send![*window, orderFrontRegardless];
-                } else {
-                    let _: () =
-                        msg_send![*window, orderOut: std::ptr::null::<objc::runtime::Object>()];
+        unsafe {
+            for (i, SendableId(window)) in windows.iter().enumerate() {
+                if i < hints.len() && !window.is_null() {
+                    let hint = &hints[i];
+                    let visible = input_upper.is_empty() || hint.starts_with(&input_upper);
+
+                    if visible {
+                        let _: () = msg_send![*window, orderFrontRegardless];
+                    } else {
+                        let _: () =
+                            msg_send![*window, orderOut: std::ptr::null::<objc::runtime::Object>()];
+                    }
                 }
             }
         }
-    }
+    });
 }
