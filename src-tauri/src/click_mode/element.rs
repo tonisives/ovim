@@ -27,13 +27,13 @@ pub struct ClickableElement {
     pub title: String,
 }
 
-/// Internal element with AX handle (not serializable)
+/// Internal element with optional AX handle (not serializable)
 #[derive(Debug)]
 pub struct ClickableElementInternal {
     /// The serializable element data
     pub element: ClickableElement,
-    /// AX element reference for performing actions
-    pub ax_element: AXElementHandle,
+    /// AX element reference for performing actions (optional - may be None for subprocess mode)
+    pub ax_element: Option<AXElementHandle>,
 }
 
 impl ClickableElementInternal {
@@ -46,7 +46,7 @@ impl ClickableElementInternal {
         height: f64,
         role: String,
         title: String,
-        ax_element: AXElementHandle,
+        ax_element: Option<AXElementHandle>,
     ) -> Self {
         Self {
             element: ClickableElement {
@@ -66,5 +66,13 @@ impl ClickableElementInternal {
     /// Get the serializable element for sending to frontend
     pub fn to_serializable(&self) -> ClickableElement {
         self.element.clone()
+    }
+
+    /// Get center position for clicking
+    pub fn center(&self) -> (f64, f64) {
+        (
+            self.element.x + self.element.width / 2.0,
+            self.element.y + self.element.height / 2.0,
+        )
     }
 }

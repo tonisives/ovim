@@ -360,9 +360,8 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
                     );
                     let element_id = element.id;
 
-                    // IMPORTANT: Get the AX element handle BEFORE deactivating
-                    // (deactivate clears the elements vector)
-                    let ax_element = mgr.get_ax_element(element_id);
+                    // Get element position BEFORE deactivating (deactivate clears elements)
+                    let position = mgr.get_element_position(element_id);
 
                     // Hide hints FIRST so they don't block the click target
                     hide_click_overlay();
@@ -375,15 +374,15 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
 
                     // Perform click on a separate thread with a small delay
                     // to ensure hint windows have been removed
-                    if let Some(ax_handle) = ax_element {
+                    if let Some((x, y)) = position {
                         thread::spawn(move || {
                             // Wait for hint windows to close
                             thread::sleep(std::time::Duration::from_millis(50));
 
                             let result = if shift_held {
-                                crate::click_mode::accessibility::perform_right_click(&ax_handle)
+                                crate::click_mode::accessibility::perform_right_click_at_position(x, y)
                             } else {
-                                crate::click_mode::accessibility::perform_click(&ax_handle)
+                                crate::click_mode::accessibility::perform_click_at_position(x, y)
                             };
 
                             if let Err(e) = result {
@@ -391,7 +390,7 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
                             }
                         });
                     } else {
-                        log::error!("Could not get AX element handle for element {}", element_id);
+                        log::error!("Could not get position for element {}", element_id);
                     }
                 }
                 Ok(None) => {
