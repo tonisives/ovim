@@ -181,7 +181,6 @@ sequenceDiagram
     participant Editor as Editor (nvim)
 
     App->>Script: spawn with env vars
-    Script->>Script: Check environment (tmux available?)
 
     alt Script handles spawning
         Script->>CLI: ovim launcher-handled --session ID
@@ -230,9 +229,9 @@ sequenceDiagram
 
 ## File Locations
 
-| File                                  | Purpose                          |
-| ------------------------------------- | -------------------------------- |
-| `~/.config/ovim/terminal-launcher.sh` | Your launcher script             |
-| `~/.config/ovim/samples/`             | Sample scripts for reference     |
-| `~/.cache/ovim.sock`                  | IPC socket for CLI communication |
-| `~/.cache/ovim/nvim_*.sock`           | Per-session RPC sockets          |
+| File                                                      | Purpose                          |
+| --------------------------------------------------------- | -------------------------------- |
+| `~/Library/Application Support/ovim/terminal-launcher.sh` | Your launcher script             |
+| `~/Library/Application Support/ovim/samples/`             | Sample scripts for reference     |
+| `~/Library/Caches/ovim.sock`                              | IPC socket for CLI communication |
+| `~/Library/Caches/ovim/nvim_*.sock`                       | Per-session RPC sockets          |

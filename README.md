@@ -7,7 +7,7 @@ macOS system-wide Vim keybindings and modal editor.
 | In-Place Mode                                                                                                                                          | Edit Popup                                                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Simulates Vim motions by intercepting keystrokes and injecting native macOS key events. Works instantly in any app. Supports a subset of Vim commands. | Opens your actual Neovim installation in a terminal window with your full config and plugins. Edit complex text, then paste back with `:wq`. |
-| ![c-u-d](docs/images/visual-C-u-d.gif)                                     | ![Edit Popup](docs/images/edit-popup.gif)                                                                                                    |
+| ![c-u-d](docs/images/visual-C-u-d.gif)                                                                                                                 | ![Edit Popup](docs/images/edit-popup.gif)                                                                                                    |
 
 ## Features
 
@@ -85,23 +85,16 @@ Opens your actual Neovim installation in a terminal window. Your full config (`~
 
 **Supported terminals:** Alacritty, Kitty, WezTerm, iTerm2, Terminal.app
 
-## CLI Tool
+## More features
 
-ovim includes a CLI for controlling modes from scripts or tools like Karabiner-Elements:
+- Custom launch script - use your own editor. [docs/launcher-script.md](docs/launcher-script.md)
+- CLI - toggle modes via CLI. [docs/cli.md](docs/cli.md)
 
-```bash
-ovim toggle   # Toggle between insert/normal mode
-ovim normal   # Enter normal mode
-ovim insert   # Enter insert mode
-ovim mode     # Get current mode
-```
-
-See [docs/cli.md](docs/cli.md) for full CLI documentation and Karabiner integration examples.
-
+Check out [full docs](docs/README.md)
 
 ## Issues
-Please check logs at `/tmp/ovim-rust.log` and submit an [issue](https://github.com/tonisives/ovim/issues)
 
+Please check logs at `/tmp/ovim-rust.log` and submit an [issue](https://github.com/tonisives/ovim/issues)
 
 ## License
 
