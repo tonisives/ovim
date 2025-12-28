@@ -70,7 +70,6 @@ Open the editor in a tmux popup window:
 
 ```bash
 #!/bin/bash
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
 # Check if tmux is available and has a session
 if command -v tmux &>/dev/null && tmux list-sessions &>/dev/null 2>&1; then
@@ -97,7 +96,6 @@ Open in a new tmux pane instead of popup:
 
 ```bash
 #!/bin/bash
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
 if command -v tmux &>/dev/null && tmux list-sessions &>/dev/null 2>&1; then
     osascript -e 'tell application "Alacritty" to activate'
@@ -129,7 +127,6 @@ Use neovim-remote to open in an existing neovim instance:
 
 ```bash
 #!/bin/bash
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
 # Check for existing nvim with a server
 NVIM_SOCKET="/tmp/nvim-main.sock"
@@ -158,27 +155,12 @@ ovim launcher-fallthrough --session "$OVIM_SESSION_ID"
 exit 0
 ```
 
-### Environment Setup Only
-
-Just set up PATH without handling spawning:
-
-```bash
-#!/bin/bash
-# Add homebrew and custom bins to PATH
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
-
-# Always fall through - let ovim handle spawning
-ovim launcher-fallthrough --session "$OVIM_SESSION_ID"
-exit 0
-```
-
 ### Conditional Terminal Selection
 
 Choose different terminals based on context:
 
 ```bash
 #!/bin/bash
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 
 # Check which apps are running
 if pgrep -x "Alacritty" >/dev/null; then
@@ -231,7 +213,6 @@ sequenceDiagram
 
 ## Tips
 
-- **PATH Setup**: Always add `/opt/homebrew/bin` to PATH at the start of your script for macOS Homebrew binaries
 - **Signal Early**: Call `ovim launcher-handled` before spawning long-running processes
 - **Include PID**: Pass `--pid` when possible for better process tracking
 - **Block Until Done**: Your script should wait for the editor to close before exiting
@@ -245,7 +226,6 @@ sequenceDiagram
 
 ### Editor doesn't open
 - Check the script logs: `tail -f ~/Library/Logs/ovim/ovim.log`
-- Verify PATH includes your editor: `which nvim`
 
 ### Live sync not working
 - Ensure you're passing `--listen $OVIM_SOCKET` to the editor
@@ -253,7 +233,6 @@ sequenceDiagram
 
 ### Fallthrough not working
 - Ensure you're calling `ovim launcher-fallthrough` with the correct session ID
-- Check that the ovim CLI is accessible (add to PATH or use full path)
 
 ## File Locations
 

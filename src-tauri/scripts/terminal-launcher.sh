@@ -21,9 +21,6 @@
 #   OVIM_X          - popup x position
 #   OVIM_Y          - popup y position
 
-# Example: Add homebrew and local bins to PATH
-# export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
-
 # Example: Spawn in tmux popup with live sync
 # if command -v tmux &>/dev/null && tmux list-sessions &>/dev/null 2>&1; then
 #     # Focus the terminal running tmux
