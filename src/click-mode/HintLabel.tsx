@@ -1,11 +1,17 @@
 import { CSSProperties, useMemo } from "react"
 import { ClickableElement, ClickModeStyleSettings } from "./types"
 
+interface WindowOffset {
+  x: number
+  y: number
+}
+
 interface HintLabelProps {
   element: ClickableElement
   inputBuffer: string
   styleSettings: ClickModeStyleSettings
   animationDelay?: number
+  windowOffset: WindowOffset
 }
 
 /** Individual hint label that appears on a clickable element */
@@ -14,6 +20,7 @@ export function HintLabel({
   inputBuffer,
   styleSettings,
   animationDelay = 0,
+  windowOffset,
 }: HintLabelProps) {
   const { hint, x, y } = element
   const inputUpper = inputBuffer.toUpperCase()
@@ -28,9 +35,10 @@ export function HintLabel({
     return null
   }
 
-  // Calculate optimal label position (top-left of element, offset slightly)
-  const labelX = x + 2
-  const labelY = y + 2
+  // Convert screen coordinates to window-relative coordinates
+  // Element x,y are in screen coordinates, we need to subtract the window's position
+  const labelX = x - windowOffset.x + 2
+  const labelY = y - windowOffset.y + 2
 
   const labelStyle: CSSProperties = useMemo(
     () => ({

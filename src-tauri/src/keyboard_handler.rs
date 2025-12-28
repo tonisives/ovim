@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 use crate::click_mode::SharedClickModeManager;
 use crate::commands::{RecordedKey, RecordedModifiers};
@@ -11,7 +11,7 @@ use crate::config::Settings;
 use crate::keyboard::{KeyCode, KeyEvent};
 use crate::nvim_edit::{self, EditSessionManager};
 use crate::vim::{ProcessResult, VimAction, VimMode, VimState};
-use crate::window::{position_click_overlay_fullscreen, setup_click_overlay_window};
+use crate::click_mode::native_hints::{self, HintStyle};
 use crate::get_app_handle;
 
 #[cfg(target_os = "macos")]
@@ -160,43 +160,41 @@ pub fn create_keyboard_callback(
                     if event.keycode() == Some(configured_key) && modifiers_match {
                         drop(settings_guard);
 
-                        // Activate click mode
+                        // Set click mode to activating state IMMEDIATELY so subsequent
+                        // key presses are captured while we query elements
+                        {
+                            let mut mgr = click_mode_manager.lock().unwrap();
+                            mgr.set_activating();
+                        }
+
+                        // Activate click mode on a separate thread to avoid panics
+                        // in the CGEventTap callback
                         let manager = Arc::clone(&click_mode_manager);
                         thread::spawn(move || {
-                            let mut mgr = manager.lock().unwrap();
-                            match mgr.activate() {
-                                Ok(elements) => {
-                                    log::info!(
-                                        "Click mode activated with {} elements",
-                                        elements.len()
-                                    );
-                                    // Show and position the overlay window, then send elements
-                                    if let Some(app) = get_app_handle() {
-                                        if let Some(overlay) = app.get_webview_window("click-overlay") {
-                                            // Position overlay to cover all screens
-                                            if let Err(e) = position_click_overlay_fullscreen(&overlay) {
-                                                log::warn!("Failed to position overlay: {}", e);
-                                            }
-                                            // Ensure window is set up correctly
-                                            if let Err(e) = setup_click_overlay_window(&overlay) {
-                                                log::warn!("Failed to setup overlay: {}", e);
-                                            }
-                                            // Show the overlay
-                                            if let Err(e) = overlay.show() {
-                                                log::error!("Failed to show click overlay: {}", e);
-                                            }
-                                            if let Err(e) = overlay.set_focus() {
-                                                log::warn!("Failed to focus click overlay: {}", e);
-                                            }
-                                        }
-                                        // Send elements to frontend
-                                        if let Err(e) = app.emit("click-mode-activated", &elements) {
-                                            log::error!("Failed to emit click-mode-activated: {}", e);
-                                        }
+                            // Use catch_unwind to handle any panics safely
+                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let mut mgr = manager.lock().unwrap();
+                                match mgr.activate() {
+                                    Ok(elements) => {
+                                        log::info!(
+                                            "Click mode activated with {} elements",
+                                            elements.len()
+                                        );
+                                        // Show native hint windows (dispatched to main thread)
+                                        let style = HintStyle::default();
+                                        native_hints::show_hints(&elements, &style);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to activate click mode: {}", e);
+                                        mgr.deactivate();
                                     }
                                 }
-                                Err(e) => {
-                                    log::error!("Failed to activate click mode: {}", e);
+                            }));
+
+                            if let Err(e) = result {
+                                log::error!("Panic in click mode activation: {:?}", e);
+                                // Deactivate on panic
+                                if let Ok(mut mgr) = manager.lock() {
                                     mgr.deactivate();
                                 }
                             }
@@ -298,16 +296,10 @@ pub fn create_keyboard_callback(
     }
 }
 
-/// Hide the click overlay window
+/// Hide the click overlay / native hints
 fn hide_click_overlay() {
-    if let Some(app) = get_app_handle() {
-        if let Some(overlay) = app.get_webview_window("click-overlay") {
-            if let Err(e) = overlay.hide() {
-                log::error!("Failed to hide click overlay: {}", e);
-            }
-        }
-        let _ = app.emit("click-mode-deactivated", ());
-    }
+    // Hide native hint windows
+    native_hints::hide_hints();
 }
 
 /// Handle keyboard input when click mode is active
@@ -368,20 +360,39 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
                     );
                     let element_id = element.id;
 
-                    // Perform click or right-click based on Shift modifier
-                    let result = if shift_held {
-                        mgr.right_click_element(element_id)
-                    } else {
-                        mgr.click_element(element_id)
-                    };
+                    // IMPORTANT: Get the AX element handle BEFORE deactivating
+                    // (deactivate clears the elements vector)
+                    let ax_element = mgr.get_ax_element(element_id);
 
-                    if let Err(e) = result {
-                        log::error!("Failed to {} element: {}", click_type, e);
-                    }
-
-                    // Deactivate click mode after successful click
-                    mgr.deactivate();
+                    // Hide hints FIRST so they don't block the click target
                     hide_click_overlay();
+
+                    // Deactivate click mode state (clears elements)
+                    mgr.deactivate();
+
+                    // Drop the manager lock before spawning the click thread
+                    drop(mgr);
+
+                    // Perform click on a separate thread with a small delay
+                    // to ensure hint windows have been removed
+                    if let Some(ax_handle) = ax_element {
+                        thread::spawn(move || {
+                            // Wait for hint windows to close
+                            thread::sleep(std::time::Duration::from_millis(50));
+
+                            let result = if shift_held {
+                                crate::click_mode::accessibility::perform_right_click(&ax_handle)
+                            } else {
+                                crate::click_mode::accessibility::perform_click(&ax_handle)
+                            };
+
+                            if let Err(e) = result {
+                                log::error!("Failed to {} element: {}", click_type, e);
+                            }
+                        });
+                    } else {
+                        log::error!("Could not get AX element handle for element {}", element_id);
+                    }
                 }
                 Ok(None) => {
                     // Partial match - continue waiting for more input

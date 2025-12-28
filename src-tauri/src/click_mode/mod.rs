@@ -9,6 +9,7 @@
 pub mod accessibility;
 pub mod element;
 pub mod hints;
+pub mod native_hints;
 
 use std::sync::{Arc, Mutex};
 
@@ -98,6 +99,16 @@ impl ClickModeManager {
         self.state.is_active()
     }
 
+    /// Set click mode to "activating" state immediately
+    /// This ensures keys are captured while elements are being queried
+    pub fn set_activating(&mut self) {
+        log::info!("Click mode: set to activating state");
+        self.state = ClickModeState::ShowingHints {
+            input_buffer: String::new(),
+            element_count: 0,
+        };
+    }
+
     /// Activate click mode and query elements
     ///
     /// Returns the elements for display in the overlay
@@ -109,6 +120,7 @@ impl ClickModeManager {
 
         if internal_elements.is_empty() {
             log::warn!("No clickable elements found");
+            self.state = ClickModeState::Inactive;
             return Err("No clickable elements found".to_string());
         }
 
@@ -189,6 +201,15 @@ impl ClickModeManager {
         };
 
         Ok(None)
+    }
+
+    /// Get a clone of the AXElementHandle for an element by ID
+    /// This is useful when you need to perform actions after deactivating click mode
+    pub fn get_ax_element(&self, element_id: usize) -> Option<crate::nvim_edit::accessibility::AXElementHandle> {
+        self.elements
+            .iter()
+            .find(|e| e.element.id == element_id)
+            .map(|e| e.ax_element.clone())
     }
 
     /// Perform click on element by ID

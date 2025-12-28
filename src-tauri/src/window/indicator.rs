@@ -82,6 +82,7 @@ pub fn setup_click_overlay_window(window: &WebviewWindow) -> Result<(), String> 
 
 /// Position the click overlay to cover all screens
 #[allow(unused_variables)]
+#[allow(dead_code)]
 pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
