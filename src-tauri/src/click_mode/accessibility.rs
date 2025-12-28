@@ -60,6 +60,8 @@ const CLICKABLE_ROLES: &[&str] = &[
     "AXDisclosureTriangle",
     "AXIncrementor",
     "AXSlider",
+    // Container items often found in lists (e.g., Bluetooth devices in System Settings)
+    "AXGroup",
 ];
 
 /// Maximum depth to traverse the UI hierarchy

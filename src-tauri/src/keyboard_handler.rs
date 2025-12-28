@@ -328,6 +328,10 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
         let mut mgr = manager.lock().unwrap();
         mgr.clear_last_input();
         log::debug!("Click mode: cleared last input");
+        // Update native hint filtering
+        let all_elements = mgr.get_all_elements();
+        let current_input = mgr.get_current_input();
+        native_hints::filter_hints(&current_input, &all_elements);
         // Send updated filtered elements to frontend
         let filtered = mgr.get_filtered_elements();
         if let Some(app) = get_app_handle() {
@@ -396,6 +400,10 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
                 Ok(None) => {
                     // Partial match - continue waiting for more input
                     log::debug!("Click mode: partial match, waiting for more input");
+                    // Filter native hint windows to hide non-matching hints
+                    let all_elements = mgr.get_all_elements();
+                    let current_input = mgr.get_current_input();
+                    native_hints::filter_hints(&current_input, &all_elements);
                     // Send updated filtered elements to frontend
                     let filtered = mgr.get_filtered_elements();
                     if let Some(app) = get_app_handle() {

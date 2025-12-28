@@ -319,6 +319,20 @@ impl ClickModeManager {
             }
         }
     }
+
+    /// Get all elements (for filtering native hints)
+    pub fn get_all_elements(&self) -> Vec<ClickableElement> {
+        self.elements.iter().map(|e| e.to_serializable()).collect()
+    }
+
+    /// Get current input buffer
+    pub fn get_current_input(&self) -> String {
+        match &self.state {
+            ClickModeState::ShowingHints { input_buffer, .. } => input_buffer.clone(),
+            ClickModeState::Searching { query, .. } => query.clone(),
+            ClickModeState::Inactive => String::new(),
+        }
+    }
 }
 
 impl Default for ClickModeManager {

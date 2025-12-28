@@ -59,12 +59,38 @@ const CLICKABLE_ROLES: &[&str] = &[
     "AXDisclosureTriangle",
     "AXIncrementor",
     "AXSlider",
+    // Container items often found in lists (e.g., Bluetooth devices in System Settings)
+    "AXGroup",
 ];
 
 // Reduced depth and element limits to minimize crashes
 // Deep accessibility trees in apps like System Settings can throw ObjC exceptions
 const MAX_DEPTH: usize = 6;
 const MAX_ELEMENTS: usize = 150;
+
+/// Window bounds for filtering elements
+#[derive(Debug, Clone, Copy)]
+struct WindowBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+impl WindowBounds {
+    fn contains(&self, elem_x: f64, elem_y: f64, elem_w: f64, elem_h: f64) -> bool {
+        // Check if element is at least partially within window bounds
+        // Element must have some overlap with the window
+        let elem_right = elem_x + elem_w;
+        let elem_bottom = elem_y + elem_h;
+        let win_right = self.x + self.width;
+        let win_bottom = self.y + self.height;
+
+        // Element is visible if it overlaps with window
+        elem_x < win_right && elem_right > self.x &&
+        elem_y < win_bottom && elem_bottom > self.y
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RawElement {
@@ -208,6 +234,7 @@ fn collect_elements(
     element: &CFHandle,
     elements: &mut Vec<RawElement>,
     depth: usize,
+    window_bounds: Option<WindowBounds>,
 ) {
     if depth > MAX_DEPTH || elements.len() >= MAX_ELEMENTS {
         return;
@@ -227,22 +254,47 @@ fn collect_elements(
             element.get_attribute("AXPosition").and_then(|p| p.extract_point()),
             element.get_attribute("AXSize").and_then(|s| s.extract_size()),
         ) {
-            let title = element
-                .get_string_attribute("AXTitle")
-                .or_else(|| element.get_string_attribute("AXDescription"))
-                .or_else(|| element.get_string_attribute("AXValue"))
-                .or_else(|| element.get_string_attribute("AXLabel"))
-                .or_else(|| element.get_string_attribute("AXHelp"))
-                .unwrap_or_default();
+            // Filter out elements outside window bounds
+            if let Some(bounds) = window_bounds {
+                if !bounds.contains(pos.0, pos.1, size.0, size.1) {
+                    // Element is outside window - skip it but still recurse into children
+                    // (children might be visible even if parent container extends outside)
+                } else {
+                    let title = element
+                        .get_string_attribute("AXTitle")
+                        .or_else(|| element.get_string_attribute("AXDescription"))
+                        .or_else(|| element.get_string_attribute("AXValue"))
+                        .or_else(|| element.get_string_attribute("AXLabel"))
+                        .or_else(|| element.get_string_attribute("AXHelp"))
+                        .unwrap_or_default();
 
-            elements.push(RawElement {
-                x: pos.0,
-                y: pos.1,
-                width: size.0,
-                height: size.1,
-                role,
-                title,
-            });
+                    elements.push(RawElement {
+                        x: pos.0,
+                        y: pos.1,
+                        width: size.0,
+                        height: size.1,
+                        role,
+                        title,
+                    });
+                }
+            } else {
+                let title = element
+                    .get_string_attribute("AXTitle")
+                    .or_else(|| element.get_string_attribute("AXDescription"))
+                    .or_else(|| element.get_string_attribute("AXValue"))
+                    .or_else(|| element.get_string_attribute("AXLabel"))
+                    .or_else(|| element.get_string_attribute("AXHelp"))
+                    .unwrap_or_default();
+
+                elements.push(RawElement {
+                    x: pos.0,
+                    y: pos.1,
+                    width: size.0,
+                    height: size.1,
+                    role,
+                    title,
+                });
+            }
         }
     }
 
@@ -281,7 +333,7 @@ fn collect_elements(
 
         unsafe { core_foundation::base::CFRetain(child_ptr) };
         let child = CFHandle(child_ptr);
-        collect_elements(&child, elements, depth + 1);
+        collect_elements(&child, elements, depth + 1, window_bounds);
     }
 }
 
@@ -305,6 +357,19 @@ fn get_frontmost_app_pid() -> Option<i32> {
     }
 }
 
+/// Get window bounds from a window element
+fn get_window_bounds(window: &CFHandle) -> Option<WindowBounds> {
+    let pos = window.get_attribute("AXPosition").and_then(|p| p.extract_point())?;
+    let size = window.get_attribute("AXSize").and_then(|s| s.extract_size())?;
+
+    Some(WindowBounds {
+        x: pos.0,
+        y: pos.1,
+        width: size.0,
+        height: size.1,
+    })
+}
+
 fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
     let app_element = unsafe {
         let ptr = AXUIElementCreateApplication(pid);
@@ -321,7 +386,7 @@ fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
     let mut elements: Vec<RawElement> = Vec::new();
 
     // Try to get focused window first, fall back to app element
-    let start_element = app_element
+    let (start_element, window_bounds) = app_element
         .get_attribute("AXFocusedWindow")
         .and_then(|w| {
             let ptr = w.0;
@@ -333,8 +398,10 @@ fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
             if role_test.is_none() {
                 return None;
             }
+            // Get window bounds for filtering
+            let bounds = get_window_bounds(&w);
             std::mem::forget(w);
-            Some(CFHandle(unsafe { core_foundation::base::CFRetain(ptr) }))
+            Some((CFHandle(unsafe { core_foundation::base::CFRetain(ptr) }), bounds))
         })
         .or_else(|| {
             // Try AXWindows array as fallback
@@ -346,17 +413,19 @@ fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
                     };
                     if !first.is_null() {
                         unsafe { core_foundation::base::CFRetain(first) };
-                        return Some(CFHandle(first));
+                        let handle = CFHandle(first);
+                        let bounds = get_window_bounds(&handle);
+                        return Some((handle, bounds));
                     }
                 }
                 None
             })
         })
         .unwrap_or_else(|| {
-            CFHandle(unsafe { core_foundation::base::CFRetain(app_element.0) })
+            (CFHandle(unsafe { core_foundation::base::CFRetain(app_element.0) }), None)
         });
 
-    collect_elements(&start_element, &mut elements, 0);
+    collect_elements(&start_element, &mut elements, 0, window_bounds);
 
     Ok(elements)
 }
