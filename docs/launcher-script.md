@@ -36,17 +36,17 @@ flowchart TD
 
 Your script receives these environment variables:
 
-| Variable | Description |
-|----------|-------------|
-| `OVIM_FILE` | Path to the temp file to edit |
-| `OVIM_EDITOR` | Configured editor executable (e.g., `nvim`) |
-| `OVIM_SOCKET` | RPC socket path for live sync |
-| `OVIM_SESSION_ID` | Unique session ID for IPC callbacks |
-| `OVIM_TERMINAL` | Selected terminal type |
-| `OVIM_WIDTH` | Popup width in pixels |
-| `OVIM_HEIGHT` | Popup height in pixels |
-| `OVIM_X` | Popup X position |
-| `OVIM_Y` | Popup Y position |
+| Variable          | Description                                 |
+| ----------------- | ------------------------------------------- |
+| `OVIM_FILE`       | Path to the temp file to edit               |
+| `OVIM_EDITOR`     | Configured editor executable (e.g., `nvim`) |
+| `OVIM_SOCKET`     | RPC socket path for live sync               |
+| `OVIM_SESSION_ID` | Unique session ID for IPC callbacks         |
+| `OVIM_TERMINAL`   | Selected terminal type                      |
+| `OVIM_WIDTH`      | Popup width in pixels                       |
+| `OVIM_HEIGHT`     | Popup height in pixels                      |
+| `OVIM_X`          | Popup X position                            |
+| `OVIM_Y`          | Popup Y position                            |
 
 ## CLI Commands
 
@@ -82,12 +82,10 @@ if command -v tmux &>/dev/null && tmux list-sessions &>/dev/null 2>&1; then
     # Open editor in tmux popup (blocks until closed)
     tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
 
-    exit 0
 fi
 
 # No tmux - fall through to normal terminal
 ovim launcher-fallthrough --session "$OVIM_SESSION_ID"
-exit 0
 ```
 
 ### Tmux Split Pane
@@ -114,11 +112,9 @@ if command -v tmux &>/dev/null && tmux list-sessions &>/dev/null 2>&1; then
         sleep 0.5
     done
 
-    exit 0
 fi
 
 ovim launcher-fallthrough --session "$OVIM_SESSION_ID"
-exit 0
 ```
 
 ### Send to Existing Neovim (via nvr)
@@ -148,11 +144,9 @@ if [ -S "$NVIM_SOCKET" ]; then
         sleep 0.5
     done
 
-    exit 0
 fi
 
 ovim launcher-fallthrough --session "$OVIM_SESSION_ID"
-exit 0
 ```
 
 ### Conditional Terminal Selection
@@ -169,13 +163,11 @@ if pgrep -x "Alacritty" >/dev/null; then
         osascript -e 'tell application "Alacritty" to activate'
         ovim launcher-handled --session "$OVIM_SESSION_ID"
         tmux popup -E -w 80% -h 80% "$OVIM_EDITOR --listen $OVIM_SOCKET $OVIM_FILE"
-        exit 0
     fi
 fi
 
 # Fall through to whatever terminal is configured
 ovim launcher-fallthrough --session "$OVIM_SESSION_ID"
-exit 0
 ```
 
 ## Architecture
@@ -200,12 +192,10 @@ sequenceDiagram
         Editor-->>App: Buffer changes
         Editor->>Editor: User edits & saves
         Editor->>Script: Exit
-        Script->>Script: Exit 0
     else Script falls through
         Script->>CLI: ovim launcher-fallthrough --session ID
         CLI->>IPC: LauncherFallthrough { session_id }
         IPC->>App: Callback received
-        Script->>Script: Exit 0
         App->>App: Spawn configured terminal
         App->>Editor: Editor in terminal
     end
@@ -221,24 +211,28 @@ sequenceDiagram
 ## Troubleshooting
 
 ### Script not running
+
 - Check that "Use custom launcher script" is enabled in settings
 - Verify script is executable: `chmod +x ~/.config/ovim/terminal-launcher.sh`
 
 ### Editor doesn't open
+
 - Check the script logs: `tail -f ~/Library/Logs/ovim/ovim.log`
 
 ### Live sync not working
+
 - Ensure you're passing `--listen $OVIM_SOCKET` to the editor
 - Check that the RPC socket is being created
 
 ### Fallthrough not working
+
 - Ensure you're calling `ovim launcher-fallthrough` with the correct session ID
 
 ## File Locations
 
-| File | Purpose |
-|------|---------|
-| `~/.config/ovim/terminal-launcher.sh` | Your launcher script |
-| `~/.config/ovim/samples/` | Sample scripts for reference |
-| `~/.cache/ovim.sock` | IPC socket for CLI communication |
-| `~/.cache/ovim/nvim_*.sock` | Per-session RPC sockets |
+| File                                  | Purpose                          |
+| ------------------------------------- | -------------------------------- |
+| `~/.config/ovim/terminal-launcher.sh` | Your launcher script             |
+| `~/.config/ovim/samples/`             | Sample scripts for reference     |
+| `~/.cache/ovim.sock`                  | IPC socket for CLI communication |
+| `~/.cache/ovim/nvim_*.sock`           | Per-session RPC sockets          |
