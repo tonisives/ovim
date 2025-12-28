@@ -1,5 +1,6 @@
 //! Terminal.app spawner (macOS default terminal)
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -20,6 +21,7 @@ impl TerminalSpawner for TerminalAppSpawner {
         file_path: &str,
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
+        custom_env: Option<&HashMap<String, String>>,
     ) -> Result<SpawnInfo, String> {
         // Get editor path and args from settings
         let editor_path = settings.editor_path();
@@ -46,15 +48,31 @@ impl TerminalSpawner for TerminalAppSpawner {
             format!(" {}", all_args.join(" "))
         };
 
+        // Build environment export commands for custom env
+        let env_exports = if let Some(env) = custom_env {
+            env.iter()
+                .map(|(k, v)| format!("export {}='{}'", k, v.replace('\'', "'\\''")))
+                .collect::<Vec<_>>()
+                .join("; ")
+        } else {
+            String::new()
+        };
+        let env_prefix = if env_exports.is_empty() {
+            String::new()
+        } else {
+            format!("{}; ", env_exports)
+        };
+
         let script = if let Some(geo) = geometry {
             format!(
                 r#"
             tell application "Terminal"
                 activate
-                do script "{}{} '{}'"
+                do script "{}{}{} '{}'"
                 set bounds of front window to {{{}, {}, {}, {}}}
             end tell
             "#,
+                env_prefix,
                 editor_path,
                 args_str,
                 file_path,
@@ -68,10 +86,10 @@ impl TerminalSpawner for TerminalAppSpawner {
                 r#"
             tell application "Terminal"
                 activate
-                do script "{}{} '{}'"
+                do script "{}{}{} '{}'"
             end tell
             "#,
-                editor_path, args_str, file_path
+                env_prefix, editor_path, args_str, file_path
             )
         };
 

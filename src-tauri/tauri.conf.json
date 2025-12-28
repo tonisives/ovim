@@ -37,8 +37,10 @@
         "label": "settings",
         "title": "ovim Settings",
         "url": "/settings.html",
-        "width": 600,
-        "height": 400,
+        "width": 800,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 800,
         "resizable": true,
         "decorations": true,
         "transparent": false,
@@ -53,6 +55,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "scripts/*",
+      "scripts/samples/*"
+    ],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",

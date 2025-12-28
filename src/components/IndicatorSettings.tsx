@@ -1,98 +1,25 @@
-import { useState, useEffect } from "react";
-import type { Settings, RgbColor, ModeColors } from "./SettingsApp";
-import {
-  formatKeyWithModifiers,
-  hasAnyModifier,
-  recordKey,
-  cancelRecordKey,
-  getKeyDisplayName,
-} from "./keyRecording";
-
-const PRESET_KEYS = [
-  { value: "caps_lock", label: "Caps Lock" },
-  { value: "escape", label: "Escape" },
-  { value: "right_control", label: "Right Control" },
-  { value: "right_option", label: "Right Option" },
-];
+import type { Settings, ModeColors } from "./SettingsApp";
+import { hasAnyModifier } from "./keyRecording";
+import { useKeyRecording } from "../hooks/useKeyRecording";
+import { PRESET_KEYS, POSITION_OPTIONS, FONT_OPTIONS } from "./indicator/constants";
+import { rgbToHex, hexToRgb } from "./colorUtils";
 
 interface Props {
   settings: Settings;
   onUpdate: (updates: Partial<Settings>) => void;
 }
 
-const POSITION_OPTIONS = [
-  { value: 0, label: "Top Left" },
-  { value: 1, label: "Top Middle" },
-  { value: 2, label: "Top Right" },
-  { value: 3, label: "Bottom Left" },
-  { value: 4, label: "Bottom Middle" },
-  { value: 5, label: "Bottom Right" },
-];
-
-const FONT_OPTIONS = [
-  { value: "system-ui, -apple-system, sans-serif", label: "System (Default)" },
-  { value: "SF Pro Display, -apple-system, sans-serif", label: "SF Pro Display" },
-  { value: "SF Pro Rounded, -apple-system, sans-serif", label: "SF Pro Rounded" },
-  { value: "Helvetica Neue, sans-serif", label: "Helvetica Neue" },
-  { value: "Arial, sans-serif", label: "Arial" },
-  { value: "SF Mono, Monaco, monospace", label: "SF Mono" },
-  { value: "Menlo, monospace", label: "Menlo" },
-  { value: "Monaco, monospace", label: "Monaco" },
-  { value: "Courier New, monospace", label: "Courier New" },
-];
-
-function rgbToHex(color: RgbColor): string {
-  const toHex = (n: number) => n.toString(16).padStart(2, "0");
-  return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
-}
-
-function hexToRgb(hex: string): RgbColor {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!result) return { r: 128, g: 128, b: 128 };
-  return {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16),
-  };
-}
-
 export function IndicatorSettings({ settings, onUpdate }: Props) {
-  const [isRecording, setIsRecording] = useState(false);
-  const [displayName, setDisplayName] = useState<string | null>(null);
-
-  useEffect(() => {
-    getKeyDisplayName(settings.vim_key)
-      .then((name) => {
-        if (name && hasAnyModifier(settings.vim_key_modifiers)) {
-          setDisplayName(formatKeyWithModifiers(name, settings.vim_key_modifiers));
-        } else {
-          setDisplayName(name);
-        }
-      })
-      .catch(() => setDisplayName(null));
-  }, [settings.vim_key, settings.vim_key_modifiers]);
-
-  const handleRecordKey = async () => {
-    setIsRecording(true);
-    try {
-      const recorded = await recordKey();
+  const { isRecording, displayName, handleRecordKey, handleCancelRecord } = useKeyRecording({
+    key: settings.vim_key,
+    modifiers: settings.vim_key_modifiers,
+    onKeyRecorded: (key, modifiers) => {
       onUpdate({
-        vim_key: recorded.name,
-        vim_key_modifiers: recorded.modifiers,
+        vim_key: key,
+        vim_key_modifiers: modifiers,
       });
-      const formatted = formatKeyWithModifiers(recorded.display_name, recorded.modifiers);
-      setDisplayName(formatted);
-    } catch (e) {
-      console.error("Failed to record key:", e);
-    } finally {
-      setIsRecording(false);
-    }
-  };
-
-  const handleCancelRecord = () => {
-    cancelRecordKey().catch(() => {});
-    setIsRecording(false);
-  };
+    },
+  });
 
   const handlePresetSelect = (value: string) => {
     onUpdate({

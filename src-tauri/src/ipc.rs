@@ -25,6 +25,13 @@ pub enum IpcCommand {
     Normal,
     /// Set to visual mode
     Visual,
+    /// Launcher script signals it handled spawning
+    LauncherHandled {
+        session_id: String,
+        editor_pid: Option<u32>,
+    },
+    /// Launcher script signals fallthrough to normal terminal
+    LauncherFallthrough { session_id: String },
 }
 
 /// IPC response from main app to CLI

@@ -1,5 +1,6 @@
 //! Alacritty terminal spawner
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -23,6 +24,7 @@ impl TerminalSpawner for AlacrittySpawner {
         file_path: &str,
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
+        custom_env: Option<&HashMap<String, String>>,
     ) -> Result<SpawnInfo, String> {
         // Generate a unique window title so we can find it
         let unique_title = format!("ovim-edit-{}", std::process::id());
@@ -47,7 +49,86 @@ impl TerminalSpawner for AlacrittySpawner {
         let resolved_editor = resolve_command_path(&editor_path);
         log::info!("Resolved editor path: {} -> {}", editor_path, resolved_editor);
 
+        // Calculate initial window size
+        let (init_columns, init_lines) = if let Some(ref geo) = geometry {
+            ((geo.width / 8).max(40) as u32, (geo.height / 16).max(10) as u32)
+        } else {
+            (80, 24)
+        };
+
+        // Resolve terminal path (uses user setting or auto-detects)
+        let terminal_cmd = settings.get_terminal_path();
+        let resolved_terminal = resolve_terminal_path(&terminal_cmd);
+        log::info!("Resolved terminal path: {} -> {}", terminal_cmd, resolved_terminal);
+
+        // Build the editor command with all args
+        let mut editor_cmd_parts: Vec<String> = vec![resolved_editor.clone()];
+        editor_cmd_parts.extend(socket_args.iter().cloned());
+        editor_cmd_parts.extend(editor_args.iter().map(|s| s.to_string()));
+        editor_cmd_parts.push(file_path.to_string());
+
+        // If we have custom env, wrap in a shell command that exports the env first
+        // This allows using msg create-window (fast) while still setting env
+        let shell_script = if let Some(env) = custom_env {
+            if !env.is_empty() {
+                let mut exports: Vec<String> = env.iter()
+                    .map(|(k, v)| format!("export {}={}", k, shell_escape(v)))
+                    .collect();
+                exports.push(shell_escape_cmd(&editor_cmd_parts));
+                let script = exports.join("; ");
+                log::info!("Shell wrapper script: {}", script);
+                Some(script)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Try msg create-window first (faster, reuses existing daemon)
+        let msg_args = if let Some(ref script) = shell_script {
+            // Use shell wrapper: bash -c 'export ...; cmd'
+            self.build_msg_args_shell(&unique_title, init_columns, init_lines, "bash", "-c", script)
+        } else {
+            // Direct editor command
+            self.build_msg_args(
+                &unique_title,
+                init_columns,
+                init_lines,
+                &resolved_editor,
+                &socket_args,
+                &editor_args,
+                file_path,
+            )
+        };
+
+        let msg_result = Command::new(&resolved_terminal)
+            .args(&msg_args)
+            .status();
+
+        let child = match msg_result {
+            Ok(status) if status.success() => {
+                log::info!("msg create-window succeeded");
+                None
+            }
+            _ => {
+                log::info!("msg create-window failed, falling back to regular spawn");
+                Some(self.spawn_new_process(
+                    &resolved_terminal,
+                    &unique_title,
+                    init_columns,
+                    init_lines,
+                    &resolved_editor,
+                    &socket_args,
+                    &editor_args,
+                    file_path,
+                    custom_env,
+                )?)
+            }
+        };
+
         // Start a watcher thread to find the window, set bounds, and focus it
+        // This runs AFTER spawning so the window has a chance to appear
         {
             let title = unique_title.clone();
             let geo = geometry.clone();
@@ -69,85 +150,6 @@ impl TerminalSpawner for AlacrittySpawner {
             });
         }
 
-        // Calculate initial window size
-        let (init_columns, init_lines) = if let Some(ref geo) = geometry {
-            ((geo.width / 8).max(40) as u32, (geo.height / 16).max(10) as u32)
-        } else {
-            (80, 24)
-        };
-
-        // Build the command arguments: editor path, socket args, editor args, file path
-        let mut cmd_args: Vec<String> = vec![
-            "msg".to_string(),
-            "create-window".to_string(),
-            "-o".to_string(),
-            format!("window.title=\"{}\"", unique_title),
-            "-o".to_string(),
-            "window.dynamic_title=false".to_string(),
-            "-o".to_string(),
-            "window.startup_mode=\"Windowed\"".to_string(),
-            "-o".to_string(),
-            format!("window.dimensions.columns={}", init_columns),
-            "-o".to_string(),
-            format!("window.dimensions.lines={}", init_lines),
-            "-e".to_string(),
-            resolved_editor.clone(),
-        ];
-        cmd_args.extend(socket_args.iter().cloned());
-        for arg in &editor_args {
-            cmd_args.push(arg.to_string());
-        }
-        cmd_args.push(file_path.to_string());
-
-        // Resolve terminal path (uses user setting or auto-detects)
-        let terminal_cmd = settings.get_terminal_path();
-        let resolved_terminal = resolve_terminal_path(&terminal_cmd);
-        log::info!("Resolved terminal path: {} -> {}", terminal_cmd, resolved_terminal);
-
-        // Try `alacritty msg create-window` first - this works if Alacritty daemon is running
-        // We use status() to wait for the command to complete and check exit code
-        let msg_result = Command::new(&resolved_terminal)
-            .args(&cmd_args)
-            .status();
-
-        // If msg create-window failed (no daemon running), fall back to regular spawn
-        let child = match msg_result {
-            Ok(status) if status.success() => {
-                log::info!("msg create-window succeeded");
-                None // No child process to track - window was created in existing daemon
-            }
-            _ => {
-                log::info!("msg create-window failed, falling back to regular spawn");
-                // Build fallback args (without msg create-window)
-                let mut fallback_args: Vec<String> = vec![
-                    "-o".to_string(),
-                    format!("window.title=\"{}\"", unique_title),
-                    "-o".to_string(),
-                    "window.dynamic_title=false".to_string(),
-                    "-o".to_string(),
-                    "window.startup_mode=\"Windowed\"".to_string(),
-                    "-o".to_string(),
-                    format!("window.dimensions.columns={}", init_columns),
-                    "-o".to_string(),
-                    format!("window.dimensions.lines={}", init_lines),
-                    "-e".to_string(),
-                    resolved_editor.clone(),
-                ];
-                fallback_args.extend(socket_args.iter().cloned());
-                for arg in &editor_args {
-                    fallback_args.push(arg.to_string());
-                }
-                fallback_args.push(file_path.to_string());
-
-                Some(
-                    Command::new(&resolved_terminal)
-                        .args(&fallback_args)
-                        .spawn()
-                        .map_err(|e| format!("Failed to spawn alacritty: {}", e))?,
-                )
-            }
-        };
-
         // Wait a bit for editor to start, then find its PID by the file it's editing
         let pid = find_editor_pid_for_file(file_path, process_name);
         log::info!("Found editor PID: {:?} for file: {}", pid, file_path);
@@ -158,5 +160,126 @@ impl TerminalSpawner for AlacrittySpawner {
             child,
             window_title: Some(unique_title),
         })
+    }
+}
+
+/// Escape a string for use in shell
+fn shell_escape(s: &str) -> String {
+    // Use single quotes and escape any single quotes within
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Build a shell command from parts
+fn shell_escape_cmd(parts: &[String]) -> String {
+    parts.iter()
+        .map(|s| shell_escape(s))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+impl AlacrittySpawner {
+    fn build_msg_args_shell(
+        &self,
+        title: &str,
+        columns: u32,
+        lines: u32,
+        shell: &str,
+        shell_flag: &str,
+        script: &str,
+    ) -> Vec<String> {
+        vec![
+            "msg".to_string(),
+            "create-window".to_string(),
+            "-o".to_string(),
+            format!("window.title=\"{}\"", title),
+            "-o".to_string(),
+            "window.dynamic_title=false".to_string(),
+            "-o".to_string(),
+            "window.startup_mode=\"Windowed\"".to_string(),
+            "-o".to_string(),
+            format!("window.dimensions.columns={}", columns),
+            "-o".to_string(),
+            format!("window.dimensions.lines={}", lines),
+            "-e".to_string(),
+            shell.to_string(),
+            shell_flag.to_string(),
+            script.to_string(),
+        ]
+    }
+
+    fn build_msg_args(
+        &self,
+        title: &str,
+        columns: u32,
+        lines: u32,
+        editor: &str,
+        socket_args: &[String],
+        editor_args: &[&str],
+        file_path: &str,
+    ) -> Vec<String> {
+        let mut args = vec![
+            "msg".to_string(),
+            "create-window".to_string(),
+            "-o".to_string(),
+            format!("window.title=\"{}\"", title),
+            "-o".to_string(),
+            "window.dynamic_title=false".to_string(),
+            "-o".to_string(),
+            "window.startup_mode=\"Windowed\"".to_string(),
+            "-o".to_string(),
+            format!("window.dimensions.columns={}", columns),
+            "-o".to_string(),
+            format!("window.dimensions.lines={}", lines),
+            "-e".to_string(),
+            editor.to_string(),
+        ];
+        args.extend(socket_args.iter().cloned());
+        args.extend(editor_args.iter().map(|s| s.to_string()));
+        args.push(file_path.to_string());
+        args
+    }
+
+    fn spawn_new_process(
+        &self,
+        terminal: &str,
+        title: &str,
+        columns: u32,
+        lines: u32,
+        editor: &str,
+        socket_args: &[String],
+        editor_args: &[&str],
+        file_path: &str,
+        custom_env: Option<&HashMap<String, String>>,
+    ) -> Result<std::process::Child, String> {
+        let mut args: Vec<String> = vec![
+            "-o".to_string(),
+            format!("window.title=\"{}\"", title),
+            "-o".to_string(),
+            "window.dynamic_title=false".to_string(),
+            "-o".to_string(),
+            "window.startup_mode=\"Windowed\"".to_string(),
+            "-o".to_string(),
+            "window.decorations=\"Full\"".to_string(),
+            "-o".to_string(),
+            format!("window.dimensions.columns={}", columns),
+            "-o".to_string(),
+            format!("window.dimensions.lines={}", lines),
+            "-e".to_string(),
+            editor.to_string(),
+        ];
+        args.extend(socket_args.iter().cloned());
+        args.extend(editor_args.iter().map(|s| s.to_string()));
+        args.push(file_path.to_string());
+
+        let mut cmd = Command::new(terminal);
+        cmd.args(&args);
+
+        if let Some(env) = custom_env {
+            log::info!("Applying {} custom env vars to alacritty", env.len());
+            cmd.envs(env.iter());
+        }
+
+        cmd.spawn()
+            .map_err(|e| format!("Failed to spawn alacritty: {}", e))
     }
 }

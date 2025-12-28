@@ -45,44 +45,23 @@ pub fn move_window_to_position(app_name: &str, x: i32, y: i32) {
 }
 
 /// Find Alacritty window index by title (returns 1-based index)
+/// Searches all processes named "alacritty" (case-insensitive)
 pub fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
-    // First, let's list all window titles to debug
-    let list_script = r#"
-        tell application "System Events"
-            tell process "Alacritty"
-                set windowNames to {}
-                repeat with i from 1 to (count of windows)
-                    set end of windowNames to name of window i
-                end repeat
-                return windowNames
-            end tell
-        end tell
-        "#;
-
-    if let Ok(out) = Command::new("osascript")
-        .arg("-e")
-        .arg(list_script)
-        .output()
-    {
-        log::info!(
-            "Alacritty window titles: {}",
-            String::from_utf8_lossy(&out.stdout).trim()
-        );
-    }
-
+    // Search across all alacritty processes (spawned ones are lowercase)
     let script = format!(
         r#"
         tell application "System Events"
-            tell process "Alacritty"
-                set windowIndex to 0
-                repeat with i from 1 to (count of windows)
-                    set w to window i
-                    if name of w contains "{}" then
-                        return i
-                    end if
-                end repeat
-                return 0
-            end tell
+            repeat with p in (every process whose name is "alacritty" or name is "Alacritty")
+                try
+                    repeat with i from 1 to (count of windows of p)
+                        set w to window i of p
+                        if name of w contains "{}" then
+                            return i
+                        end if
+                    end repeat
+                end try
+            end repeat
+            return 0
         end tell
         "#,
         title
@@ -94,13 +73,107 @@ pub fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
         if out.status.success() {
             let index_str = String::from_utf8_lossy(&out.stdout);
             let index: usize = index_str.trim().parse().unwrap_or(0);
-            log::info!("Search for '{}' returned index: {}", title, index);
             if index > 0 {
                 return Some(index);
             }
         }
     }
     None
+}
+
+/// Set Alacritty window bounds by title (finds and positions the specific window)
+#[allow(dead_code)]
+pub fn set_alacritty_window_bounds_by_title(
+    title: &str,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) {
+    // Search ALL foreground processes - name filter doesn't work reliably
+    let script = format!(
+        r#"
+        tell application "System Events"
+            repeat with p in (every process whose background only is false)
+                try
+                    repeat with w in windows of p
+                        if name of w contains "{}" then
+                            set position of w to {{{}, {}}}
+                            set size of w to {{{}, {}}}
+                            return "ok"
+                        end if
+                    end repeat
+                end try
+            end repeat
+            return "not found"
+        end tell
+        "#,
+        title, x, y, width, height
+    );
+
+    log::info!(
+        "Setting Alacritty window '{}' bounds: {}x{} at ({}, {})",
+        title, width, height, x, y
+    );
+
+    let output = Command::new("osascript").arg("-e").arg(&script).output();
+
+    if let Ok(out) = output {
+        let result = String::from_utf8_lossy(&out.stdout);
+        log::info!("Set bounds result: {}", result.trim());
+        if !out.status.success() {
+            log::error!(
+                "AppleScript set bounds failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+}
+
+/// Focus Alacritty window by title
+#[allow(dead_code)]
+pub fn focus_alacritty_window_by_title(title: &str) {
+    // Search ALL foreground processes - name filter doesn't work reliably
+    let script = format!(
+        r#"
+        tell application "System Events"
+            repeat with p in (every process whose background only is false)
+                try
+                    repeat with w in windows of p
+                        if name of w contains "{}" then
+                            perform action "AXRaise" of w
+                            set winPos to position of w
+                            return (item 1 of winPos) & "," & (item 2 of winPos)
+                        end if
+                    end repeat
+                end try
+            end repeat
+        end tell
+        "#,
+        title
+    );
+
+    log::info!("Focusing Alacritty window '{}'", title);
+
+    let output = Command::new("osascript").arg("-e").arg(&script).output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            // Parse the position and click to give keyboard focus
+            let pos_str = String::from_utf8_lossy(&out.stdout);
+            let pos_str = pos_str.trim();
+            if let Some((x_str, y_str)) = pos_str.split_once(',') {
+                if let (Ok(x), Ok(y)) = (x_str.trim().parse::<i32>(), y_str.trim().parse::<i32>()) {
+                    click_at_position(x + 50, y + 50);
+                }
+            }
+        } else {
+            log::error!(
+                "Failed to focus window: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
 }
 
 /// Set window bounds by window index (1-based)
@@ -151,21 +224,25 @@ pub fn set_window_bounds_by_index(
 }
 
 /// Focus an Alacritty window by index (without bringing all app windows to front)
+#[allow(dead_code)]
 pub fn focus_alacritty_window_by_index(index: usize) {
     // Use AXRaise to bring the specific window to front and give it keyboard focus.
+    // Search across all alacritty processes (spawned ones are lowercase)
     let script = format!(
         r#"
         tell application "System Events"
-            tell process "Alacritty"
-                if (count of windows) >= {} then
-                    set w to window {}
-                    -- Raise just this window to the front
-                    perform action "AXRaise" of w
-                    -- Return the window position for clicking
-                    set winPos to position of w
-                    return (item 1 of winPos) & "," & (item 2 of winPos)
-                end if
-            end tell
+            repeat with p in (every process whose name is "alacritty" or name is "Alacritty")
+                try
+                    if (count of windows of p) >= {} then
+                        set w to window {} of p
+                        -- Raise just this window to the front
+                        perform action "AXRaise" of w
+                        -- Return the window position for clicking
+                        set winPos to position of w
+                        return (item 1 of winPos) & "," & (item 2 of winPos)
+                    end if
+                end try
+            end repeat
         end tell
         "#,
         index, index
@@ -227,6 +304,7 @@ fn click_at_position(x: i32, y: i32) {
 }
 
 /// Set window bounds atomically (position and size in one call)
+#[allow(dead_code)]
 pub fn set_window_bounds_atomic(
     app_name: &str,
     index: usize,
@@ -236,20 +314,41 @@ pub fn set_window_bounds_atomic(
     height: u32,
 ) {
     // Set both position and size in a single script for speed
-    let script = format!(
-        r#"
-        tell application "System Events"
-            tell process "{}"
-                if (count of windows) >= {} then
-                    set w to window {}
-                    set position of w to {{{}, {}}}
-                    set size of w to {{{}, {}}}
-                end if
+    // For Alacritty, search across all processes (spawned ones are lowercase)
+    let script = if app_name.to_lowercase() == "alacritty" {
+        format!(
+            r#"
+            tell application "System Events"
+                repeat with p in (every process whose name is "alacritty" or name is "Alacritty")
+                    try
+                        if (count of windows of p) >= {} then
+                            set w to window {} of p
+                            set position of w to {{{}, {}}}
+                            set size of w to {{{}, {}}}
+                            return
+                        end if
+                    end try
+                end repeat
             end tell
-        end tell
-        "#,
-        app_name, index, index, x, y, width, height
-    );
+            "#,
+            index, index, x, y, width, height
+        )
+    } else {
+        format!(
+            r#"
+            tell application "System Events"
+                tell process "{}"
+                    if (count of windows) >= {} then
+                        set w to window {}
+                        set position of w to {{{}, {}}}
+                        set size of w to {{{}, {}}}
+                    end if
+                end tell
+            end tell
+            "#,
+            app_name, index, index, x, y, width, height
+        )
+    };
 
     log::info!(
         "Setting window {} index {} to {}x{} at ({}, {})",

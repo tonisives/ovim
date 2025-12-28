@@ -243,11 +243,19 @@ pub fn trigger_nvim_edit(
         if let Some(session) = manager_clone2.get_session(&session_id) {
             log::info!("Waiting for process: {:?} (PID: {:?})", session.terminal_type, session.process_id);
 
-            // Wait for process
-            if let Err(e) = terminals::wait_for_process(&session.terminal_type, session.process_id) {
-                log::error!("Error waiting for terminal process: {}", e);
-                manager_clone2.cancel_session(&session_id);
-                return;
+            // For Custom terminal without PID, skip wait_for_process - RPC thread handles waiting
+            let is_custom_without_pid = session.terminal_type == terminals::TerminalType::Custom
+                && session.process_id.is_none();
+
+            if is_custom_without_pid {
+                log::info!("Custom terminal without PID, RPC thread will handle wait");
+            } else {
+                // Wait for process
+                if let Err(e) = terminals::wait_for_process(&session.terminal_type, session.process_id) {
+                    log::error!("Error waiting for terminal process: {}", e);
+                    manager_clone2.cancel_session(&session_id);
+                    return;
+                }
             }
 
             log::info!("Terminal process exited, reading edited file");

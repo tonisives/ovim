@@ -1,5 +1,6 @@
 //! Ghostty terminal spawner
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -20,6 +21,7 @@ impl TerminalSpawner for GhosttySpawner {
         file_path: &str,
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
+        custom_env: Option<&HashMap<String, String>>,
     ) -> Result<SpawnInfo, String> {
         // Generate a unique window title so we can find it
         let unique_title = format!("ovim-edit-{}", std::process::id());
@@ -86,6 +88,11 @@ impl TerminalSpawner for GhosttySpawner {
             cmd.arg(arg);
         }
         cmd.arg(file_path);
+
+        // Apply custom environment variables
+        if let Some(env) = custom_env {
+            cmd.envs(env.iter());
+        }
 
         cmd.spawn()
             .map_err(|e| format!("Failed to spawn ghostty: {}", e))?;
