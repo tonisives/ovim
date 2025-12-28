@@ -203,13 +203,20 @@ impl ClickModeManager {
         Ok(None)
     }
 
-    /// Get a clone of the AXElementHandle for an element by ID
-    /// This is useful when you need to perform actions after deactivating click mode
+    /// Get the center position of an element by ID
+    pub fn get_element_position(&self, element_id: usize) -> Option<(f64, f64)> {
+        self.elements
+            .iter()
+            .find(|e| e.element.id == element_id)
+            .map(|e| e.center())
+    }
+
+    /// Get a clone of the AXElementHandle for an element by ID (if available)
     pub fn get_ax_element(&self, element_id: usize) -> Option<crate::nvim_edit::accessibility::AXElementHandle> {
         self.elements
             .iter()
             .find(|e| e.element.id == element_id)
-            .map(|e| e.ax_element.clone())
+            .and_then(|e| e.ax_element.clone())
     }
 
     /// Perform click on element by ID
@@ -220,7 +227,9 @@ impl ClickModeManager {
             .find(|e| e.element.id == element_id)
             .ok_or_else(|| format!("Element {} not found", element_id))?;
 
-        accessibility::perform_click(&element.ax_element)
+        // Use position-based click (works for both subprocess and direct modes)
+        let (x, y) = element.center();
+        accessibility::perform_click_at_position(x, y)
     }
 
     /// Perform right-click on element by ID
@@ -231,7 +240,9 @@ impl ClickModeManager {
             .find(|e| e.element.id == element_id)
             .ok_or_else(|| format!("Element {} not found", element_id))?;
 
-        accessibility::perform_right_click(&element.ax_element)
+        // Use position-based right-click
+        let (x, y) = element.center();
+        accessibility::perform_right_click_at_position(x, y)
     }
 
     /// Enter search mode

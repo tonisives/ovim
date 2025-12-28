@@ -5,7 +5,6 @@
 
 #![allow(dead_code)]
 
-use core_foundation::array::CFArray;
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::CFString;
 
@@ -173,27 +172,41 @@ impl Drop for CFHandle {
 
 /// Check if an element has a clickable action
 fn has_press_action(element: &CFHandle) -> bool {
-    let mut actions: CFTypeRef = std::ptr::null();
-    let result = unsafe { AXUIElementCopyAttributeNames(element.as_ptr(), &mut actions) };
+    // Get AXActions attribute - this returns an array of action names
+    let actions_handle = match element.get_attribute("AXActions") {
+        Some(h) => h,
+        None => return false,
+    };
 
-    if result != 0 || actions.is_null() {
+    let actions_ptr = actions_handle.0;
+    if actions_ptr.is_null() {
         return false;
     }
 
-    // Check for AXActions attribute
-    if let Some(actions_handle) = element.get_attribute("AXActions") {
-        // Try to iterate actions array
-        let actions_array: CFArray<CFString> =
-            unsafe { CFArray::wrap_under_create_rule(actions_handle.0 as _) };
-        std::mem::forget(actions_handle);
+    // Safely get array count
+    let count = unsafe { core_foundation::array::CFArrayGetCount(actions_ptr as _) };
+    if count <= 0 {
+        return false;
+    }
 
-        for i in 0..actions_array.len() {
-            if let Some(action) = actions_array.get(i) {
-                let action_str = action.to_string();
-                if action_str == "AXPress" || action_str == "AXShowMenu" {
-                    return true;
-                }
-            }
+    // Check each action
+    for i in 0..count.min(20) {
+        let action_ptr = unsafe {
+            core_foundation::array::CFArrayGetValueAtIndex(actions_ptr as _, i)
+        };
+
+        if action_ptr.is_null() {
+            continue;
+        }
+
+        // Try to convert to string - be defensive
+        let action_cfstring: CFString = unsafe {
+            CFString::wrap_under_get_rule(action_ptr as _)
+        };
+        let action_str = action_cfstring.to_string();
+
+        if action_str == "AXPress" || action_str == "AXShowMenu" {
+            return true;
         }
     }
 
@@ -268,37 +281,55 @@ fn collect_elements(
     }
 
     // Recurse into children
-    if let Some(children) = element.get_attribute("AXChildren") {
-        let children_array: CFArray<CFTypeRef> =
-            unsafe { CFArray::wrap_under_create_rule(children.0 as _) };
-        std::mem::forget(children);
+    // Use AXUIElementCopyAttributeValue which gives us an owned array
+    let children_attr = CFString::new("AXChildren");
+    let mut children_value: CFTypeRef = std::ptr::null();
+    let result = unsafe {
+        AXUIElementCopyAttributeValue(element.0, children_attr.as_CFTypeRef(), &mut children_value)
+    };
 
-        for i in 0..children_array.len() {
-            if elements.len() >= MAX_ELEMENTS {
-                break;
-            }
-            if let Some(child_ref) = children_array.get(i) {
-                let child_ptr: CFTypeRef = *child_ref;
-                if !child_ptr.is_null() {
-                    // Retain the child for our use
-                    let child = CFHandle(unsafe {
-                        core_foundation::base::CFRetain(child_ptr)
-                    });
-                    collect_elements(&child, elements, depth + 1);
-                }
-            }
+    if result != 0 || children_value.is_null() {
+        return;
+    }
+
+    // We now own children_value - wrap it in CFHandle for cleanup
+    let _children_handle = CFHandle(children_value);
+
+    let count = unsafe { core_foundation::array::CFArrayGetCount(children_value as _) };
+    if count <= 0 {
+        return;
+    }
+
+    // Limit to prevent performance issues
+    let safe_count = (count as usize).min(100);
+
+    for i in 0..safe_count {
+        if elements.len() >= MAX_ELEMENTS {
+            break;
         }
+
+        // Get child - the array owns it, we get a borrowed reference
+        let child_ptr = unsafe {
+            core_foundation::array::CFArrayGetValueAtIndex(children_value as _, i as isize)
+        };
+
+        if child_ptr.is_null() {
+            continue;
+        }
+
+        // Retain the child so we own it for recursion
+        // The array retains its elements, so this should be safe
+        unsafe { core_foundation::base::CFRetain(child_ptr) };
+        let child = CFHandle(child_ptr);
+        collect_elements(&child, elements, depth + 1);
     }
 }
 
-/// Query all clickable elements in the frontmost application
-pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String> {
-    // Add a small delay to ensure the app state is stable
-    std::thread::sleep(std::time::Duration::from_millis(10));
-
-    let pid = get_frontmost_app_pid().ok_or("Could not get frontmost app")?;
-
-    log::info!("Querying clickable elements for PID {}", pid);
+/// Inner function to collect elements - separated so we can wrap with objc exception handling
+fn collect_elements_inner(
+    pid: i32,
+) -> Result<Vec<(f64, f64, f64, f64, String, String, AXElementHandle)>, String> {
+    log::debug!("Creating AX element for app");
 
     let app_element = unsafe {
         let ptr = AXUIElementCreateApplication(pid);
@@ -308,9 +339,12 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
         CFHandle(ptr)
     };
 
+    log::debug!("AX element created, checking focused window");
+
     let mut raw_elements: Vec<(f64, f64, f64, f64, String, String, AXElementHandle)> = Vec::new();
 
     // Start from focused window if available, otherwise from app
+    log::debug!("Getting focused window");
     let start_element = app_element
         .get_attribute("AXFocusedWindow")
         .and_then(|w| {
@@ -322,18 +356,221 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
             Some(CFHandle(unsafe { core_foundation::base::CFRetain(ptr) }))
         })
         .unwrap_or_else(|| {
+            log::debug!("No focused window, using app element");
             // Retain the app element for traversal
             CFHandle(unsafe { core_foundation::base::CFRetain(app_element.as_ptr()) })
         });
 
+    log::debug!("Starting element collection");
     collect_elements(&start_element, &mut raw_elements, 0);
+    log::debug!("Element collection complete");
 
-    log::info!("Found {} raw clickable elements", raw_elements.len());
+    Ok(raw_elements)
+}
+
+/// Raw element data from subprocess (matches ax_helper output)
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RawElementData {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    role: String,
+    title: String,
+}
+
+/// Get the path to the helper binary in Application Support
+fn get_helper_path() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|d| d.join("ovim").join("ovim-ax-helper"))
+}
+
+/// Initialize the helper binary by copying it to Application Support
+/// Call this on app startup
+pub fn init_helper() {
+    // Try to find source binary next to main executable
+    let source_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("ovim-ax-helper")));
+
+    let source_path = match source_path {
+        Some(p) if p.exists() => p,
+        _ => {
+            log::debug!("Helper binary not found next to executable");
+            return;
+        }
+    };
+
+    let dest_path = match get_helper_path() {
+        Some(p) => p,
+        None => {
+            log::warn!("Could not determine Application Support path");
+            return;
+        }
+    };
+
+    // Create directory if needed
+    if let Some(parent) = dest_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!("Failed to create helper directory: {}", e);
+            return;
+        }
+    }
+
+    // Copy if source is newer or dest doesn't exist
+    let should_copy = if dest_path.exists() {
+        // Check if source is newer
+        match (source_path.metadata(), dest_path.metadata()) {
+            (Ok(src), Ok(dst)) => {
+                src.modified().ok() > dst.modified().ok()
+            }
+            _ => true,
+        }
+    } else {
+        true
+    };
+
+    if should_copy {
+        match std::fs::copy(&source_path, &dest_path) {
+            Ok(_) => {
+                log::info!("Copied helper binary to {:?}", dest_path);
+                // Make executable
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = dest_path.metadata() {
+                        let mut perms = metadata.permissions();
+                        perms.set_mode(0o755);
+                        let _ = std::fs::set_permissions(&dest_path, perms);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to copy helper binary: {}", e);
+            }
+        }
+    }
+}
+
+/// Query all clickable elements using a subprocess
+/// This prevents crashes from Objective-C exceptions in the accessibility API
+pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String> {
+    let pid = get_frontmost_app_pid().ok_or("Could not get frontmost app")?;
+
+    log::info!("Querying clickable elements for PID {} via subprocess", pid);
+
+    // First try Application Support path
+    let helper_path = get_helper_path()
+        .filter(|p| p.exists())
+        // Fall back to next to executable
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("ovim-ax-helper")))
+                .filter(|p| p.exists())
+        });
+
+    let helper_path = match helper_path {
+        Some(p) => p,
+        None => {
+            log::error!("Helper binary not found - click mode cannot work safely");
+            return Err("Helper binary not found. Please reinstall ovim.".to_string());
+        }
+    };
+
+    log::info!("Using helper at {:?}", helper_path);
+
+    // Run the helper subprocess with retry logic
+    let mut raw_elements: Option<Vec<RawElementData>> = None;
+
+    for attempt in 0..3 {
+        if attempt > 0 {
+            log::info!("Retry attempt {} after waiting...", attempt);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+
+        let output = match std::process::Command::new(&helper_path)
+            .arg(pid.to_string())
+            .output()
+        {
+            Ok(o) => o,
+            Err(e) => {
+                log::warn!("Failed to run helper (attempt {}): {}", attempt + 1, e);
+                continue;
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!("Helper subprocess failed (attempt {}): {}", attempt + 1, stderr.trim());
+            continue;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        match serde_json::from_str::<Vec<RawElementData>>(&stdout) {
+            Ok(elements) => {
+                raw_elements = Some(elements);
+                break;
+            }
+            Err(e) => {
+                log::warn!("Failed to parse helper output (attempt {}): {}", attempt + 1, e);
+                continue;
+            }
+        }
+    }
+
+    let raw_elements = match raw_elements {
+        Some(e) => e,
+        None => {
+            // All subprocess attempts failed - do NOT fall back to direct query
+            // as that would crash the main app if the UI is in a bad state
+            log::error!("All subprocess attempts failed - accessibility API may be unstable");
+            return Err("Failed to query elements - try again in a moment".to_string());
+        }
+    };
+
+    log::info!("Found {} raw clickable elements via subprocess", raw_elements.len());
 
     // Generate hints
     let hints = generate_hints(raw_elements.len(), super::hints::DEFAULT_HINT_CHARS);
 
-    // Convert to internal elements with hints
+    // Convert to internal elements
+    // Note: No AXElementHandle - clicks will use position-based mouse simulation
+    let elements: Vec<ClickableElementInternal> = raw_elements
+        .into_iter()
+        .enumerate()
+        .map(|(i, elem)| {
+            ClickableElementInternal::new(
+                i,
+                hints.get(i).cloned().unwrap_or_else(|| i.to_string()),
+                elem.x,
+                elem.y,
+                elem.width,
+                elem.height,
+                elem.role,
+                elem.title,
+                None, // No AX handle in subprocess mode
+            )
+        })
+        .collect();
+
+    Ok(elements)
+}
+
+
+/// Direct query without subprocess (fallback)
+fn get_clickable_elements_direct() -> Result<Vec<ClickableElementInternal>, String> {
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let pid = get_frontmost_app_pid().ok_or("Could not get frontmost app")?;
+
+    log::info!("Querying clickable elements for PID {} directly", pid);
+
+    let raw_elements = collect_elements_inner(pid)?;
+
+    log::info!("Found {} raw clickable elements", raw_elements.len());
+
+    let hints = generate_hints(raw_elements.len(), super::hints::DEFAULT_HINT_CHARS);
+
     let elements: Vec<ClickableElementInternal> = raw_elements
         .into_iter()
         .enumerate()
@@ -347,7 +584,7 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
                 h,
                 role,
                 title,
-                ax_handle,
+                Some(ax_handle),
             )
         })
         .collect();
@@ -357,18 +594,9 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
 
 /// Perform a click action on an element
 pub fn perform_click(element: &AXElementHandle) -> Result<(), String> {
-    // First try AXPress
-    let action = CFString::new("AXPress");
-    let result = unsafe { AXUIElementPerformAction(element.as_ptr(), action.as_CFTypeRef()) };
-
-    if result == 0 {
-        log::info!("Successfully performed AXPress action");
-        return Ok(());
-    }
-
-    log::warn!("AXPress failed with code {}, trying mouse click", result);
-
-    // Fall back to simulated mouse click
+    // Use simulated mouse click as primary method
+    // AXPress often returns success but doesn't actually work for menu bar items
+    log::info!("Performing mouse click on element");
     perform_mouse_click(element)
 }
 
@@ -452,6 +680,90 @@ fn perform_mouse_click(element: &AXElementHandle) -> Result<(), String> {
     mouse_up.post(CGEventTapLocation::HID);
 
     log::info!("Mouse click completed");
+    Ok(())
+}
+
+/// Perform a click at a specific position
+pub fn perform_click_at_position(x: f64, y: f64) -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
+    log::info!("Performing mouse click at position ({}, {})", x, y);
+
+    let point = CGPoint::new(x, y);
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Could not create event source")?;
+
+    // Mouse down
+    let mouse_down = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse down event")?;
+
+    mouse_down.post(CGEventTapLocation::HID);
+
+    // Small delay
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Mouse up
+    let mouse_up = CGEvent::new_mouse_event(
+        source,
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse up event")?;
+
+    mouse_up.post(CGEventTapLocation::HID);
+
+    log::info!("Mouse click completed");
+    Ok(())
+}
+
+/// Perform a right-click at a specific position
+pub fn perform_right_click_at_position(x: f64, y: f64) -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
+    log::info!("Performing right-click at position ({}, {})", x, y);
+
+    let point = CGPoint::new(x, y);
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Could not create event source")?;
+
+    // Right mouse down
+    let mouse_down = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::RightMouseDown,
+        point,
+        CGMouseButton::Right,
+    )
+    .map_err(|_| "Could not create mouse down event")?;
+
+    mouse_down.post(CGEventTapLocation::HID);
+
+    // Small delay
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Right mouse up
+    let mouse_up = CGEvent::new_mouse_event(
+        source,
+        CGEventType::RightMouseUp,
+        point,
+        CGMouseButton::Right,
+    )
+    .map_err(|_| "Could not create mouse up event")?;
+
+    mouse_up.post(CGEventTapLocation::HID);
+
+    log::info!("Right-click completed");
     Ok(())
 }
 

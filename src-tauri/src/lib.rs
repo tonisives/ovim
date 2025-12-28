@@ -198,6 +198,9 @@ pub fn run() {
     init_file_logger();
     log::info!("ovim-rust started");
 
+    // Initialize the accessibility helper binary
+    click_mode::accessibility::init_helper();
+
     let (vim_state, mode_rx) = VimState::new();
     let vim_state = Arc::new(Mutex::new(vim_state));
 
