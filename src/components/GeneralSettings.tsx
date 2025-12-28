@@ -14,6 +14,13 @@ interface PermissionStatus {
 
 export function GeneralSettings({ settings, onUpdate }: Props) {
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus | null>(null)
+  const [version, setVersion] = useState<string>("")
+
+  useEffect(() => {
+    invoke<string>("get_version")
+      .then(setVersion)
+      .catch((e) => console.error("Failed to get version:", e))
+  }, [])
 
   useEffect(() => {
     const checkPermissions = () => {
@@ -45,6 +52,12 @@ export function GeneralSettings({ settings, onUpdate }: Props) {
   return (
     <div className="settings-section">
       <h2>General Settings</h2>
+
+      {version && (
+        <div className="version-info">
+          ovim v{version}
+        </div>
+      )}
 
       {permissionStatus && !permissionsOk && (
         <div className="permission-warning">
@@ -84,6 +97,17 @@ export function GeneralSettings({ settings, onUpdate }: Props) {
             onChange={(e) => onUpdate({ launch_at_login: e.target.checked })}
           />
           Launch ovim at login
+        </label>
+      </div>
+
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={settings.auto_update_enabled}
+            onChange={(e) => onUpdate({ auto_update_enabled: e.target.checked })}
+          />
+          Automatically check for updates
         </label>
       </div>
 

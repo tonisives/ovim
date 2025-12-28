@@ -63,6 +63,9 @@ pub struct Settings {
     pub electron_apps: Vec<String>,
     /// Settings for Edit Popup feature
     pub nvim_edit: NvimEditSettings,
+    /// Enable automatic update checking
+    #[serde(default = "default_true")]
+    pub auto_update_enabled: bool,
 }
 
 fn default_font_family() -> String {
@@ -99,6 +102,7 @@ impl Default for Settings {
             bottom_widget: "None".to_string(),
             electron_apps: vec![],
             nvim_edit: NvimEditSettings::default(),
+            auto_update_enabled: true,
         }
     }
 }
