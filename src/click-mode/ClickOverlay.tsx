@@ -6,11 +6,17 @@ import { HintLabel } from "./HintLabel"
 import { ClickableElement, ClickModeState, ClickModeStyleSettings } from "./types"
 import "./click-overlay.css"
 
+interface WindowOffset {
+  x: number
+  y: number
+}
+
 /** Main overlay component that displays hint labels */
 export function ClickOverlay() {
   const [elements, setElements] = useState<ClickableElement[]>([])
   const [inputBuffer, setInputBuffer] = useState("")
   const [isActive, setIsActive] = useState(false)
+  const [windowOffset, setWindowOffset] = useState<WindowOffset>({ x: 0, y: 0 })
   const [styleSettings, setStyleSettings] = useState<ClickModeStyleSettings>({
     hint_opacity: 1,
     hint_font_size: 11,
@@ -67,6 +73,18 @@ export function ClickOverlay() {
         // Show and position the overlay window
         await currentWindow.show()
         await currentWindow.setFocus()
+
+        // Get window position for coordinate offset
+        // Small delay to ensure window is positioned
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        try {
+          const position = await currentWindow.outerPosition()
+          console.log("Window position:", position.x, position.y)
+          console.log("Elements sample:", event.payload.slice(0, 3).map(e => ({ hint: e.hint, x: e.x, y: e.y })))
+          setWindowOffset({ x: position.x, y: position.y })
+        } catch (e) {
+          console.error("Failed to get window position:", e)
+        }
       }
     )
 
@@ -185,9 +203,12 @@ export function ClickOverlay() {
     left: 0,
     width: "100vw",
     height: "100vh",
-    backgroundColor: "rgba(0, 0, 0, 0.05)",
+    backgroundColor: "rgba(0, 0, 0, 0.15)", // More visible for debugging
     pointerEvents: "auto",
   }
+
+  // Debug: show element count
+  console.log("Rendering overlay with", elements.length, "elements, offset:", windowOffset)
 
   const inputIndicatorStyle: CSSProperties = {
     position: "fixed",
@@ -210,10 +231,26 @@ export function ClickOverlay() {
 
   return (
     <div style={overlayStyle} className="click-overlay-container">
+      {/* Debug info */}
+      <div style={{
+        position: "fixed",
+        bottom: 20,
+        right: 20,
+        backgroundColor: "rgba(0,0,0,0.8)",
+        color: "#fff",
+        padding: "8px 12px",
+        borderRadius: "4px",
+        fontSize: "12px",
+        fontFamily: "monospace",
+        zIndex: 1000001,
+      }}>
+        Elements: {elements.length} | Offset: ({windowOffset.x}, {windowOffset.y})
+      </div>
+
       {/* Show current input at top of screen */}
-      {styleSettings.show_search_bar && inputBuffer && (
+      {(styleSettings.show_search_bar || true) && (
         <div style={inputIndicatorStyle} className="input-indicator">
-          {inputBuffer}
+          {inputBuffer || "Type hint..."}
         </div>
       )}
 
@@ -225,6 +262,7 @@ export function ClickOverlay() {
           inputBuffer={inputBuffer}
           styleSettings={styleSettings}
           animationDelay={index * 5}
+          windowOffset={windowOffset}
         />
       ))}
     </div>

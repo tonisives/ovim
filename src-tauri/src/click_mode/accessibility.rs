@@ -293,23 +293,33 @@ fn collect_elements(
 
 /// Query all clickable elements in the frontmost application
 pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String> {
+    // Add a small delay to ensure the app state is stable
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
     let pid = get_frontmost_app_pid().ok_or("Could not get frontmost app")?;
 
     log::info!("Querying clickable elements for PID {}", pid);
 
-    let app_element =
-        CFHandle::new(unsafe { AXUIElementCreateApplication(pid) }).ok_or("Could not create AX element for app")?;
+    let app_element = unsafe {
+        let ptr = AXUIElementCreateApplication(pid);
+        if ptr.is_null() {
+            return Err("Could not create AX element for app".to_string());
+        }
+        CFHandle(ptr)
+    };
 
     let mut raw_elements: Vec<(f64, f64, f64, f64, String, String, AXElementHandle)> = Vec::new();
 
     // Start from focused window if available, otherwise from app
     let start_element = app_element
         .get_attribute("AXFocusedWindow")
-        .map(|w| {
-            // Need to wrap the window properly
+        .and_then(|w| {
             let ptr = w.as_ptr();
+            if ptr.is_null() {
+                return None;
+            }
             std::mem::forget(w);
-            CFHandle(unsafe { core_foundation::base::CFRetain(ptr) })
+            Some(CFHandle(unsafe { core_foundation::base::CFRetain(ptr) }))
         })
         .unwrap_or_else(|| {
             // Retain the app element for traversal
@@ -347,17 +357,102 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
 
 /// Perform a click action on an element
 pub fn perform_click(element: &AXElementHandle) -> Result<(), String> {
+    // First try AXPress
     let action = CFString::new("AXPress");
     let result = unsafe { AXUIElementPerformAction(element.as_ptr(), action.as_CFTypeRef()) };
 
     if result == 0 {
         log::info!("Successfully performed AXPress action");
-        Ok(())
-    } else {
-        log::warn!("AXPress failed with code {}, trying mouse click", result);
-        // Could fall back to CGEvent mouse click here
-        Err(format!("AXPress failed with error code: {}", result))
+        return Ok(());
     }
+
+    log::warn!("AXPress failed with code {}, trying mouse click", result);
+
+    // Fall back to simulated mouse click
+    perform_mouse_click(element)
+}
+
+/// Perform a simulated mouse click at the element's position
+fn perform_mouse_click(element: &AXElementHandle) -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
+    // Get element position
+    let position_attr = CFString::new("AXPosition");
+    let mut position_value: CFTypeRef = std::ptr::null();
+
+    let result = unsafe {
+        AXUIElementCopyAttributeValue(
+            element.as_ptr(),
+            position_attr.as_CFTypeRef(),
+            &mut position_value,
+        )
+    };
+
+    if result != 0 || position_value.is_null() {
+        return Err("Could not get element position".to_string());
+    }
+
+    let position_handle = CFHandle(position_value);
+    let (x, y) = position_handle
+        .extract_point()
+        .ok_or("Could not extract position point")?;
+
+    // Get element size to click in center
+    let size_attr = CFString::new("AXSize");
+    let mut size_value: CFTypeRef = std::ptr::null();
+
+    let result = unsafe {
+        AXUIElementCopyAttributeValue(element.as_ptr(), size_attr.as_CFTypeRef(), &mut size_value)
+    };
+
+    let (center_x, center_y) = if result == 0 && !size_value.is_null() {
+        let size_handle = CFHandle(size_value);
+        if let Some((w, h)) = size_handle.extract_size() {
+            (x + w / 2.0, y + h / 2.0)
+        } else {
+            (x, y)
+        }
+    } else {
+        (x, y)
+    };
+
+    log::info!("Performing mouse click at ({}, {})", center_x, center_y);
+
+    // Create and post mouse events
+    let point = CGPoint::new(center_x, center_y);
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Could not create event source")?;
+
+    // Mouse down
+    let mouse_down = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse down event")?;
+
+    mouse_down.post(CGEventTapLocation::HID);
+
+    // Small delay
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Mouse up
+    let mouse_up = CGEvent::new_mouse_event(
+        source,
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse up event")?;
+
+    mouse_up.post(CGEventTapLocation::HID);
+
+    log::info!("Mouse click completed");
+    Ok(())
 }
 
 /// Perform a right-click (context menu) action on an element

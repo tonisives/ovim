@@ -3130,6 +3130,7 @@ dependencies = [
  "core-foundation",
  "core-graphics 0.25.0",
  "dirs",
+ "dispatch",
  "env_logger",
  "image",
  "libc",
