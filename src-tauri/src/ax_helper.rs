@@ -66,9 +66,9 @@ const CLICKABLE_ROLES: &[&str] = &[
     "AXHeading",
 ];
 
-// Depth limit for traversal - System Settings crashes at deeper levels
-const MAX_DEPTH: usize = 6;
-const MAX_ELEMENTS: usize = 150;
+// Depth limit for traversal
+const MAX_DEPTH: usize = 12;
+const MAX_ELEMENTS: usize = 300;
 
 /// Window bounds for filtering elements
 #[derive(Debug, Clone, Copy)]
@@ -253,30 +253,32 @@ fn collect_elements(
 
     let role = element.get_string_attribute("AXRole").unwrap_or_default();
 
-    // Skip problematic roles that often have unstable accessibility state
-    // and can throw ObjC exceptions when queried during transitions
-    if role.is_empty()
-        || role == "AXUnknown"
-        || role == "AXMenu"
+    // Skip elements with empty/unknown roles entirely
+    if role.is_empty() || role == "AXUnknown" {
+        return;
+    }
+
+    // Skip these roles as clickable but still traverse their children
+    let skip_as_clickable = role == "AXMenu"
         || role == "AXMenuBar"
         || role == "AXBusyIndicator"
         || role == "AXProgressIndicator"
         || role == "AXValueIndicator"
         || role == "AXScrollBar"
-        || role == "AXOutline"  // Sidebar outline can be unstable
-    {
-        return;
-    }
+        || role == "AXOutline"
+        || role == "AXScrollArea"
+        || role == "AXSplitGroup"
+        || role == "AXGroup";
 
     // Only check AXActions for roles that commonly have them to avoid crashes
     let check_actions = matches!(role.as_str(),
         "AXButton" | "AXLink" | "AXMenuItem" | "AXMenuButton" |
         "AXCheckBox" | "AXRadioButton" | "AXPopUpButton" |
-        "AXDisclosureTriangle" | "AXToolbarButton" | "AXGroup" |
+        "AXDisclosureTriangle" | "AXToolbarButton" |
         "AXStaticText" | "AXImage" | "AXCell" | "AXRow"
     );
 
-    let is_clickable = is_clickable_role(&role) || (check_actions && has_press_action(element));
+    let is_clickable = !skip_as_clickable && (is_clickable_role(&role) || (check_actions && has_press_action(element)));
 
     if is_clickable && is_visible(element) {
         if let (Some(pos), Some(size)) = (
