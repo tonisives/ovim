@@ -66,6 +66,8 @@
 
         installPhase = ''
           export HOME=$TMPDIR
+          export PNPM_HOME=$TMPDIR
+          export NODE_EXTRA_CA_CERTS=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
           export STORE_PATH=$(pnpm store path)
 
           pnpm install --frozen-lockfile --ignore-scripts
@@ -84,10 +86,12 @@
         name = "ovim-frontend";
         src = ./.;
 
-        nativeBuildInputs = with pkgs; [pnpm nodejs];
+        nativeBuildInputs = with pkgs; [pnpm nodejs cacert];
 
         buildPhase = ''
           export HOME=$TMPDIR
+          export PNPM_HOME=$TMPDIR
+          export NODE_EXTRA_CA_CERTS=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
           cp -r ${pnpmDeps}/node_modules ./node_modules
           chmod -R +w ./node_modules
           pnpm build
