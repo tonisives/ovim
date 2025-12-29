@@ -4,13 +4,14 @@
 //! It's run as a subprocess so that if the accessibility API throws an
 //! Objective-C exception, it crashes this process instead of the main app.
 //!
-//! We use objc_exception to catch ObjC exceptions and recover gracefully.
+//! Note: We don't use objc_exception here because it's incompatible with Rust's
+//! stack unwinding. Instead, we just let the subprocess crash if an exception
+//! occurs - that's the whole point of the subprocess design.
 
 #![allow(unexpected_cfgs)]
 
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::CFString;
-use objc_exception::r#try as try_objc;
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -111,26 +112,28 @@ impl CFHandle {
     fn get_attribute(&self, attr_name: &str) -> Option<CFHandle> {
         let attr = CFString::new(attr_name);
         let mut value: CFTypeRef = std::ptr::null();
-
-        // Wrap in ObjC exception handler to catch crashes from unstable UI state
-        let element_ptr = self.0;
-        let attr_ptr = attr.as_CFTypeRef();
-        let value_ptr = &mut value as *mut CFTypeRef;
-
-        let result = unsafe {
-            try_objc(|| {
-                AXUIElementCopyAttributeValue(element_ptr, attr_ptr, value_ptr)
-            })
-        };
-
-        match result {
-            Ok(res) if res == 0 && !value.is_null() => Some(CFHandle(value)),
-            _ => None,
+        let result =
+            unsafe { AXUIElementCopyAttributeValue(self.0, attr.as_CFTypeRef(), &mut value) };
+        if result != 0 || value.is_null() {
+            None
+        } else {
+            Some(CFHandle(value))
         }
     }
 
     fn get_string_attribute(&self, attr_name: &str) -> Option<String> {
         let handle = self.get_attribute(attr_name)?;
+
+        // Check if this is actually a CFString before trying to convert
+        // Some AX attributes return CFNumber or other types
+        let type_id = unsafe { core_foundation::base::CFGetTypeID(handle.0) };
+        let string_type_id = unsafe { core_foundation::string::CFStringGetTypeID() };
+
+        if type_id != string_type_id {
+            // Not a string - skip it
+            return None;
+        }
+
         let cf_string: CFString = unsafe { CFString::wrap_under_create_rule(handle.0 as _) };
         let result = cf_string.to_string();
         std::mem::forget(handle);
@@ -241,7 +244,9 @@ fn is_visible(element: &CFHandle) -> bool {
     w > 0.0 && h > 0.0 && x >= -10000.0 && y >= -10000.0
 }
 
-fn collect_elements(
+/// Inner element collection function - no try_objc wrappers
+/// Must be called from within a try_objc block in query_elements
+fn collect_elements_inner(
     element: &CFHandle,
     elements: &mut Vec<RawElement>,
     depth: usize,
@@ -329,23 +334,12 @@ fn collect_elements(
         }
     }
 
-    // Recurse into children - wrapped in exception handler
+    // Recurse into children
     let children_attr = CFString::new("AXChildren");
     let mut children_value: CFTypeRef = std::ptr::null();
 
-    let element_ptr = element.0;
-    let attr_ptr = children_attr.as_CFTypeRef();
-    let value_ptr = &mut children_value as *mut CFTypeRef;
-
     let result = unsafe {
-        try_objc(|| {
-            AXUIElementCopyAttributeValue(element_ptr, attr_ptr, value_ptr)
-        })
-    };
-
-    let result = match result {
-        Ok(r) => r,
-        Err(_) => return, // ObjC exception caught, skip this element's children
+        AXUIElementCopyAttributeValue(element.0, children_attr.as_CFTypeRef(), &mut children_value)
     };
 
     if result != 0 || children_value.is_null() {
@@ -355,6 +349,7 @@ fn collect_elements(
     let _children_handle = CFHandle(children_value);
 
     let count = unsafe { core_foundation::array::CFArrayGetCount(children_value as _) };
+
     if count <= 0 {
         return;
     }
@@ -376,7 +371,7 @@ fn collect_elements(
 
         unsafe { core_foundation::base::CFRetain(child_ptr) };
         let child = CFHandle(child_ptr);
-        collect_elements(&child, elements, depth + 1, window_bounds);
+        collect_elements_inner(&child, elements, depth + 1, window_bounds);
     }
 }
 
@@ -413,7 +408,9 @@ fn get_window_bounds(window: &CFHandle) -> Option<WindowBounds> {
     })
 }
 
-fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
+/// Inner function that does all the work without try_objc wrappers
+/// This is safe to call from within a try_objc block
+fn query_elements_inner(pid: i32) -> Result<Vec<RawElement>, String> {
     let app_element = unsafe {
         let ptr = AXUIElementCreateApplication(pid);
         if ptr.is_null() {
@@ -444,15 +441,17 @@ fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
             // Get window bounds for filtering
             let bounds = get_window_bounds(&w);
             std::mem::forget(w);
-            Some((CFHandle(unsafe { core_foundation::base::CFRetain(ptr) }), bounds))
+            unsafe { core_foundation::base::CFRetain(ptr) };
+            Some((CFHandle(ptr), bounds))
         })
         .or_else(|| {
             // Try AXWindows array as fallback
             app_element.get_attribute("AXWindows").and_then(|windows| {
-                let count = unsafe { core_foundation::array::CFArrayGetCount(windows.0 as _) };
+                let windows_ptr = windows.0;
+                let count = unsafe { core_foundation::array::CFArrayGetCount(windows_ptr as _) };
                 if count > 0 {
                     let first = unsafe {
-                        core_foundation::array::CFArrayGetValueAtIndex(windows.0 as _, 0)
+                        core_foundation::array::CFArrayGetValueAtIndex(windows_ptr as _, 0)
                     };
                     if !first.is_null() {
                         unsafe { core_foundation::base::CFRetain(first) };
@@ -465,12 +464,24 @@ fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
             })
         })
         .unwrap_or_else(|| {
-            (CFHandle(unsafe { core_foundation::base::CFRetain(app_element.0) }), None)
+            let app_ptr = app_element.0;
+            unsafe { core_foundation::base::CFRetain(app_ptr) };
+            (CFHandle(app_ptr), None)
         });
 
-    collect_elements(&start_element, &mut elements, 0, window_bounds);
+    collect_elements_inner(&start_element, &mut elements, 0, window_bounds);
 
     Ok(elements)
+}
+
+fn query_elements(pid: i32) -> Result<Vec<RawElement>, String> {
+    // Since try_objc uses setjmp/longjmp which doesn't work well with Rust's
+    // destructor-based cleanup (closures with captured state, Vec, etc.),
+    // we just call the inner function directly.
+    //
+    // The whole point of this subprocess is that if it crashes, it only
+    // crashes the subprocess, not the main app. So we let it crash if needed.
+    query_elements_inner(pid)
 }
 
 fn main() {
