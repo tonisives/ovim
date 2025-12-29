@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 pub mod accessibility;
+pub mod browser_clickables;
 pub mod element;
 pub mod hints;
 pub mod native_hints;
