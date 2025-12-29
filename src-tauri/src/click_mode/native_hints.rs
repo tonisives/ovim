@@ -84,30 +84,64 @@ fn show_hints_on_main_thread(elements: &[ClickableElement], style: &HintStyle) {
     };
 
     unsafe {
-        // Get main screen height for coordinate conversion
-        let main_screen: *mut objc::runtime::Object = msg_send![class!(NSScreen), mainScreen];
-        if main_screen.is_null() {
-            log::error!("Failed to get main screen");
+        // Get the PRIMARY screen (the one with the menu bar, at Cocoa origin 0,0)
+        // NOT mainScreen which returns the screen with the key window!
+        // The primary screen is always screens[0] in the NSScreen.screens array.
+        let screens: *mut objc::runtime::Object = msg_send![class!(NSScreen), screens];
+        if screens.is_null() {
+            log::error!("Failed to get screens");
             return;
         }
-        let screen_frame: core_graphics::geometry::CGRect = msg_send![main_screen, frame];
+        let count: usize = msg_send![screens, count];
+        if count == 0 {
+            log::error!("No screens found");
+            return;
+        }
+        let primary_screen: *mut objc::runtime::Object = msg_send![screens, objectAtIndex: 0usize];
+        if primary_screen.is_null() {
+            log::error!("Failed to get primary screen");
+            return;
+        }
+        let screen_frame: core_graphics::geometry::CGRect = msg_send![primary_screen, frame];
         let screen_height = screen_frame.size.height;
 
         for element in elements {
-            // AXPosition gives top-left in screen coordinates (origin top-left)
-            // Cocoa uses bottom-left origin, so convert:
-            // cocoa_y = screen_height - ax_y - hint_height
+            // AXPosition gives top-left in screen coordinates (origin at top-left of main screen)
+            // Cocoa uses bottom-left origin for the main screen
+            //
+            // For main screen (0,0 at top-left in AX):
+            //   cocoa_y = screen_height - ax_y - hint_height
+            //
+            // The main screen's Cocoa origin is (0, 0) at bottom-left.
+            // AX origin is (0, 0) at top-left of main screen.
+            // So: cocoa_y = main_screen_height - ax_y - hint_height
+            //
+            // This works for ALL screens because Cocoa coordinates are relative to
+            // the main screen's bottom-left corner, and AX coordinates are relative to
+            // the main screen's top-left corner.
             let hint_height = style.font_size + 4.0;
             let cocoa_y = screen_height - element.y - hint_height;
+
+            // Log first 3 hints at info level for debugging
+            if windows.len() < 3 {
+                log::info!(
+                    "Hint '{}' at AX({}, {}) -> Cocoa({}, {})",
+                    element.hint, element.x, element.y, element.x, cocoa_y
+                );
+            }
 
             match create_hint_window(element.x, cocoa_y, &element.hint, style) {
                 Some(window) => windows.push(SendableId(window)),
                 None => {} // Silently skip failures
             }
         }
-    }
 
-    log::info!("Created {} native hint windows", windows.len());
+        log::info!(
+            "Created {} native hint windows (main_screen_height={})",
+            windows.len(),
+            screen_height
+        );
+    }
 }
 
 /// Hide and release all hint windows

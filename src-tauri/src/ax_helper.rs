@@ -3,11 +3,14 @@
 //! This binary queries the accessibility tree and outputs element data as JSON.
 //! It's run as a subprocess so that if the accessibility API throws an
 //! Objective-C exception, it crashes this process instead of the main app.
+//!
+//! We use objc_exception to catch ObjC exceptions and recover gracefully.
 
 #![allow(unexpected_cfgs)]
 
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::CFString;
+use objc_exception::r#try as try_objc;
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -44,6 +47,7 @@ const CLICKABLE_ROLES: &[&str] = &[
     "AXLink",
     "AXMenuItem",
     "AXMenuBarItem",
+    "AXMenuButton",
     "AXCheckBox",
     "AXRadioButton",
     "AXPopUpButton",
@@ -59,12 +63,10 @@ const CLICKABLE_ROLES: &[&str] = &[
     "AXDisclosureTriangle",
     "AXIncrementor",
     "AXSlider",
-    // Container items often found in lists (e.g., Bluetooth devices in System Settings)
-    "AXGroup",
+    "AXHeading",
 ];
 
-// Reduced depth and element limits to minimize crashes
-// Deep accessibility trees in apps like System Settings can throw ObjC exceptions
+// Depth limit for traversal - System Settings crashes at deeper levels
 const MAX_DEPTH: usize = 6;
 const MAX_ELEMENTS: usize = 150;
 
@@ -109,12 +111,21 @@ impl CFHandle {
     fn get_attribute(&self, attr_name: &str) -> Option<CFHandle> {
         let attr = CFString::new(attr_name);
         let mut value: CFTypeRef = std::ptr::null();
-        let result =
-            unsafe { AXUIElementCopyAttributeValue(self.0, attr.as_CFTypeRef(), &mut value) };
-        if result != 0 || value.is_null() {
-            None
-        } else {
-            Some(CFHandle(value))
+
+        // Wrap in ObjC exception handler to catch crashes from unstable UI state
+        let element_ptr = self.0;
+        let attr_ptr = attr.as_CFTypeRef();
+        let value_ptr = &mut value as *mut CFTypeRef;
+
+        let result = unsafe {
+            try_objc(|| {
+                AXUIElementCopyAttributeValue(element_ptr, attr_ptr, value_ptr)
+            })
+        };
+
+        match result {
+            Ok(res) if res == 0 && !value.is_null() => Some(CFHandle(value)),
+            _ => None,
         }
     }
 
@@ -242,12 +253,30 @@ fn collect_elements(
 
     let role = element.get_string_attribute("AXRole").unwrap_or_default();
 
-    // Skip menu hierarchies entirely - they often have unstable accessibility state
+    // Skip problematic roles that often have unstable accessibility state
     // and can throw ObjC exceptions when queried during transitions
-    if role == "AXMenu" || role == "AXMenuBar" {
+    if role.is_empty()
+        || role == "AXUnknown"
+        || role == "AXMenu"
+        || role == "AXMenuBar"
+        || role == "AXBusyIndicator"
+        || role == "AXProgressIndicator"
+        || role == "AXValueIndicator"
+        || role == "AXScrollBar"
+        || role == "AXOutline"  // Sidebar outline can be unstable
+    {
         return;
     }
-    let is_clickable = is_clickable_role(&role) || has_press_action(element);
+
+    // Only check AXActions for roles that commonly have them to avoid crashes
+    let check_actions = matches!(role.as_str(),
+        "AXButton" | "AXLink" | "AXMenuItem" | "AXMenuButton" |
+        "AXCheckBox" | "AXRadioButton" | "AXPopUpButton" |
+        "AXDisclosureTriangle" | "AXToolbarButton" | "AXGroup" |
+        "AXStaticText" | "AXImage" | "AXCell" | "AXRow"
+    );
+
+    let is_clickable = is_clickable_role(&role) || (check_actions && has_press_action(element));
 
     if is_clickable && is_visible(element) {
         if let (Some(pos), Some(size)) = (
@@ -298,11 +327,23 @@ fn collect_elements(
         }
     }
 
-    // Recurse into children
+    // Recurse into children - wrapped in exception handler
     let children_attr = CFString::new("AXChildren");
     let mut children_value: CFTypeRef = std::ptr::null();
+
+    let element_ptr = element.0;
+    let attr_ptr = children_attr.as_CFTypeRef();
+    let value_ptr = &mut children_value as *mut CFTypeRef;
+
     let result = unsafe {
-        AXUIElementCopyAttributeValue(element.0, children_attr.as_CFTypeRef(), &mut children_value)
+        try_objc(|| {
+            AXUIElementCopyAttributeValue(element_ptr, attr_ptr, value_ptr)
+        })
+    };
+
+    let result = match result {
+        Ok(r) => r,
+        Err(_) => return, // ObjC exception caught, skip this element's children
     };
 
     if result != 0 || children_value.is_null() {
@@ -452,7 +493,7 @@ fn main() {
     // Delay to let UI stabilize - accessibility API can crash during transitions
     // Longer delay helps avoid crashes from UI animations/transitions
     // System Settings especially needs more time to stabilize
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(300));
 
     match query_elements(pid) {
         Ok(elements) => {

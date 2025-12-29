@@ -13,6 +13,7 @@ interface WindowOffset {
 
 /** Main overlay component that displays hint labels */
 export function ClickOverlay() {
+  console.log("=== ClickOverlay component rendering ===")
   const [elements, setElements] = useState<ClickableElement[]>([])
   const [inputBuffer, setInputBuffer] = useState("")
   const [isActive, setIsActive] = useState(false)
@@ -46,13 +47,26 @@ export function ClickOverlay() {
     const currentWindow = getCurrentWindow()
 
     // Listen for activation event
-    const unlistenActivate = listen<ClickableElement[]>(
+    interface ActivatedPayload {
+      elements: ClickableElement[]
+      window_offset: [number, number]
+    }
+    const unlistenActivate = listen<ActivatedPayload>(
       "click-mode-activated",
       async (event) => {
-        console.log("Click mode activated with", event.payload.length, "elements")
-        setElements(event.payload)
+        const { elements: newElements, window_offset } = event.payload
+        console.log("=== CLICK MODE ACTIVATED ===")
+        console.log("Elements count:", newElements.length)
+        console.log("Window offset from backend:", window_offset)
+        console.log("First 3 elements:", newElements.slice(0, 3))
+        setElements(newElements)
         setInputBuffer("")
         setIsActive(true)
+        console.log("isActive set to true")
+
+        // Use offset from backend directly
+        setWindowOffset({ x: window_offset[0], y: window_offset[1] })
+        console.log("Elements sample:", newElements.slice(0, 3).map(e => ({ hint: e.hint, x: e.x, y: e.y })))
 
         // Refresh settings on activation
         try {
@@ -73,18 +87,6 @@ export function ClickOverlay() {
         // Show and position the overlay window
         await currentWindow.show()
         await currentWindow.setFocus()
-
-        // Get window position for coordinate offset
-        // Small delay to ensure window is positioned
-        await new Promise((resolve) => setTimeout(resolve, 50))
-        try {
-          const position = await currentWindow.outerPosition()
-          console.log("Window position:", position.x, position.y)
-          console.log("Elements sample:", event.payload.slice(0, 3).map(e => ({ hint: e.hint, x: e.x, y: e.y })))
-          setWindowOffset({ x: position.x, y: position.y })
-        } catch (e) {
-          console.error("Failed to get window position:", e)
-        }
       }
     )
 
@@ -194,7 +196,12 @@ export function ClickOverlay() {
   }, [isActive, elements, inputBuffer])
 
   if (!isActive) {
-    return null
+    // Show a small indicator that overlay is loaded but inactive
+    return (
+      <div style={{ position: "fixed", top: 5, left: 5, padding: "2px 6px", backgroundColor: "purple", color: "white", fontSize: 10, zIndex: 999999 }}>
+        Overlay Loaded (inactive)
+      </div>
+    )
   }
 
   const overlayStyle: CSSProperties = {
@@ -231,6 +238,12 @@ export function ClickOverlay() {
 
   return (
     <div style={overlayStyle} className="click-overlay-container">
+      {/* Corner markers for debugging window position */}
+      <div style={{ position: "fixed", top: 0, left: 0, width: 50, height: 50, backgroundColor: "red", zIndex: 1000002, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: "bold" }}>TL</div>
+      <div style={{ position: "fixed", top: 0, right: 0, width: 50, height: 50, backgroundColor: "green", zIndex: 1000002, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: "bold" }}>TR</div>
+      <div style={{ position: "fixed", bottom: 0, left: 0, width: 50, height: 50, backgroundColor: "blue", zIndex: 1000002, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: "bold" }}>BL</div>
+      <div style={{ position: "fixed", bottom: 0, right: 0, width: 50, height: 50, backgroundColor: "yellow", zIndex: 1000002, display: "flex", alignItems: "center", justifyContent: "center", color: "black", fontWeight: "bold" }}>BR</div>
+
       {/* Debug info */}
       <div style={{
         position: "fixed",
@@ -243,8 +256,14 @@ export function ClickOverlay() {
         fontSize: "12px",
         fontFamily: "monospace",
         zIndex: 1000001,
+        maxWidth: "400px",
       }}>
-        Elements: {elements.length} | Offset: ({windowOffset.x}, {windowOffset.y})
+        <div>Elements: {elements.length} | Offset: ({windowOffset.x}, {windowOffset.y})</div>
+        {elements.slice(0, 3).map((e, i) => (
+          <div key={i}>
+            {e.hint}: raw({e.x}, {e.y}) -&gt; label({e.x - windowOffset.x}, {e.y - windowOffset.y})
+          </div>
+        ))}
       </div>
 
       {/* Show current input at top of screen */}

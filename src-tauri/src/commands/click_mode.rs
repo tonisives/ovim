@@ -1,9 +1,17 @@
 //! Tauri commands for Click Mode
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::click_mode::{ClickModeState, ClickableElement};
+use crate::window::position_click_overlay_fullscreen;
 use crate::AppState;
+
+/// Payload for click-mode-activated event including window offset
+#[derive(Clone, serde::Serialize)]
+struct ClickModeActivatedPayload {
+    elements: Vec<ClickableElement>,
+    window_offset: (f64, f64),
+}
 
 /// Activate click mode and return the list of clickable elements
 #[tauri::command]
@@ -19,8 +27,30 @@ pub async fn activate_click_mode(
         manager.activate()?
     };
 
-    // Emit event to show overlay
-    let _ = app.emit("click-mode-activated", &elements);
+    // Position overlay to cover all screens before showing
+    let mut window_offset = (0.0, 0.0);
+    if let Some(overlay) = app.get_webview_window("click-overlay") {
+        match position_click_overlay_fullscreen(&overlay) {
+            Ok(offset) => {
+                window_offset = offset;
+            }
+            Err(e) => {
+                log::warn!("Failed to position click overlay: {}", e);
+            }
+        }
+    }
+
+    // Emit event to show overlay with window offset
+    let payload = ClickModeActivatedPayload {
+        elements: elements.clone(),
+        window_offset,
+    };
+    log::info!(
+        "Emitting click-mode-activated with {} elements, offset: {:?}",
+        elements.len(),
+        window_offset
+    );
+    let _ = app.emit("click-mode-activated", &payload);
 
     Ok(elements)
 }
