@@ -91,6 +91,37 @@ fn get_frontmost_app_pid() -> Option<i32> {
     }
 }
 
+/// Get the bundle identifier of the frontmost application
+pub fn get_frontmost_app_bundle_id() -> Option<String> {
+    unsafe {
+        use objc::{class, msg_send, sel, sel_impl};
+
+        let workspace: *mut objc::runtime::Object =
+            msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return None;
+        }
+
+        let app: *mut objc::runtime::Object = msg_send![workspace, frontmostApplication];
+        if app.is_null() {
+            return None;
+        }
+
+        let bundle_id: *mut objc::runtime::Object = msg_send![app, bundleIdentifier];
+        if bundle_id.is_null() {
+            return None;
+        }
+
+        let utf8: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
+        if utf8.is_null() {
+            return None;
+        }
+
+        let c_str = std::ffi::CStr::from_ptr(utf8);
+        c_str.to_str().ok().map(|s| s.to_string())
+    }
+}
+
 /// RAII wrapper for CFTypeRef
 struct CFHandle(CFTypeRef);
 
@@ -533,12 +564,46 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
 
     log::info!("Found {} raw clickable elements via subprocess", raw_elements.len());
 
+    // Check if this is a browser that needs JavaScript injection for web content
+    let mut all_elements: Vec<RawElementData> = raw_elements;
+
+    if let Some(bundle_id) = get_frontmost_app_bundle_id() {
+        if let Some(browser_type) = super::browser_clickables::detect_browser_type(&bundle_id) {
+            if browser_type.needs_js_injection() {
+                log::info!("Detected Chromium browser {:?}, querying web clickables via JS", browser_type);
+
+                match super::browser_clickables::get_browser_clickables(browser_type) {
+                    Ok(web_clickables) => {
+                        log::info!("Found {} web clickables via JavaScript", web_clickables.len());
+
+                        // Convert web clickables to RawElementData and append
+                        for wc in web_clickables {
+                            all_elements.push(RawElementData {
+                                x: wc.x,
+                                y: wc.y,
+                                width: wc.width,
+                                height: wc.height,
+                                role: wc.tag.clone(),
+                                title: wc.text.clone(),
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to get web clickables: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    log::info!("Total clickable elements: {}", all_elements.len());
+
     // Generate hints
-    let hints = generate_hints(raw_elements.len(), super::hints::DEFAULT_HINT_CHARS);
+    let hints = generate_hints(all_elements.len(), super::hints::DEFAULT_HINT_CHARS);
 
     // Convert to internal elements
     // Note: No AXElementHandle - clicks will use position-based mouse simulation
-    let elements: Vec<ClickableElementInternal> = raw_elements
+    let elements: Vec<ClickableElementInternal> = all_elements
         .into_iter()
         .enumerate()
         .map(|(i, elem)| {
