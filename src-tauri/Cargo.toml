@@ -80,3 +80,11 @@ unused = "deny"
 all = "deny"
 # Selectively enable useful pedantic lints
 needless_pass_by_ref_mut = "deny"
+
+# For the ax-helper subprocess, use panic=abort to avoid the
+# "Rust cannot catch foreign exceptions" error when ObjC exceptions occur
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
