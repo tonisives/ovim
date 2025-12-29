@@ -67,9 +67,9 @@ impl TerminalSpawner for TerminalAppSpawner {
             format!(
                 r#"
             tell application "Terminal"
-                activate
                 do script "{}{}{} '{}'"
                 set bounds of front window to {{{}, {}, {}, {}}}
+                activate
             end tell
             "#,
                 env_prefix,
@@ -85,8 +85,8 @@ impl TerminalSpawner for TerminalAppSpawner {
             format!(
                 r#"
             tell application "Terminal"
-                activate
                 do script "{}{}{} '{}'"
+                activate
             end tell
             "#,
                 env_prefix, editor_path, args_str, file_path

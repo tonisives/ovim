@@ -62,6 +62,10 @@ impl TerminalSpawner for GhosttySpawner {
             c
         };
 
+        // Prevent Ghostty from creating its default initial window
+        // (we only want the window created by the -e command)
+        cmd.arg("--initial-window=false");
+
         // Add window title
         cmd.args([&format!("--title={}", unique_title)]);
 
