@@ -87,6 +87,7 @@
         nativeBuildInputs = with pkgs; [pnpm nodejs];
 
         buildPhase = ''
+          export HOME=$TMPDIR
           cp -r ${pnpmDeps}/node_modules ./node_modules
           chmod -R +w ./node_modules
           pnpm build
