@@ -81,9 +81,9 @@ pub fn setup_click_overlay_window(window: &WebviewWindow) -> Result<(), String> 
 }
 
 /// Position the click overlay to cover all screens
+/// Returns the window offset (min_x, min_y) in screen coordinates
 #[allow(unused_variables)]
-#[allow(dead_code)]
-pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(), String> {
+pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(f64, f64), String> {
     #[cfg(target_os = "macos")]
     {
         use objc::{class, msg_send, sel, sel_impl};
@@ -128,8 +128,8 @@ pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(), S
                 max_y = max_y.max(screen_y + frame.size.height);
             }
 
-            let width = (max_x - min_x) as u32;
-            let height = (max_y - min_y) as u32;
+            let width = max_x - min_x;
+            let height = max_y - min_y;
 
             log::info!(
                 "Positioning click overlay: x={}, y={}, w={}, h={}",
@@ -139,15 +139,20 @@ pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(), S
                 height
             );
 
-            // Set window position and size
-            let _ = window.set_position(tauri::Position::Physical(
-                tauri::PhysicalPosition::new(min_x as i32, min_y as i32),
+            // Set window position and size using logical coordinates
+            // The accessibility API returns positions in logical points (not physical pixels)
+            // so we must use LogicalPosition/LogicalSize to match
+            let _ = window.set_position(tauri::Position::Logical(
+                tauri::LogicalPosition::new(min_x, min_y),
             ));
-            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
                 width, height,
             )));
+
+            return Ok((min_x, min_y));
         }
     }
 
-    Ok(())
+    #[cfg(not(target_os = "macos"))]
+    Ok((0.0, 0.0))
 }
