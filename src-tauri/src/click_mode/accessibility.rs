@@ -579,6 +579,8 @@ fn get_helper_binary_path() -> Option<std::path::PathBuf> {
 /// Query elements using the subprocess (internal, for caching)
 /// Returns raw elements and is_modal flag
 fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), String> {
+    let start = Instant::now();
+
     let helper_path = match get_helper_binary_path() {
         Some(p) => p,
         None => {
@@ -587,56 +589,36 @@ fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), St
         }
     };
 
-    log::debug!("Using helper at {:?}", helper_path);
+    log::info!("[TIMING] helper_path lookup: {}ms", start.elapsed().as_millis());
 
-    // Run the helper subprocess with retry logic
-    let mut helper_output: Option<HelperOutput> = None;
+    // Run the helper subprocess - single attempt for speed, retry only on failure
+    let subprocess_start = Instant::now();
+    let output = std::process::Command::new(&helper_path)
+        .arg(pid.to_string())
+        .output();
 
-    for attempt in 0..3 {
-        if attempt > 0 {
-            // Short delay between retries - use exponential backoff
-            let delay = 100 * (1 << (attempt - 1)); // 100ms, 200ms
-            log::info!("Retry attempt {} after {}ms...", attempt, delay);
-            std::thread::sleep(std::time::Duration::from_millis(delay));
-        }
+    log::info!("[TIMING] subprocess execution: {}ms", subprocess_start.elapsed().as_millis());
 
-        let output = match std::process::Command::new(&helper_path)
-            .arg(pid.to_string())
-            .output()
-        {
-            Ok(o) => o,
-            Err(e) => {
-                log::warn!("Failed to run helper (attempt {}): {}", attempt + 1, e);
-                continue;
-            }
-        };
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            log::warn!("Helper subprocess failed (attempt {}): {}", attempt + 1, stderr.trim());
-            continue;
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        match serde_json::from_str::<HelperOutput>(&stdout) {
-            Ok(parsed) => {
-                helper_output = Some(parsed);
-                break;
-            }
-            Err(e) => {
-                log::warn!("Failed to parse helper output (attempt {}): {}", attempt + 1, e);
-                continue;
-            }
-        }
-    }
-
-    let helper_output = match helper_output {
-        Some(o) => o,
-        None => {
-            log::error!("All subprocess attempts failed - accessibility API may be unstable");
-            return Err("Failed to query elements - try again in a moment".to_string());
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => {
+            log::error!("Failed to run helper: {}", e);
+            return Err(format!("Failed to run helper: {}", e));
         }
     };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("Helper subprocess failed: {}", stderr.trim());
+        return Err(format!("Helper failed: {}", stderr.trim()));
+    }
+
+    let parse_start = Instant::now();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let helper_output: HelperOutput = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse helper output: {}", e))?;
+
+    log::info!("[TIMING] JSON parsing: {}ms", parse_start.elapsed().as_millis());
 
     let is_modal = helper_output.is_modal;
     log::info!("Found {} raw clickable elements via subprocess (is_modal: {})",
@@ -644,6 +626,8 @@ fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), St
 
     // Cache the results
     cache_elements(pid, helper_output.elements.clone(), is_modal);
+
+    log::info!("[TIMING] total subprocess fn: {}ms", start.elapsed().as_millis());
 
     Ok((helper_output.elements, is_modal))
 }
