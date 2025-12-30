@@ -342,3 +342,143 @@ pub fn filter_hints(input: &str, elements: &[ClickableElement]) {
         }
     });
 }
+
+/// Update hint visibility and text based on input filter
+/// When first character is typed, shows only the remaining characters
+/// Dispatches to main thread for thread safety
+pub fn filter_hints_with_input(input: &str, elements: &[ClickableElement]) {
+    let input_upper = input.to_uppercase();
+    let input_len = input_upper.len();
+    let hints: Vec<String> = elements.iter().map(|e| e.hint.clone()).collect();
+
+    Queue::main().exec_async(move || {
+        let windows = match HINT_WINDOWS.try_lock() {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+
+        unsafe {
+            for (i, SendableId(window)) in windows.iter().enumerate() {
+                if i < hints.len() && !window.is_null() {
+                    let hint = &hints[i];
+                    let visible = input_upper.is_empty() || hint.starts_with(&input_upper);
+
+                    if visible {
+                        let _: () = msg_send![*window, orderFrontRegardless];
+
+                        // Update the text to show only remaining characters
+                        if input_len > 0 && hint.len() > input_len {
+                            let remaining = &hint[input_len..];
+                            update_window_text(*window, remaining);
+                        }
+                    } else {
+                        let _: () =
+                            msg_send![*window, orderOut: std::ptr::null::<objc::runtime::Object>()];
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Update the text of a hint window
+unsafe fn update_window_text(window: *mut objc::runtime::Object, text: &str) {
+    let content_view: *mut objc::runtime::Object = msg_send![window, contentView];
+    if content_view.is_null() {
+        return;
+    }
+
+    // Get subviews to find the text field
+    let subviews: *mut objc::runtime::Object = msg_send![content_view, subviews];
+    if subviews.is_null() {
+        return;
+    }
+
+    let count: usize = msg_send![subviews, count];
+    for i in 0..count {
+        let subview: *mut objc::runtime::Object = msg_send![subviews, objectAtIndex: i];
+        if !subview.is_null() {
+            // Check if this is an NSTextField by trying to set its string value
+            let class_name: *mut objc::runtime::Object = msg_send![subview, className];
+            if !class_name.is_null() {
+                let utf8: *const std::os::raw::c_char = msg_send![class_name, UTF8String];
+                if !utf8.is_null() {
+                    let name = std::ffi::CStr::from_ptr(utf8).to_string_lossy();
+                    if name == "NSTextField" {
+                        let nsstring = create_nsstring(text);
+                        let _: () = msg_send![subview, setStringValue: nsstring];
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Trigger shake animation on all visible hint windows
+pub fn shake_hints() {
+    Queue::main().exec_async(move || {
+        let windows = match HINT_WINDOWS.try_lock() {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+
+        unsafe {
+            for SendableId(window) in windows.iter() {
+                if !window.is_null() {
+                    // Check if window is visible
+                    let is_visible: bool = msg_send![*window, isVisible];
+                    if is_visible {
+                        shake_window(*window);
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Apply shake animation to a window using Core Animation
+unsafe fn shake_window(window: *mut objc::runtime::Object) {
+    // Get the content view and its layer
+    let content_view: *mut objc::runtime::Object = msg_send![window, contentView];
+    if content_view.is_null() {
+        return;
+    }
+
+    let layer: *mut objc::runtime::Object = msg_send![content_view, layer];
+    if layer.is_null() {
+        return;
+    }
+
+    // Create a CAKeyframeAnimation for the position
+    let animation: *mut objc::runtime::Object = msg_send![
+        class!(CAKeyframeAnimation),
+        animationWithKeyPath: create_nsstring("transform.translation.x")
+    ];
+
+    if animation.is_null() {
+        return;
+    }
+
+    // Set the keyframe values: 0 -> 4 -> -4 -> 3 -> -3 -> 0
+    let values: *mut objc::runtime::Object = msg_send![class!(NSMutableArray), array];
+    let v0: *mut objc::runtime::Object = msg_send![class!(NSNumber), numberWithDouble: 0.0f64];
+    let v1: *mut objc::runtime::Object = msg_send![class!(NSNumber), numberWithDouble: 4.0f64];
+    let v2: *mut objc::runtime::Object = msg_send![class!(NSNumber), numberWithDouble: -4.0f64];
+    let v3: *mut objc::runtime::Object = msg_send![class!(NSNumber), numberWithDouble: 3.0f64];
+    let v4: *mut objc::runtime::Object = msg_send![class!(NSNumber), numberWithDouble: -3.0f64];
+    let v5: *mut objc::runtime::Object = msg_send![class!(NSNumber), numberWithDouble: 0.0f64];
+    let _: () = msg_send![values, addObject: v0];
+    let _: () = msg_send![values, addObject: v1];
+    let _: () = msg_send![values, addObject: v2];
+    let _: () = msg_send![values, addObject: v3];
+    let _: () = msg_send![values, addObject: v4];
+    let _: () = msg_send![values, addObject: v5];
+    let _: () = msg_send![animation, setValues: values];
+
+    // Set timing
+    let _: () = msg_send![animation, setDuration: 0.25f64];
+
+    // Add animation to layer
+    let _: () = msg_send![layer, addAnimation: animation forKey: create_nsstring("shake")];
+}

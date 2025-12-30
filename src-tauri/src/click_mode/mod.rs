@@ -60,6 +60,8 @@ pub enum ClickModeState {
         element_count: usize,
         /// The type of click action to perform
         click_action: ClickAction,
+        /// Whether the user made a wrong second keystroke (allows one retry)
+        wrong_second_key: bool,
     },
     /// Search mode is active (fuzzy search by element text)
     Searching {
@@ -113,6 +115,19 @@ impl ClickModeState {
     }
 }
 
+/// Result of hint input handling
+#[derive(Debug, Clone)]
+pub enum HintInputResult {
+    /// Exact match found - perform click
+    Match(ClickableElement),
+    /// Partial match - continue waiting for more input
+    Partial,
+    /// Wrong second key - show shake animation, allow one retry
+    WrongSecondKey,
+    /// No match at all - deactivate
+    NoMatch,
+}
+
 /// Manager for click mode state and elements
 pub struct ClickModeManager {
     /// Current state
@@ -151,6 +166,7 @@ impl ClickModeManager {
             input_buffer: String::new(),
             element_count: 0,
             click_action: self.click_action,
+            wrong_second_key: false,
         };
     }
 
@@ -185,6 +201,7 @@ impl ClickModeManager {
             input_buffer: String::new(),
             element_count,
             click_action: self.click_action,
+            wrong_second_key: false,
         };
 
         Ok(elements)
@@ -201,16 +218,19 @@ impl ClickModeManager {
     /// Handle a character input in hint mode
     ///
     /// Returns:
-    /// - `Ok(Some(element))` if a hint was matched (perform click)
-    /// - `Ok(None)` if input was accepted but no match yet
-    /// - `Err` if input doesn't match any hints
-    pub fn handle_hint_input(&mut self, c: char) -> Result<Option<ClickableElement>, String> {
-        let new_input = match &self.state {
-            ClickModeState::ShowingHints { input_buffer, .. } => {
-                format!("{}{}", input_buffer, c.to_uppercase())
+    /// - `HintInputResult::Match(element)` if a hint was matched (perform click)
+    /// - `HintInputResult::Partial` if input was accepted but no match yet
+    /// - `HintInputResult::WrongSecondKey` if user typed wrong second character (allow retry)
+    /// - `HintInputResult::NoMatch` if input doesn't match any hints
+    pub fn handle_hint_input(&mut self, c: char) -> HintInputResult {
+        let (current_input, was_wrong_second_key) = match &self.state {
+            ClickModeState::ShowingHints { input_buffer, wrong_second_key, .. } => {
+                (input_buffer.clone(), *wrong_second_key)
             }
-            _ => return Err("Not in hint mode".to_string()),
+            _ => return HintInputResult::NoMatch,
         };
+
+        let new_input = format!("{}{}", current_input, c.to_uppercase());
 
         // Check for matches
         let matching: Vec<usize> = self
@@ -226,7 +246,7 @@ impl ClickModeManager {
         // Exact match found
         if matching.len() == 1 {
             let element = self.elements[matching[0]].to_serializable();
-            return Ok(Some(element));
+            return HintInputResult::Match(element);
         }
 
         // Check for partial matches
@@ -237,18 +257,41 @@ impl ClickModeManager {
             .filter_map(|(i, e)| hints::match_hint(&e.element.hint, &new_input).map(|_| i))
             .collect();
 
-        if partial_matches.is_empty() {
-            return Err("No matching hints".to_string());
+        if !partial_matches.is_empty() {
+            // Update input buffer
+            self.state = ClickModeState::ShowingHints {
+                input_buffer: new_input,
+                element_count: self.elements.len(),
+                click_action: self.click_action,
+                wrong_second_key: false,
+            };
+            return HintInputResult::Partial;
         }
 
-        // Update input buffer
-        self.state = ClickModeState::ShowingHints {
-            input_buffer: new_input,
-            element_count: self.elements.len(),
-            click_action: self.click_action,
-        };
+        // No partial matches - check if this is second character and allow retry
+        // Only allow retry if: first char was correct AND this is the second char AND haven't retried yet
+        if current_input.len() == 1 && !was_wrong_second_key {
+            // Check if the first character still has partial matches
+            let first_char_matches: Vec<usize> = self
+                .elements
+                .iter()
+                .enumerate()
+                .filter_map(|(i, e)| hints::match_hint(&e.element.hint, &current_input).map(|_| i))
+                .collect();
 
-        Ok(None)
+            if !first_char_matches.is_empty() {
+                // First char was correct, second was wrong - allow one retry
+                self.state = ClickModeState::ShowingHints {
+                    input_buffer: current_input, // Keep first char
+                    element_count: self.elements.len(),
+                    click_action: self.click_action,
+                    wrong_second_key: true, // Mark that we had a wrong second key
+                };
+                return HintInputResult::WrongSecondKey;
+            }
+        }
+
+        HintInputResult::NoMatch
     }
 
     /// Get the center position of an element by ID
@@ -396,11 +439,12 @@ impl ClickModeManager {
 
         // Update the state to reflect the new action
         match &self.state {
-            ClickModeState::ShowingHints { input_buffer, element_count, .. } => {
+            ClickModeState::ShowingHints { input_buffer, element_count, wrong_second_key, .. } => {
                 self.state = ClickModeState::ShowingHints {
                     input_buffer: input_buffer.clone(),
                     element_count: *element_count,
                     click_action: action,
+                    wrong_second_key: *wrong_second_key,
                 };
             }
             ClickModeState::Searching { query, match_count, .. } => {

@@ -5,7 +5,7 @@ use std::thread;
 
 use tauri::Emitter;
 
-use crate::click_mode::{ClickAction, SharedClickModeManager};
+use crate::click_mode::{ClickAction, HintInputResult, SharedClickModeManager};
 use crate::commands::{RecordedKey, RecordedModifiers};
 use crate::config::Settings;
 use crate::keyboard::{KeyCode, KeyEvent};
@@ -389,7 +389,7 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
             let click_action = mgr.get_click_action();
 
             match mgr.handle_hint_input(c) {
-                Ok(Some(element)) => {
+                HintInputResult::Match(element) => {
                     // Exact match found - perform click based on stored action
                     let action_name = click_action.display_name();
                     log::info!(
@@ -447,22 +447,39 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
                         log::error!("Could not get position for element {}", element_id);
                     }
                 }
-                Ok(None) => {
+                HintInputResult::Partial => {
                     // Partial match - continue waiting for more input
                     log::debug!("Click mode: partial match, waiting for more input");
                     // Filter native hint windows to hide non-matching hints
+                    // and update to show only second letter
                     let all_elements = mgr.get_all_elements();
                     let current_input = mgr.get_current_input();
-                    native_hints::filter_hints(&current_input, &all_elements);
+                    native_hints::filter_hints_with_input(&current_input, &all_elements);
                     // Send updated filtered elements to frontend
                     let filtered = mgr.get_filtered_elements();
                     if let Some(app) = get_app_handle() {
-                        let _ = app.emit("click-mode-filtered", &filtered);
+                        let _ = app.emit("click-mode-filtered", (&filtered, &current_input));
                     }
                 }
-                Err(e) => {
-                    // No match - could beep or flash
-                    log::debug!("Click mode: no match - {}", e);
+                HintInputResult::WrongSecondKey => {
+                    // Wrong second key - show shake animation, allow one retry
+                    log::debug!("Click mode: wrong second key, allowing retry");
+                    // Emit shake animation event
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-wrong-key", ());
+                    }
+                    // Trigger shake animation on native hints
+                    native_hints::shake_hints();
+                }
+                HintInputResult::NoMatch => {
+                    // No match - deactivate click mode
+                    log::debug!("Click mode: no match, deactivating");
+                    hide_click_overlay();
+                    mgr.deactivate();
+                    drop(mgr);
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-deactivated", ());
+                    }
                 }
             }
 
