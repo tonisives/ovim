@@ -240,10 +240,9 @@ pub fn main() {
         }
     };
 
-    // Reduced delay for faster click mode activation
-    // Previously 300ms, reduced to 50ms as a balance between speed and stability
-    // If crashes occur, the subprocess design ensures main app survives
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // Minimal delay - the subprocess design protects the main app from crashes
+    // Previously 300ms, now 10ms - just enough for basic UI settling
+    std::thread::sleep(std::time::Duration::from_millis(10));
 
     match query_elements(pid) {
         Ok(output) => {

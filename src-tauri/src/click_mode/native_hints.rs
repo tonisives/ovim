@@ -43,6 +43,8 @@ impl Default for HintStyle {
 /// Show native hint windows for the given elements
 /// This dispatches to the main thread
 pub fn show_hints(elements: &[ClickableElement], style: &HintStyle) {
+    let start = std::time::Instant::now();
+
     // First, collect windows to close
     let windows_to_close: Vec<SendableId> = {
         match HINT_WINDOWS.try_lock() {
@@ -56,8 +58,13 @@ pub fn show_hints(elements: &[ClickableElement], style: &HintStyle) {
 
     let elements = elements.to_vec();
     let style = style.clone();
+    let element_count = elements.len();
+
+    log::info!("[TIMING] show_hints prep took {}ms for {} elements", start.elapsed().as_millis(), element_count);
 
     Queue::main().exec_async(move || {
+        let main_start = std::time::Instant::now();
+
         // First close old windows
         unsafe {
             for SendableId(window) in windows_to_close {
@@ -70,6 +77,8 @@ pub fn show_hints(elements: &[ClickableElement], style: &HintStyle) {
 
         // Then create new ones
         show_hints_on_main_thread(&elements, &style);
+
+        log::info!("[TIMING] show_hints main thread took {}ms", main_start.elapsed().as_millis());
     });
 }
 

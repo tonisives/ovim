@@ -651,52 +651,74 @@ fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), St
 /// Query all clickable elements using a subprocess
 /// This prevents crashes from Objective-C exceptions in the accessibility API
 pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String> {
+    let start = Instant::now();
+
     let pid = get_frontmost_app_pid().ok_or("Could not get frontmost app")?;
+    let bundle_id = get_frontmost_app_bundle_id();
 
     log::info!("Querying clickable elements for PID {}", pid);
 
+    // Detect browser type early so we can parallelize
+    let browser_type = bundle_id
+        .as_ref()
+        .and_then(|id| super::browser_clickables::detect_browser_type(id));
+
     // Check cache first
-    let (mut all_elements, is_modal) = if let Some((cached, cached_modal)) = get_cached_elements(pid) {
-        log::info!("Cache hit! Using {} cached elements", cached.len());
-        (cached, cached_modal)
-    } else {
-        log::info!("Cache miss, querying via subprocess");
-        query_elements_subprocess(pid)?
-    };
+    let cached = get_cached_elements(pid);
 
-    // Check if this is a browser that needs JavaScript injection for web content
-    // Skip JS injection if we're in a modal dialog (file picker, etc.)
-    if !is_modal {
-        if let Some(bundle_id) = get_frontmost_app_bundle_id() {
-            if let Some(browser_type) = super::browser_clickables::detect_browser_type(&bundle_id) {
-                if browser_type.needs_js_injection() {
-                    log::info!("Detected Chromium browser {:?}, querying web clickables via JS", browser_type);
+    // If cache miss and this is a browser, run AX query and JS query in parallel
+    let (mut all_elements, is_modal, web_clickables) = if let Some((cached_els, cached_modal)) = cached {
+        log::info!("[TIMING] Cache hit! Using {} cached elements ({}ms)", cached_els.len(), start.elapsed().as_millis());
+        (cached_els, cached_modal, None)
+    } else if let Some(bt) = browser_type {
+        if bt.needs_js_injection() {
+            log::info!("[TIMING] Cache miss, running AX + browser JS in parallel");
 
-                    match super::browser_clickables::get_browser_clickables(browser_type) {
-                        Ok(web_clickables) => {
-                            log::info!("Found {} web clickables via JavaScript", web_clickables.len());
+            // Run both queries in parallel using threads
+            let bt_clone = bt;
+            let js_handle = std::thread::spawn(move || {
+                super::browser_clickables::get_browser_clickables(bt_clone)
+            });
 
-                            // Convert web clickables to RawElementData and append
-                            for wc in web_clickables {
-                                all_elements.push(RawElementData {
-                                    x: wc.x,
-                                    y: wc.y,
-                                    width: wc.width,
-                                    height: wc.height,
-                                    role: wc.tag.clone(),
-                                    title: wc.text.clone(),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to get web clickables: {}", e);
-                        }
-                    }
-                }
-            }
+            // Run subprocess query on current thread
+            let (ax_elements, is_modal) = query_elements_subprocess(pid)?;
+            log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
+
+            // Wait for JS results
+            let js_result = js_handle.join().ok().and_then(|r| r.ok());
+            log::info!("[TIMING] Parallel queries complete at {}ms", start.elapsed().as_millis());
+
+            (ax_elements, is_modal, js_result)
+        } else {
+            // Safari - no JS injection needed
+            log::info!("[TIMING] Cache miss, querying via subprocess (Safari)");
+            let result = query_elements_subprocess(pid)?;
+            log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
+            (result.0, result.1, None)
         }
     } else {
-        log::info!("Modal dialog detected, skipping browser JS injection");
+        // Non-browser app
+        log::info!("[TIMING] Cache miss, querying via subprocess (non-browser)");
+        let result = query_elements_subprocess(pid)?;
+        log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
+        (result.0, result.1, None)
+    };
+
+    // Append web clickables if we got any
+    if let Some(web_els) = web_clickables {
+        log::info!("Found {} web clickables via JavaScript", web_els.len());
+        for wc in web_els {
+            all_elements.push(RawElementData {
+                x: wc.x,
+                y: wc.y,
+                width: wc.width,
+                height: wc.height,
+                role: wc.tag.clone(),
+                title: wc.text.clone(),
+            });
+        }
+    } else if is_modal {
+        log::info!("Modal dialog detected, skipped browser JS injection");
     }
 
     log::info!("Total clickable elements: {}", all_elements.len());
@@ -723,6 +745,8 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
             )
         })
         .collect();
+
+    log::info!("[TIMING] Total get_clickable_elements took {}ms", start.elapsed().as_millis());
 
     Ok(elements)
 }
