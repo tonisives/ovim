@@ -161,32 +161,82 @@ end tell"#,
     )
 }
 
+/// Combined JavaScript that gets both viewport info and clickable elements in one call
+/// Returns JSON: {"vh": viewportHeight, "els": [...clickables]}
+const GET_ALL_JS: &str = r#"(function(){var r=[];var seen=new Set();var s="a[href],button,input,textarea,select,[role=button],[role=link],[onclick],[tabindex]";var els=document.querySelectorAll(s);for(var i=0;i<els.length&&r.length<200;i++){var el=els[i];var rect=el.getBoundingClientRect();if(rect.width<=0||rect.height<=0)continue;if(rect.top>window.innerHeight||rect.bottom<0)continue;if(rect.left>window.innerWidth||rect.right<0)continue;var k=Math.round(rect.left)+","+Math.round(rect.top);if(seen.has(k))continue;seen.add(k);var t=el.textContent||el.value||el.placeholder||"";t=t.trim().substring(0,50);r.push({x:rect.left,y:rect.top,width:rect.width,height:rect.height,tag:el.tagName.toLowerCase(),text:t});}return JSON.stringify({vh:window.innerHeight,els:r});})()"#;
+
+/// Combined result from browser query
+#[derive(Debug, serde::Deserialize)]
+struct BrowserQueryResult {
+    vh: f64,
+    els: Vec<WebClickable>,
+}
+
+/// Build a combined AppleScript that gets window info AND runs JS in one osascript call
+fn build_combined_chrome_script(app_name: &str, js: &str) -> String {
+    format!(
+        r#"set winInfo to ""
+tell application "System Events"
+    try
+        set winPos to position of front window of process "{app}"
+        set winSize to size of front window of process "{app}"
+        set winInfo to (item 1 of winPos as text) & "," & (item 2 of winPos as text) & "," & (item 2 of winSize as text)
+    end try
+end tell
+set jsResult to "null"
+tell application "{app}"
+    if (count of windows) > 0 then
+        tell active tab of front window
+            try
+                set jsResult to execute javascript "{js}"
+            end try
+        end tell
+    end if
+end tell
+return winInfo & "|" & jsResult"#,
+        app = app_name,
+        js = js.replace('"', "\\\"").replace('\n', "")
+    )
+}
+
+/// Build a combined AppleScript for Safari
+fn build_combined_safari_script(js: &str) -> String {
+    format!(
+        r#"set winInfo to ""
+tell application "System Events"
+    try
+        set winPos to position of front window of process "Safari"
+        set winSize to size of front window of process "Safari"
+        set winInfo to (item 1 of winPos as text) & "," & (item 2 of winPos as text) & "," & (item 2 of winSize as text)
+    end try
+end tell
+set jsResult to "null"
+tell application "Safari"
+    if (count of windows) > 0 then
+        tell front window
+            if (count of tabs) > 0 then
+                try
+                    set jsResult to do JavaScript "{js}" in current tab
+                end try
+            end if
+        end tell
+    end if
+end tell
+return winInfo & "|" & jsResult"#,
+        js = js.replace('"', "\\\"").replace('\n', "")
+    )
+}
+
 /// Query clickable elements from the browser's web content
+/// Uses a single combined AppleScript call for speed
 pub fn get_browser_clickables(browser_type: BrowserType) -> Result<Vec<WebClickable>, String> {
     log::info!("Querying web clickables from {:?}", browser_type);
 
-    // Get window position info
-    let (win_x, win_y, win_height) = get_browser_viewport_info(browser_type.app_name())
-        .ok_or("Failed to get browser window info")?;
-
-    // Get viewport height to calculate chrome height
-    let viewport_height = get_viewport_height(browser_type).unwrap_or(win_height);
-    let chrome_height = win_height - viewport_height;
-
-    log::info!(
-        "Browser window: x={}, y={}, win_h={}, viewport_h={}, chrome_h={}",
-        win_x,
-        win_y,
-        win_height,
-        viewport_height,
-        chrome_height
-    );
-
-    // Execute JavaScript to get clickables
+    // Build combined script that gets window info AND clickables in one call
     let script = match browser_type {
-        BrowserType::Safari => build_safari_script(GET_CLICKABLES_JS),
+        BrowserType::Safari => build_combined_safari_script(GET_ALL_JS),
         BrowserType::Chrome | BrowserType::Brave | BrowserType::Arc => {
-            build_chrome_script(browser_type.app_name(), GET_CLICKABLES_JS)
+            build_combined_chrome_script(browser_type.app_name(), GET_ALL_JS)
         }
     };
 
@@ -202,22 +252,42 @@ pub fn get_browser_clickables(browser_type: BrowserType) -> Result<Vec<WebClicka
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log::debug!("Combined AppleScript output: {}", &stdout[..stdout.len().min(200)]);
 
-    log::debug!("AppleScript raw output (first 500 chars): {}", &stdout[..stdout.len().min(500)]);
+    // Parse combined result: "winX,winY,winH|{json}"
+    let parts: Vec<&str> = stdout.splitn(2, '|').collect();
+    if parts.len() != 2 {
+        return Err(format!("Invalid combined output format: {}", stdout));
+    }
 
-    if stdout.is_empty() || stdout == "null" || stdout == "missing value" {
-        log::info!("No clickables returned from browser (stdout was: '{}')", stdout);
+    let win_parts: Vec<&str> = parts[0].split(',').collect();
+    if win_parts.len() != 3 {
+        return Err(format!("Invalid window info: {}", parts[0]));
+    }
+
+    let win_x: f64 = win_parts[0].parse().unwrap_or(0.0);
+    let win_y: f64 = win_parts[1].parse().unwrap_or(0.0);
+    let win_height: f64 = win_parts[2].parse().unwrap_or(0.0);
+
+    let js_result = parts[1];
+    if js_result.is_empty() || js_result == "null" || js_result == "missing value" {
+        log::info!("No clickables returned from browser");
         return Ok(Vec::new());
     }
 
-    // Parse JSON results
-    let clickables: Vec<WebClickable> = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse clickables JSON: {} (stdout: {})", e, &stdout[..stdout.len().min(200)]))?;
+    // Parse JSON results (now includes viewport height)
+    let result: BrowserQueryResult = serde_json::from_str(js_result)
+        .map_err(|e| format!("Failed to parse clickables JSON: {} (output: {})", e, &js_result[..js_result.len().min(200)]))?;
 
-    log::info!("Found {} raw web clickables", clickables.len());
+    let chrome_height = win_height - result.vh;
+
+    log::info!(
+        "Browser: x={}, y={}, win_h={}, viewport_h={}, chrome_h={}, elements={}",
+        win_x, win_y, win_height, result.vh, chrome_height, result.els.len()
+    );
 
     // Convert viewport-relative coordinates to screen coordinates
-    let screen_clickables: Vec<WebClickable> = clickables
+    let screen_clickables: Vec<WebClickable> = result.els
         .into_iter()
         .map(|mut c| {
             c.x += win_x;
@@ -225,11 +295,6 @@ pub fn get_browser_clickables(browser_type: BrowserType) -> Result<Vec<WebClicka
             c
         })
         .collect();
-
-    log::info!(
-        "Converted {} web clickables to screen coordinates",
-        screen_clickables.len()
-    );
 
     Ok(screen_clickables)
 }
