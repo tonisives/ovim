@@ -3134,6 +3134,7 @@ version = "0.0.24"
 dependencies = [
  "anyhow",
  "async-trait",
+ "block",
  "chrono",
  "cocoa",
  "core-foundation",

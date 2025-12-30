@@ -67,6 +67,7 @@ dispatch = "0.2.0"
 cocoa = "0.26"
 objc = "0.2.7"
 objc_exception = "0.1"
+block = "0.1"
 
 [features]
 default = ["custom-protocol"]

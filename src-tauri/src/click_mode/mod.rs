@@ -349,3 +349,63 @@ pub type SharedClickModeManager = Arc<Mutex<ClickModeManager>>;
 pub fn create_manager() -> SharedClickModeManager {
     Arc::new(Mutex::new(ClickModeManager::new()))
 }
+
+/// Start observing app focus changes
+/// When the frontmost app changes, the callback will be called
+pub fn start_focus_observer<F>(callback: F)
+where
+    F: Fn() + Send + Sync + 'static,
+{
+    use dispatch::Queue;
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::sync::Arc;
+
+    let callback = Arc::new(callback);
+
+    // Dispatch to main thread to set up the observer
+    Queue::main().exec_async(move || {
+        unsafe {
+            // Get NSWorkspace shared instance
+            let workspace: *mut objc::runtime::Object =
+                msg_send![class!(NSWorkspace), sharedWorkspace];
+            if workspace.is_null() {
+                log::error!("Failed to get NSWorkspace");
+                return;
+            }
+
+            // Get the notification center
+            let notification_center: *mut objc::runtime::Object =
+                msg_send![workspace, notificationCenter];
+            if notification_center.is_null() {
+                log::error!("Failed to get notification center");
+                return;
+            }
+
+            // Create block for the observer
+            // We use a simple approach: observe didActivateApplicationNotification
+            let callback_clone = Arc::clone(&callback);
+            let block = block::ConcreteBlock::new(move |_notification: *mut objc::runtime::Object| {
+                log::debug!("App focus changed - hiding click mode hints");
+                callback_clone();
+            });
+            let block = block.copy();
+
+            // Get the notification name
+            let notification_name: *mut objc::runtime::Object = msg_send![
+                class!(NSString),
+                stringWithUTF8String: b"NSWorkspaceDidActivateApplicationNotification\0".as_ptr()
+            ];
+
+            // Add observer using the block-based API
+            let _: *mut objc::runtime::Object = msg_send![
+                notification_center,
+                addObserverForName: notification_name
+                object: std::ptr::null::<objc::runtime::Object>()
+                queue: std::ptr::null::<objc::runtime::Object>()
+                usingBlock: &*block
+            ];
+
+            log::info!("Focus change observer started");
+        }
+    });
+}

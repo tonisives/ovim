@@ -219,6 +219,37 @@ pub fn run() {
         Arc::clone(&click_mode_manager),
     ));
 
+    // Set up mouse click callback to hide click mode on any mouse click
+    {
+        let click_manager_for_mouse = Arc::clone(&click_mode_manager);
+        keyboard_capture.set_mouse_callback(move |_event| {
+            // Check if click mode is active and deactivate it
+            if let Ok(mut mgr) = click_manager_for_mouse.try_lock() {
+                if mgr.is_active() {
+                    log::info!("Mouse click detected - deactivating click mode");
+                    mgr.deactivate();
+                    click_mode::native_hints::hide_hints();
+                }
+            }
+            true // Always pass through mouse events
+        });
+    }
+
+    // Set up focus change observer to hide click mode when app loses focus
+    {
+        let click_manager_for_focus = Arc::clone(&click_mode_manager);
+        click_mode::start_focus_observer(move || {
+            // Check if click mode is active and deactivate it
+            if let Ok(mut mgr) = click_manager_for_focus.try_lock() {
+                if mgr.is_active() {
+                    log::info!("App focus changed - deactivating click mode");
+                    mgr.deactivate();
+                    click_mode::native_hints::hide_hints();
+                }
+            }
+        });
+    }
+
     let app_state = AppState {
         settings,
         vim_state: Arc::clone(&vim_state),
