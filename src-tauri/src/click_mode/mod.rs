@@ -20,6 +20,32 @@ pub use hints::{generate_hints, DEFAULT_HINT_CHARS};
 
 use serde::{Deserialize, Serialize};
 
+/// The type of click action to perform
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+pub enum ClickAction {
+    /// Normal left-click
+    #[default]
+    Click,
+    /// Right-click (context menu)
+    RightClick,
+    /// Cmd+click
+    CmdClick,
+    /// Double-click
+    DoubleClick,
+}
+
+impl ClickAction {
+    /// Get display name for the action
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ClickAction::Click => "click",
+            ClickAction::RightClick => "right",
+            ClickAction::CmdClick => "cmd",
+            ClickAction::DoubleClick => "double",
+        }
+    }
+}
+
 /// Click mode state machine
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -32,6 +58,8 @@ pub enum ClickModeState {
         input_buffer: String,
         /// Number of elements being shown
         element_count: usize,
+        /// The type of click action to perform
+        click_action: ClickAction,
     },
     /// Search mode is active (fuzzy search by element text)
     Searching {
@@ -39,6 +67,8 @@ pub enum ClickModeState {
         query: String,
         /// Number of matching elements
         match_count: usize,
+        /// The type of click action to perform
+        click_action: ClickAction,
     },
 }
 
@@ -72,6 +102,15 @@ impl ClickModeState {
             ClickModeState::Searching { query, .. } => query,
         }
     }
+
+    /// Get the current click action
+    pub fn click_action(&self) -> ClickAction {
+        match self {
+            ClickModeState::Inactive => ClickAction::Click,
+            ClickModeState::ShowingHints { click_action, .. } => *click_action,
+            ClickModeState::Searching { click_action, .. } => *click_action,
+        }
+    }
 }
 
 /// Manager for click mode state and elements
@@ -80,6 +119,8 @@ pub struct ClickModeManager {
     state: ClickModeState,
     /// Currently discovered elements (with AX handles)
     elements: Vec<ClickableElementInternal>,
+    /// Current click action type
+    click_action: ClickAction,
 }
 
 impl ClickModeManager {
@@ -87,6 +128,7 @@ impl ClickModeManager {
         Self {
             state: ClickModeState::Inactive,
             elements: Vec::new(),
+            click_action: ClickAction::Click,
         }
     }
 
@@ -104,9 +146,11 @@ impl ClickModeManager {
     /// This ensures keys are captured while elements are being queried
     pub fn set_activating(&mut self) {
         log::info!("Click mode: set to activating state");
+        self.click_action = ClickAction::Click; // Reset to default
         self.state = ClickModeState::ShowingHints {
             input_buffer: String::new(),
             element_count: 0,
+            click_action: self.click_action,
         };
     }
 
@@ -140,6 +184,7 @@ impl ClickModeManager {
         self.state = ClickModeState::ShowingHints {
             input_buffer: String::new(),
             element_count,
+            click_action: self.click_action,
         };
 
         Ok(elements)
@@ -150,6 +195,7 @@ impl ClickModeManager {
         log::info!("Deactivating click mode");
         self.state = ClickModeState::Inactive;
         self.elements.clear();
+        self.click_action = ClickAction::Click;
     }
 
     /// Handle a character input in hint mode
@@ -199,6 +245,7 @@ impl ClickModeManager {
         self.state = ClickModeState::ShowingHints {
             input_buffer: new_input,
             element_count: self.elements.len(),
+            click_action: self.click_action,
         };
 
         Ok(None)
@@ -254,6 +301,7 @@ impl ClickModeManager {
         self.state = ClickModeState::Searching {
             query: String::new(),
             match_count: self.elements.len(),
+            click_action: self.click_action,
         };
     }
 
@@ -274,6 +322,7 @@ impl ClickModeManager {
         self.state = ClickModeState::Searching {
             query: query.to_string(),
             match_count: matching.len(),
+            click_action: self.click_action,
         };
 
         matching
@@ -332,6 +381,36 @@ impl ClickModeManager {
             ClickModeState::ShowingHints { input_buffer, .. } => input_buffer.clone(),
             ClickModeState::Searching { query, .. } => query.clone(),
             ClickModeState::Inactive => String::new(),
+        }
+    }
+
+    /// Get the current click action
+    pub fn get_click_action(&self) -> ClickAction {
+        self.click_action
+    }
+
+    /// Set the click action type
+    pub fn set_click_action(&mut self, action: ClickAction) {
+        log::info!("Click mode: setting action to {:?}", action);
+        self.click_action = action;
+
+        // Update the state to reflect the new action
+        match &self.state {
+            ClickModeState::ShowingHints { input_buffer, element_count, .. } => {
+                self.state = ClickModeState::ShowingHints {
+                    input_buffer: input_buffer.clone(),
+                    element_count: *element_count,
+                    click_action: action,
+                };
+            }
+            ClickModeState::Searching { query, match_count, .. } => {
+                self.state = ClickModeState::Searching {
+                    query: query.clone(),
+                    match_count: *match_count,
+                    click_action: action,
+                };
+            }
+            ClickModeState::Inactive => {}
         }
     }
 }

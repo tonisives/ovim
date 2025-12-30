@@ -5,7 +5,7 @@ use std::thread;
 
 use tauri::Emitter;
 
-use crate::click_mode::SharedClickModeManager;
+use crate::click_mode::{ClickAction, SharedClickModeManager};
 use crate::commands::{RecordedKey, RecordedModifiers};
 use crate::config::Settings;
 use crate::keyboard::{KeyCode, KeyEvent};
@@ -183,6 +183,10 @@ pub fn create_keyboard_callback(
                                         // Show native hint windows (dispatched to main thread)
                                         let style = HintStyle::default();
                                         native_hints::show_hints(&elements, &style);
+                                        // Emit activation event to frontend
+                                        if let Some(app) = get_app_handle() {
+                                            let _ = app.emit("click-mode-activated", ());
+                                        }
                                     }
                                     Err(e) => {
                                         log::error!("Failed to activate click mode: {}", e);
@@ -320,6 +324,10 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
         mgr.deactivate();
         log::info!("Click mode cancelled via Escape");
         hide_click_overlay();
+        // Emit deactivation event
+        if let Some(app) = get_app_handle() {
+            let _ = app.emit("click-mode-deactivated", ());
+        }
         return None;
     }
 
@@ -346,19 +354,47 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
         return None;
     }
 
+    // Handle click action switching keys (Shift+r/c/d/n)
+    // Using Shift modifier to avoid conflicts with hint characters
+    if event.modifiers.shift {
+        if let Some(c) = keycode.to_char() {
+            let c_lower = c.to_ascii_lowercase();
+
+            // Check if this is an action switching key
+            let new_action = match c_lower {
+                'r' => Some(ClickAction::RightClick),
+                'c' => Some(ClickAction::CmdClick),
+                'd' => Some(ClickAction::DoubleClick),
+                'n' => Some(ClickAction::Click),
+                _ => None,
+            };
+
+            if let Some(action) = new_action {
+                let mut mgr = manager.lock().unwrap();
+                mgr.set_click_action(action);
+                log::info!("Click mode: switched to {:?} action", action);
+                // Emit action change event to frontend
+                if let Some(app) = get_app_handle() {
+                    let _ = app.emit("click-action-changed", action);
+                }
+                return None;
+            }
+        }
+    }
+
     // Handle letter/number keys for hint input
     if let Some(c) = keycode.to_char() {
         if c.is_alphanumeric() {
             let mut mgr = manager.lock().unwrap();
-            let shift_held = event.modifiers.shift;
+            let click_action = mgr.get_click_action();
 
             match mgr.handle_hint_input(c) {
                 Ok(Some(element)) => {
-                    // Exact match found - perform click (or right-click if Shift held)
-                    let click_type = if shift_held { "right-click" } else { "click" };
+                    // Exact match found - perform click based on stored action
+                    let action_name = click_action.display_name();
                     log::info!(
                         "Click mode: {} on element '{}' ({})",
-                        click_type,
+                        action_name,
                         element.hint,
                         element.title
                     );
@@ -376,6 +412,11 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
                     // Drop the manager lock before spawning the click thread
                     drop(mgr);
 
+                    // Emit deactivation event
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-deactivated", ());
+                    }
+
                     // Perform click on a separate thread with a small delay
                     // to ensure hint windows have been removed
                     if let Some((x, y)) = position {
@@ -383,14 +424,23 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
                             // Wait for hint windows to close
                             thread::sleep(std::time::Duration::from_millis(50));
 
-                            let result = if shift_held {
-                                crate::click_mode::accessibility::perform_right_click_at_position(x, y)
-                            } else {
-                                crate::click_mode::accessibility::perform_click_at_position(x, y)
+                            let result = match click_action {
+                                ClickAction::Click => {
+                                    crate::click_mode::accessibility::perform_click_at_position(x, y)
+                                }
+                                ClickAction::RightClick => {
+                                    crate::click_mode::accessibility::perform_right_click_at_position(x, y)
+                                }
+                                ClickAction::CmdClick => {
+                                    crate::click_mode::accessibility::perform_cmd_click_at_position(x, y)
+                                }
+                                ClickAction::DoubleClick => {
+                                    crate::click_mode::accessibility::perform_double_click_at_position(x, y)
+                                }
                             };
 
                             if let Err(e) = result {
-                                log::error!("Failed to {} element: {}", click_type, e);
+                                log::error!("Failed to {} element: {}", action_name, e);
                             }
                         });
                     } else {
