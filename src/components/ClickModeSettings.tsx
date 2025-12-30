@@ -40,202 +40,210 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
       </p>
 
       {/* Enable/Disable Toggle */}
-      <div className="setting-row">
-        <label className="setting-label">
-          <span>Enable Click Mode</span>
-          <span className="setting-description">
-            Show hint labels on UI elements for keyboard-driven clicking
-          </span>
-        </label>
-        <label className="toggle">
+      <div className="form-group">
+        <label className="checkbox-label">
           <input
             type="checkbox"
             checked={clickMode.enabled}
             onChange={(e) => updateClickMode({ enabled: e.target.checked })}
           />
-          <span className="toggle-slider"></span>
+          Enable Click Mode feature
         </label>
       </div>
 
-      {clickMode.enabled && (
-        <>
-          {/* Shortcut */}
-          <div className="setting-row">
-            <label className="setting-label">
-              <span>Activation Shortcut</span>
-              <span className="setting-description">
-                Press this shortcut to enter click mode
-              </span>
-            </label>
-            <div className="shortcut-input">
-              {isRecording ? (
-                <div className="recording-indicator">
-                  <span>Press any key...</span>
-                  <button className="cancel-btn" onClick={handleCancelRecord}>
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button className="shortcut-btn" onClick={handleRecordKey}>
-                  {displayName}
-                </button>
-              )}
-            </div>
-          </div>
+      {/* Keyboard Shortcut */}
+      <div className="form-group">
+        <label>Keyboard shortcut</label>
+        <div className="key-display">
+          {isRecording ? (
+            <button type="button" className="record-key-btn recording" onClick={handleCancelRecord}>
+              Press any key...
+            </button>
+          ) : (
+            <>
+              <span className="current-key">{displayName || clickMode.shortcut_key}</span>
+              <button
+                type="button"
+                className="record-key-btn"
+                onClick={handleRecordKey}
+                disabled={!clickMode.enabled}
+              >
+                Record Key
+              </button>
+            </>
+          )}
+        </div>
+      </div>
 
-          {/* Hint Characters */}
-          <div className="setting-row">
-            <label className="setting-label">
-              <span>Hint Characters</span>
-              <span className="setting-description">
-                Characters used for hint labels (home row first for speed)
-              </span>
-            </label>
+      {/* Hint Characters */}
+      <div className="form-group">
+        <label>Hint characters</label>
+        <input
+          type="text"
+          value={clickMode.hint_chars}
+          onChange={(e) => updateClickMode({ hint_chars: e.target.value })}
+          placeholder="asdfghjklqwertyuiopzxcvbnm"
+          disabled={!clickMode.enabled}
+        />
+        <span className="hint">Characters used for hint labels (home row first recommended)</span>
+      </div>
+
+      {/* Hint Appearance Section */}
+      <div className="color-settings">
+        <h3>Hint Appearance</h3>
+
+        <div className="indicator-controls">
+          {/* Font Size */}
+          <div className="slider-group">
+            <label>Font Size</label>
             <input
-              type="text"
-              className="text-input"
-              value={clickMode.hint_chars}
-              onChange={(e) => updateClickMode({ hint_chars: e.target.value })}
-              placeholder="asdfghjklqwertyuiopzxcvbnm"
+              type="range"
+              min="8"
+              max="24"
+              step="1"
+              value={clickMode.hint_font_size}
+              onChange={(e) => updateClickMode({ hint_font_size: parseInt(e.target.value) })}
+              disabled={!clickMode.enabled}
             />
-          </div>
-
-          {/* Hint Styling Section */}
-          <div className="subsection">
-            <h3>Hint Appearance</h3>
-
-            {/* Font Size */}
-            <div className="setting-row">
-              <label className="setting-label">
-                <span>Font Size</span>
-                <span className="setting-description">
-                  Size of hint label text in pixels
-                </span>
-              </label>
-              <div className="slider-with-value">
-                <input
-                  type="range"
-                  min="8"
-                  max="24"
-                  step="1"
-                  value={clickMode.hint_font_size}
-                  onChange={(e) =>
-                    updateClickMode({ hint_font_size: parseInt(e.target.value) })
-                  }
-                />
-                <span className="slider-value">{clickMode.hint_font_size}px</span>
-              </div>
-            </div>
-
-            {/* Opacity */}
-            <div className="setting-row">
-              <label className="setting-label">
-                <span>Opacity</span>
-                <span className="setting-description">
-                  Transparency of hint labels
-                </span>
-              </label>
-              <div className="slider-with-value">
-                <input
-                  type="range"
-                  min="0.5"
-                  max="1"
-                  step="0.05"
-                  value={clickMode.hint_opacity}
-                  onChange={(e) =>
-                    updateClickMode({ hint_opacity: parseFloat(e.target.value) })
-                  }
-                />
-                <span className="slider-value">
-                  {Math.round(clickMode.hint_opacity * 100)}%
-                </span>
-              </div>
-            </div>
-
-            {/* Background Color */}
-            <div className="setting-row">
-              <label className="setting-label">
-                <span>Background Color</span>
-                <span className="setting-description">
-                  Hint label background color
-                </span>
-              </label>
-              <div className="color-input-wrapper">
-                <input
-                  type="color"
-                  className="color-input"
-                  value={clickMode.hint_bg_color}
-                  onChange={(e) => updateClickMode({ hint_bg_color: e.target.value })}
-                />
-                <span className="color-value">{clickMode.hint_bg_color}</span>
-              </div>
-            </div>
-
-            {/* Text Color */}
-            <div className="setting-row">
-              <label className="setting-label">
-                <span>Text Color</span>
-                <span className="setting-description">
-                  Hint label text color
-                </span>
-              </label>
-              <div className="color-input-wrapper">
-                <input
-                  type="color"
-                  className="color-input"
-                  value={clickMode.hint_text_color}
-                  onChange={(e) => updateClickMode({ hint_text_color: e.target.value })}
-                />
-                <span className="color-value">{clickMode.hint_text_color}</span>
-              </div>
-            </div>
-
-            {/* Preview */}
-            <div className="setting-row">
-              <label className="setting-label">
-                <span>Preview</span>
-              </label>
-              <div className="hint-preview">
-                <span
-                  className="hint-label-preview"
-                  style={{
-                    backgroundColor: clickMode.hint_bg_color,
-                    color: clickMode.hint_text_color,
-                    fontSize: `${clickMode.hint_font_size}px`,
-                    opacity: clickMode.hint_opacity,
-                    padding: "2px 4px",
-                    borderRadius: "3px",
-                    fontFamily: "SF Mono, Monaco, Menlo, monospace",
-                    fontWeight: 700,
-                    letterSpacing: "0.5px",
-                    border: "1px solid rgba(0,0,0,0.2)",
-                  }}
-                >
-                  {clickMode.hint_chars.slice(0, 2).toUpperCase() || "AS"}
-                </span>
-              </div>
+            <div className="slider-labels">
+              <span>8px</span>
+              <span>{clickMode.hint_font_size}px</span>
+              <span>24px</span>
             </div>
           </div>
 
-          {/* Show Search Bar Toggle */}
-          <div className="setting-row">
-            <label className="setting-label">
-              <span>Show Search Bar</span>
-              <span className="setting-description">
-                Display current input at top of screen when active
-              </span>
-            </label>
-            <label className="toggle">
+          {/* Opacity */}
+          <div className="slider-group">
+            <label>Opacity</label>
+            <input
+              type="range"
+              min="0.5"
+              max="1"
+              step="0.05"
+              value={clickMode.hint_opacity}
+              onChange={(e) => updateClickMode({ hint_opacity: parseFloat(e.target.value) })}
+              disabled={!clickMode.enabled}
+            />
+            <div className="slider-labels">
+              <span>50%</span>
+              <span>{Math.round(clickMode.hint_opacity * 100)}%</span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Colors */}
+        <div className="color-pickers">
+          <div className="color-picker-group">
+            <label>Background</label>
+            <div className="color-input-wrapper">
               <input
-                type="checkbox"
-                checked={clickMode.show_search_bar}
-                onChange={(e) => updateClickMode({ show_search_bar: e.target.checked })}
+                type="color"
+                value={clickMode.hint_bg_color}
+                onChange={(e) => updateClickMode({ hint_bg_color: e.target.value })}
+                disabled={!clickMode.enabled}
               />
-              <span className="toggle-slider"></span>
-            </label>
+              <span className="color-hex">{clickMode.hint_bg_color}</span>
+            </div>
           </div>
-        </>
-      )}
+
+          <div className="color-picker-group">
+            <label>Text</label>
+            <div className="color-input-wrapper">
+              <input
+                type="color"
+                value={clickMode.hint_text_color}
+                onChange={(e) => updateClickMode({ hint_text_color: e.target.value })}
+                disabled={!clickMode.enabled}
+              />
+              <span className="color-hex">{clickMode.hint_text_color}</span>
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div className="color-picker-group">
+            <label>Preview</label>
+            <span
+              style={{
+                backgroundColor: clickMode.hint_bg_color,
+                color: clickMode.hint_text_color,
+                fontSize: `${clickMode.hint_font_size}px`,
+                opacity: clickMode.hint_opacity,
+                padding: "2px 6px",
+                borderRadius: "3px",
+                fontFamily: "SF Mono, Monaco, Menlo, monospace",
+                fontWeight: 700,
+                letterSpacing: "0.5px",
+                border: "1px solid rgba(0,0,0,0.2)",
+              }}
+            >
+              {clickMode.hint_chars.slice(0, 2).toUpperCase() || "AS"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Show Search Bar Toggle */}
+      <div className="form-group" style={{ marginTop: 16 }}>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={clickMode.show_search_bar}
+            onChange={(e) => updateClickMode({ show_search_bar: e.target.checked })}
+            disabled={!clickMode.enabled}
+          />
+          Show search bar when active
+        </label>
+        <span className="hint">Display current input at top of screen</span>
+      </div>
+
+      {/* Advanced Settings Section */}
+      <div className="color-settings">
+        <h3>Advanced</h3>
+        <p className="help-text">
+          Timing settings for troubleshooting. Increase delays if some hints are missing on slower systems.
+        </p>
+
+        <div className="indicator-controls">
+          {/* Stabilization Delay */}
+          <div className="slider-group">
+            <label>Stabilization Delay</label>
+            <input
+              type="range"
+              min="0"
+              max="300"
+              step="10"
+              value={clickMode.ax_stabilization_delay_ms}
+              onChange={(e) => updateClickMode({ ax_stabilization_delay_ms: parseInt(e.target.value) })}
+              disabled={!clickMode.enabled}
+            />
+            <div className="slider-labels">
+              <span>0ms</span>
+              <span>{clickMode.ax_stabilization_delay_ms}ms</span>
+              <span>300ms</span>
+            </div>
+          </div>
+
+          {/* Cache Duration */}
+          <div className="slider-group">
+            <label>Cache Duration</label>
+            <input
+              type="range"
+              min="0"
+              max="2000"
+              step="100"
+              value={clickMode.cache_ttl_ms}
+              onChange={(e) => updateClickMode({ cache_ttl_ms: parseInt(e.target.value) })}
+              disabled={!clickMode.enabled}
+            />
+            <div className="slider-labels">
+              <span>0ms</span>
+              <span>{clickMode.cache_ttl_ms}ms</span>
+              <span>2000ms</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

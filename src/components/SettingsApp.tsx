@@ -39,6 +39,9 @@ export interface ClickModeSettings {
   hint_font_size: number;
   hint_bg_color: string;
   hint_text_color: string;
+  // Advanced timing settings
+  ax_stabilization_delay_ms: number;
+  cache_ttl_ms: number;
 }
 
 export interface RgbColor {

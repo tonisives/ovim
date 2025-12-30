@@ -28,6 +28,23 @@ pub struct ClickModeSettings {
     pub hint_bg_color: String,
     /// Hint label text color (hex)
     pub hint_text_color: String,
+
+    // Advanced timing settings
+    /// Delay before querying accessibility elements (ms).
+    /// Increase if hints are missing on slower computers.
+    #[serde(default = "default_ax_delay")]
+    pub ax_stabilization_delay_ms: u32,
+    /// How long to cache elements (ms). Increase for faster repeat activations.
+    #[serde(default = "default_cache_ttl")]
+    pub cache_ttl_ms: u32,
+}
+
+fn default_ax_delay() -> u32 {
+    10
+}
+
+fn default_cache_ttl() -> u32 {
+    500
 }
 
 impl Default for ClickModeSettings {
@@ -47,6 +64,8 @@ impl Default for ClickModeSettings {
             hint_font_size: 12,
             hint_bg_color: "#FFCC00".to_string(), // Yellow background like Vimium
             hint_text_color: "#000000".to_string(), // Black text
+            ax_stabilization_delay_ms: default_ax_delay(),
+            cache_ttl_ms: default_cache_ttl(),
         }
     }
 }

@@ -30,8 +30,35 @@ struct ElementCache {
 /// Global element cache with short TTL
 static ELEMENT_CACHE: OnceLock<Mutex<Option<ElementCache>>> = OnceLock::new();
 
-/// Cache TTL in milliseconds - elements are valid for this long
-const CACHE_TTL_MS: u128 = 500;
+/// Configurable timing settings (updated from user settings)
+static TIMING_SETTINGS: OnceLock<Mutex<TimingSettings>> = OnceLock::new();
+
+struct TimingSettings {
+    cache_ttl_ms: u128,
+    ax_delay_ms: u32,
+}
+
+impl Default for TimingSettings {
+    fn default() -> Self {
+        Self {
+            cache_ttl_ms: 500,
+            ax_delay_ms: 10,
+        }
+    }
+}
+
+fn get_timing_settings() -> &'static Mutex<TimingSettings> {
+    TIMING_SETTINGS.get_or_init(|| Mutex::new(TimingSettings::default()))
+}
+
+/// Update timing settings from user configuration
+pub fn update_timing_settings(cache_ttl_ms: u32, ax_delay_ms: u32) {
+    if let Ok(mut settings) = get_timing_settings().lock() {
+        settings.cache_ttl_ms = cache_ttl_ms as u128;
+        settings.ax_delay_ms = ax_delay_ms;
+        log::info!("Updated click mode timing: cache_ttl={}ms, ax_delay={}ms", cache_ttl_ms, ax_delay_ms);
+    }
+}
 
 fn get_cache() -> &'static Mutex<Option<ElementCache>> {
     ELEMENT_CACHE.get_or_init(|| Mutex::new(None))
@@ -39,11 +66,16 @@ fn get_cache() -> &'static Mutex<Option<ElementCache>> {
 
 /// Check if we have valid cached elements for the given PID
 fn get_cached_elements(pid: i32) -> Option<(Vec<RawElementData>, bool)> {
+    let cache_ttl = get_timing_settings()
+        .lock()
+        .map(|s| s.cache_ttl_ms)
+        .unwrap_or(500);
+
     let cache = get_cache().lock().ok()?;
     let cached = cache.as_ref()?;
 
     // Check if cache is for the right PID and not expired
-    if cached.pid == pid && cached.timestamp.elapsed().as_millis() < CACHE_TTL_MS {
+    if cached.pid == pid && cached.timestamp.elapsed().as_millis() < cache_ttl {
         log::info!("Using cached elements (age: {}ms)", cached.timestamp.elapsed().as_millis());
         Some((cached.elements.clone(), cached.is_modal))
     } else {
@@ -589,12 +621,19 @@ fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), St
         }
     };
 
+    // Get delay setting
+    let delay_ms = get_timing_settings()
+        .lock()
+        .map(|s| s.ax_delay_ms)
+        .unwrap_or(10);
+
     log::info!("[TIMING] helper_path lookup: {}ms", start.elapsed().as_millis());
 
     // Run the helper subprocess - single attempt for speed, retry only on failure
     let subprocess_start = Instant::now();
     let output = std::process::Command::new(&helper_path)
         .arg(pid.to_string())
+        .arg(delay_ms.to_string())
         .output();
 
     log::info!("[TIMING] subprocess execution: {}ms", subprocess_start.elapsed().as_millis());
@@ -651,9 +690,23 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
     let cached = get_cached_elements(pid);
 
     // If cache miss and this is a browser, run AX query and JS query in parallel
+    // NOTE: Browser JS query must ALWAYS run (even on cache hit) because the cache
+    // only stores AX elements, not browser elements. Otherwise we get single-char hints
+    // that conflict with multi-char hints when browser elements are added.
     let (mut all_elements, is_modal, web_clickables) = if let Some((cached_els, cached_modal)) = cached {
         log::info!("[TIMING] Cache hit! Using {} cached elements ({}ms)", cached_els.len(), start.elapsed().as_millis());
-        (cached_els, cached_modal, None)
+        // Even on cache hit, we need to fetch browser elements if this is a browser app
+        let browser_els = if let Some(bt) = browser_type {
+            if bt.needs_js_injection() && !cached_modal {
+                log::info!("[TIMING] Cache hit but fetching browser elements for browser app");
+                super::browser_clickables::get_browser_clickables(bt).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        (cached_els, cached_modal, browser_els)
     } else if let Some(bt) = browser_type {
         if bt.needs_js_injection() {
             log::info!("[TIMING] Cache miss, running AX + browser JS in parallel");

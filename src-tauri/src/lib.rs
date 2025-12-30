@@ -205,6 +205,16 @@ pub fn run() {
     let vim_state = Arc::new(Mutex::new(vim_state));
 
     let settings = Arc::new(Mutex::new(Settings::load()));
+
+    // Initialize click mode timing settings from loaded settings
+    {
+        let s = settings.lock().unwrap();
+        click_mode::accessibility::update_timing_settings(
+            s.click_mode.cache_ttl_ms,
+            s.click_mode.ax_stabilization_delay_ms,
+        );
+    }
+
     let record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>> =
         Arc::new(Mutex::new(None));
     let edit_session_manager = Arc::new(EditSessionManager::new());
