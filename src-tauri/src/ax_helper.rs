@@ -530,7 +530,7 @@ fn query_elements_inner(pid: i32) -> Result<Vec<RawElement>, String> {
     let mut elements: Vec<RawElement> = Vec::new();
 
     // Try to get focused window first, fall back to app element
-    let (start_element, window_bounds) = app_element
+    let focused_window = app_element
         .get_attribute("AXFocusedWindow")
         .and_then(|w| {
             let ptr = w.0;
@@ -542,11 +542,75 @@ fn query_elements_inner(pid: i32) -> Result<Vec<RawElement>, String> {
             if role_test.is_none() {
                 return None;
             }
-            // Get window bounds for filtering
-            let bounds = get_window_bounds(&w);
             std::mem::forget(w);
             unsafe { core_foundation::base::CFRetain(ptr) };
-            Some((CFHandle(ptr), bounds))
+            Some(CFHandle(ptr))
+        });
+
+    // Check for sheets or dialogs (file picker dialogs, save panels, etc.) on the focused window
+    // These take priority as they are modal UI that needs interaction
+    if let Some(ref window) = focused_window {
+        // Try AXSheets first (attached sheet dialogs)
+        if let Some(sheets) = window.get_attribute("AXSheets") {
+            let sheets_ptr = sheets.0;
+            let count = unsafe { core_foundation::array::CFArrayGetCount(sheets_ptr as _) };
+            if count > 0 {
+                // Get the first (topmost) sheet
+                let sheet_ptr = unsafe {
+                    core_foundation::array::CFArrayGetValueAtIndex(sheets_ptr as _, 0)
+                };
+                if !sheet_ptr.is_null() {
+                    unsafe { core_foundation::base::CFRetain(sheet_ptr) };
+                    let sheet = CFHandle(sheet_ptr);
+                    let sheet_bounds = get_window_bounds(&sheet);
+                    // Collect elements from the sheet instead of the window
+                    collect_elements_inner(&sheet, &mut elements, 0, sheet_bounds, false);
+                    return Ok(elements);
+                }
+            }
+        }
+
+        // Try AXDialogs (modal dialogs)
+        if let Some(dialogs) = window.get_attribute("AXDialogs") {
+            let dialogs_ptr = dialogs.0;
+            let count = unsafe { core_foundation::array::CFArrayGetCount(dialogs_ptr as _) };
+            if count > 0 {
+                let dialog_ptr = unsafe {
+                    core_foundation::array::CFArrayGetValueAtIndex(dialogs_ptr as _, 0)
+                };
+                if !dialog_ptr.is_null() {
+                    unsafe { core_foundation::base::CFRetain(dialog_ptr) };
+                    let dialog = CFHandle(dialog_ptr);
+                    let dialog_bounds = get_window_bounds(&dialog);
+                    collect_elements_inner(&dialog, &mut elements, 0, dialog_bounds, false);
+                    return Ok(elements);
+                }
+            }
+        }
+    }
+
+    // Also check app-level for sheets/dialogs (some apps report them at the app level)
+    if let Some(sheets) = app_element.get_attribute("AXSheets") {
+        let sheets_ptr = sheets.0;
+        let count = unsafe { core_foundation::array::CFArrayGetCount(sheets_ptr as _) };
+        if count > 0 {
+            let sheet_ptr = unsafe {
+                core_foundation::array::CFArrayGetValueAtIndex(sheets_ptr as _, 0)
+            };
+            if !sheet_ptr.is_null() {
+                unsafe { core_foundation::base::CFRetain(sheet_ptr) };
+                let sheet = CFHandle(sheet_ptr);
+                let sheet_bounds = get_window_bounds(&sheet);
+                collect_elements_inner(&sheet, &mut elements, 0, sheet_bounds, false);
+                return Ok(elements);
+            }
+        }
+    }
+
+    let (start_element, window_bounds) = focused_window
+        .map(|w| {
+            let bounds = get_window_bounds(&w);
+            (w, bounds)
         })
         .or_else(|| {
             // Try AXWindows array as fallback

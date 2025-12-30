@@ -3,7 +3,8 @@ mod inject;
 pub mod keycode;
 mod permission;
 
-pub use capture::KeyboardCapture;
+#[allow(unused_imports)]
+pub use capture::{KeyboardCapture, MouseClickEvent};
 pub use inject::*;
 pub use keycode::{KeyCode, KeyEvent, Modifiers};
 pub use permission::{check_accessibility_permission, request_accessibility_permission};
