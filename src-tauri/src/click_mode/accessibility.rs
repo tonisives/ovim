@@ -763,6 +763,12 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
     // Generate hints
     let hints = generate_hints(all_elements.len(), super::hints::DEFAULT_HINT_CHARS);
 
+    // Log hint length for debugging prefix conflicts
+    if let Some(first_hint) = hints.first() {
+        log::info!("Hint length: {} chars (first hint: '{}', count: {})",
+            first_hint.len(), first_hint, hints.len());
+    }
+
     // Convert to internal elements
     // Note: No AXElementHandle - clicks will use position-based mouse simulation
     let elements: Vec<ClickableElementInternal> = all_elements

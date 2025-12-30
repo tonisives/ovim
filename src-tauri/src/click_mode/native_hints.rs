@@ -191,8 +191,9 @@ unsafe fn create_hint_window(
     style: &HintStyle,
 ) -> Option<*mut objc::runtime::Object> {
     // Calculate window size based on hint text length
-    let char_width = style.font_size * 0.65;
-    let width = (hint.len() as f64 * char_width).max(16.0) + 6.0;
+    // Use a wider char_width to ensure text fits
+    let char_width = style.font_size * 0.75;
+    let width = (hint.len() as f64 * char_width).max(20.0) + 8.0;
     let height = style.font_size + 4.0;
 
     let frame = core_graphics::geometry::CGRect::new(
