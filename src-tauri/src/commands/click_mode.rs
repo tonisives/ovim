@@ -2,7 +2,7 @@
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::click_mode::{ClickModeState, ClickableElement};
+use crate::click_mode::{ClickModeState, ClickableElement, HintInputResult};
 use crate::window::position_click_overlay_fullscreen;
 use crate::AppState;
 
@@ -140,15 +140,18 @@ pub async fn click_mode_input_hint(
         let mut matched_element = None;
         for c in input.chars() {
             match manager.handle_hint_input(c) {
-                Ok(Some(element)) => {
+                HintInputResult::Match(element) => {
                     matched_element = Some(element);
                     break;
                 }
-                Ok(None) => {
+                HintInputResult::Partial => {
                     // Partial match, continue
                 }
-                Err(e) => {
-                    return Err(e);
+                HintInputResult::WrongSecondKey => {
+                    // Wrong second key, allow retry - don't return error
+                }
+                HintInputResult::NoMatch => {
+                    return Err("No matching hints".to_string());
                 }
             }
         }
