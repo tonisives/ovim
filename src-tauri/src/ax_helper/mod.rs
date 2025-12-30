@@ -240,10 +240,10 @@ pub fn main() {
         }
     };
 
-    // Delay to let UI stabilize - accessibility API can crash during transitions
-    // Longer delay helps avoid crashes from UI animations/transitions
-    // System Settings especially needs more time to stabilize
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Reduced delay for faster click mode activation
+    // Previously 300ms, reduced to 50ms as a balance between speed and stability
+    // If crashes occur, the subprocess design ensures main app survives
+    std::thread::sleep(std::time::Duration::from_millis(50));
 
     match query_elements(pid) {
         Ok(output) => {

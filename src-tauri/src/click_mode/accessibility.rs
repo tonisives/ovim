@@ -7,11 +7,81 @@
 
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::CFString;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use crate::nvim_edit::accessibility::AXElementHandle;
 
 use super::element::ClickableElementInternal;
 use super::hints::generate_hints;
+
+/// Cache for clickable elements to speed up repeated activations
+struct ElementCache {
+    /// Cached elements (raw data before hint generation)
+    elements: Vec<RawElementData>,
+    /// PID of the app these elements belong to
+    pid: i32,
+    /// When the cache was populated
+    timestamp: Instant,
+    /// Whether this is modal content (sheet/dialog)
+    is_modal: bool,
+}
+
+/// Global element cache with short TTL
+static ELEMENT_CACHE: OnceLock<Mutex<Option<ElementCache>>> = OnceLock::new();
+
+/// Cache TTL in milliseconds - elements are valid for this long
+const CACHE_TTL_MS: u128 = 500;
+
+fn get_cache() -> &'static Mutex<Option<ElementCache>> {
+    ELEMENT_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// Check if we have valid cached elements for the given PID
+fn get_cached_elements(pid: i32) -> Option<(Vec<RawElementData>, bool)> {
+    let cache = get_cache().lock().ok()?;
+    let cached = cache.as_ref()?;
+
+    // Check if cache is for the right PID and not expired
+    if cached.pid == pid && cached.timestamp.elapsed().as_millis() < CACHE_TTL_MS {
+        log::info!("Using cached elements (age: {}ms)", cached.timestamp.elapsed().as_millis());
+        Some((cached.elements.clone(), cached.is_modal))
+    } else {
+        None
+    }
+}
+
+/// Store elements in cache
+fn cache_elements(pid: i32, elements: Vec<RawElementData>, is_modal: bool) {
+    if let Ok(mut cache) = get_cache().lock() {
+        *cache = Some(ElementCache {
+            elements,
+            pid,
+            timestamp: Instant::now(),
+            is_modal,
+        });
+    }
+}
+
+/// Invalidate the cache (call when app focus changes)
+pub fn invalidate_cache() {
+    if let Ok(mut cache) = get_cache().lock() {
+        *cache = None;
+        log::debug!("Element cache invalidated");
+    }
+}
+
+/// Prefetch elements in background for faster click mode activation
+/// Call this when window focus changes to warm the cache
+pub fn prefetch_elements() {
+    std::thread::spawn(|| {
+        if let Some(pid) = get_frontmost_app_pid() {
+            log::debug!("Prefetching elements for PID {}", pid);
+            // Query elements - this will populate the cache
+            let _ = query_elements_subprocess(pid);
+        }
+    });
+}
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
@@ -492,15 +562,10 @@ pub fn init_helper() {
     }
 }
 
-/// Query all clickable elements using a subprocess
-/// This prevents crashes from Objective-C exceptions in the accessibility API
-pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String> {
-    let pid = get_frontmost_app_pid().ok_or("Could not get frontmost app")?;
-
-    log::info!("Querying clickable elements for PID {} via subprocess", pid);
-
+/// Get the helper binary path
+fn get_helper_binary_path() -> Option<std::path::PathBuf> {
     // First try Application Support path
-    let helper_path = get_helper_path()
+    get_helper_path()
         .filter(|p| p.exists())
         // Fall back to next to executable
         .or_else(|| {
@@ -508,9 +573,13 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.join("ovim-ax-helper")))
                 .filter(|p| p.exists())
-        });
+        })
+}
 
-    let helper_path = match helper_path {
+/// Query elements using the subprocess (internal, for caching)
+/// Returns raw elements and is_modal flag
+fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), String> {
+    let helper_path = match get_helper_binary_path() {
         Some(p) => p,
         None => {
             log::error!("Helper binary not found - click mode cannot work safely");
@@ -518,16 +587,17 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
         }
     };
 
-    log::info!("Using helper at {:?}", helper_path);
+    log::debug!("Using helper at {:?}", helper_path);
 
     // Run the helper subprocess with retry logic
     let mut helper_output: Option<HelperOutput> = None;
 
     for attempt in 0..3 {
         if attempt > 0 {
-            // Longer delay between retries to let UI stabilize
-            log::info!("Retry attempt {} after waiting...", attempt);
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            // Short delay between retries - use exponential backoff
+            let delay = 100 * (1 << (attempt - 1)); // 100ms, 200ms
+            log::info!("Retry attempt {} after {}ms...", attempt, delay);
+            std::thread::sleep(std::time::Duration::from_millis(delay));
         }
 
         let output = match std::process::Command::new(&helper_path)
@@ -563,8 +633,6 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
     let helper_output = match helper_output {
         Some(o) => o,
         None => {
-            // All subprocess attempts failed - do NOT fall back to direct query
-            // as that would crash the main app if the UI is in a bad state
             log::error!("All subprocess attempts failed - accessibility API may be unstable");
             return Err("Failed to query elements - try again in a moment".to_string());
         }
@@ -574,10 +642,30 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
     log::info!("Found {} raw clickable elements via subprocess (is_modal: {})",
         helper_output.elements.len(), is_modal);
 
+    // Cache the results
+    cache_elements(pid, helper_output.elements.clone(), is_modal);
+
+    Ok((helper_output.elements, is_modal))
+}
+
+/// Query all clickable elements using a subprocess
+/// This prevents crashes from Objective-C exceptions in the accessibility API
+pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String> {
+    let pid = get_frontmost_app_pid().ok_or("Could not get frontmost app")?;
+
+    log::info!("Querying clickable elements for PID {}", pid);
+
+    // Check cache first
+    let (mut all_elements, is_modal) = if let Some((cached, cached_modal)) = get_cached_elements(pid) {
+        log::info!("Cache hit! Using {} cached elements", cached.len());
+        (cached, cached_modal)
+    } else {
+        log::info!("Cache miss, querying via subprocess");
+        query_elements_subprocess(pid)?
+    };
+
     // Check if this is a browser that needs JavaScript injection for web content
     // Skip JS injection if we're in a modal dialog (file picker, etc.)
-    let mut all_elements: Vec<RawElementData> = helper_output.elements;
-
     if !is_modal {
         if let Some(bundle_id) = get_frontmost_app_bundle_id() {
             if let Some(browser_type) = super::browser_clickables::detect_browser_type(&bundle_id) {

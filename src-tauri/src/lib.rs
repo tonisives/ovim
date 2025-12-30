@@ -236,9 +236,13 @@ pub fn run() {
     }
 
     // Set up focus change observer to hide click mode when app loses focus
+    // and prefetch elements for the new app
     {
         let click_manager_for_focus = Arc::clone(&click_mode_manager);
         click_mode::start_focus_observer(move || {
+            // Invalidate cache since we're now on a different app
+            click_mode::accessibility::invalidate_cache();
+
             // Check if click mode is active and deactivate it
             if let Ok(mut mgr) = click_manager_for_focus.try_lock() {
                 if mgr.is_active() {
@@ -247,6 +251,10 @@ pub fn run() {
                     click_mode::native_hints::hide_hints();
                 }
             }
+
+            // Prefetch elements for the new app in background
+            // This warms the cache so click mode activation is faster
+            click_mode::accessibility::prefetch_elements();
         });
     }
 
