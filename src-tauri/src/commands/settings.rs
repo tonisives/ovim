@@ -20,6 +20,12 @@ pub fn set_settings(
     state: State<AppState>,
     new_settings: Settings,
 ) -> Result<(), String> {
+    // Update click mode timing settings
+    crate::click_mode::accessibility::update_timing_settings(
+        new_settings.click_mode.cache_ttl_ms,
+        new_settings.click_mode.ax_stabilization_delay_ms,
+    );
+
     let mut settings = state.settings.lock().unwrap();
     *settings = new_settings.clone();
     settings.save()?;

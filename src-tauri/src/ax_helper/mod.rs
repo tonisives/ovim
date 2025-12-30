@@ -224,8 +224,8 @@ fn query_elements(pid: i32) -> Result<HelperOutput, String> {
 pub fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Usage: ovim-ax-helper <pid>
-    // Or: ovim-ax-helper (uses frontmost app)
+    // Usage: ovim-ax-helper <pid> [delay_ms]
+    // Or: ovim-ax-helper (uses frontmost app with default delay)
     let pid = if args.len() > 1 {
         args[1].parse::<i32>().ok()
     } else {
@@ -240,9 +240,16 @@ pub fn main() {
         }
     };
 
-    // Minimal delay - the subprocess design protects the main app from crashes
-    // Previously 300ms, now 10ms - just enough for basic UI settling
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    // Get delay from command line arg, default to 10ms
+    let delay_ms: u64 = args
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+
+    // Configurable delay - increase if hints are missing on slower systems
+    if delay_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+    }
 
     match query_elements(pid) {
         Ok(output) => {
