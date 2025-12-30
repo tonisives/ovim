@@ -58,7 +58,7 @@ impl Default for ClickModeSettings {
                 option: false,
                 command: true, // Cmd+Shift+F
             },
-            hint_chars: "asdfghjklqwertyuiopzxcvbnm".to_string(),
+            hint_chars: "asfghjklqwetyuiopzxvbm".to_string(), // excludes r, c, d, n (action keys)
             show_search_bar: true,
             hint_opacity: 0.95,
             hint_font_size: 12,
