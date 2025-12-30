@@ -16,7 +16,7 @@ path = "src/cli.rs"
 
 [[bin]]
 name = "ovim-ax-helper"
-path = "src/ax_helper.rs"
+path = "src/bin/ovim_ax_helper.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
