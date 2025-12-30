@@ -267,16 +267,15 @@ export function Indicator() {
             {clickAction === "CmdClick" && "cmd"}
             {clickAction === "DoubleClick" && "double"}
           </div>
-          {/* Action shortcuts - Shift+key to switch */}
+          {/* Action shortcuts - just the key to switch */}
           <div
             style={{
               display: "flex",
-              gap: "2px",
-              fontSize: "7px",
+              gap: "3px",
+              fontSize: "8px",
               opacity: 0.7,
             }}
           >
-            <span>S-</span>
             <span style={{ opacity: clickAction === "RightClick" ? 1 : 0.5 }}>r</span>
             <span style={{ opacity: clickAction === "CmdClick" ? 1 : 0.5 }}>c</span>
             <span style={{ opacity: clickAction === "DoubleClick" ? 1 : 0.5 }}>d</span>

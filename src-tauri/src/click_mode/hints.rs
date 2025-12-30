@@ -6,7 +6,8 @@
 #![allow(dead_code)]
 
 /// Default hint characters - home row first, then other rows
-pub const DEFAULT_HINT_CHARS: &str = "asdfghjklqwertyuiopzxcvbnm";
+/// Excludes r, c, d, n which are reserved for action switching (right-click, cmd-click, double-click, normal click)
+pub const DEFAULT_HINT_CHARS: &str = "asfghjklqwetyuiopzxvbm";
 
 /// Generate hint labels for a given number of elements
 ///

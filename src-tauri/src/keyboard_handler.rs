@@ -354,9 +354,9 @@ fn handle_click_mode_key(event: KeyEvent, manager: SharedClickModeManager) -> Op
         return None;
     }
 
-    // Handle click action switching keys (Shift+r/c/d/n)
-    // Using Shift modifier to avoid conflicts with hint characters
-    if event.modifiers.shift {
+    // Handle click action switching keys (r/c/d/n without modifiers)
+    // These letters are excluded from hint generation to avoid conflicts
+    if !event.modifiers.shift && !event.modifiers.control && !event.modifiers.option && !event.modifiers.command {
         if let Some(c) = keycode.to_char() {
             let c_lower = c.to_ascii_lowercase();
 

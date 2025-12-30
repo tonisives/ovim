@@ -84,21 +84,24 @@ Input: "FG"
 
 | Key | Action |
 |-----|--------|
-| `a-z`, `0-9` | Type hint characters |
-| `Shift + hint` | Right-click (context menu) |
+| `a-z` (except r,c,d,n) | Type hint characters |
+| `r` | Switch to right-click mode |
+| `c` | Switch to cmd-click mode |
+| `d` | Switch to double-click mode |
+| `n` | Switch to normal click mode |
 | `Backspace` | Delete last character |
 | `Escape` | Cancel click mode |
 
-## Right-Click Support
+## Click Actions
 
-Hold `Shift` while typing the final hint character to perform a right-click:
+Press action keys to change what happens when you select a hint:
 
 ```
-Example: Right-click on element with hint "SD"
+Example: Right-click on element with hint "AS"
 
 1. Press Cmd+Shift+F (activate click mode)
-2. Type "S"
-3. Type Shift+D (right-click!)
+2. Press "r" (switch to right-click mode)
+3. Type "AS" (the hint)
 
 -> Context menu appears on the element
 ```
@@ -210,7 +213,9 @@ This can happen with:
 | Platform | macOS | Browser | macOS | macOS |
 | Scope | System-wide | Browser only | System-wide | System-wide |
 | Hint style | Vimium-like | Letters | Letters | Search-based |
-| Right-click | Shift+hint | - | Shift+hint | Yes |
+| Right-click | r + hint | - | Shift+hint | Yes |
+| Double-click | d + hint | - | - | - |
+| Cmd-click | c + hint | - | - | - |
 | Search mode | Planned | Yes | Yes | Yes |
 | Price | Free | Free | Paid | Paid |
 
@@ -218,7 +223,6 @@ This can happen with:
 
 - [ ] Search mode (type to filter by element text)
 - [ ] Scroll mode (navigate scrollable areas)
-- [ ] Double-click support
 - [ ] Drag and drop support
 - [ ] Custom hint positioning
 - [ ] Per-app settings

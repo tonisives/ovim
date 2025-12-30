@@ -82,10 +82,10 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
           type="text"
           value={clickMode.hint_chars}
           onChange={(e) => updateClickMode({ hint_chars: e.target.value })}
-          placeholder="asdfghjklqwertyuiopzxcvbnm"
+          placeholder="asfghjklqwetyuiopzxvbm"
           disabled={!clickMode.enabled}
         />
-        <span className="hint">Characters used for hint labels (home row first recommended)</span>
+        <span className="hint">Characters for hints (r, c, d, n reserved for action switching)</span>
       </div>
 
       {/* Hint Appearance Section */}
