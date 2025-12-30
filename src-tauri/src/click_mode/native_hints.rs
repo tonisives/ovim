@@ -214,7 +214,10 @@ unsafe fn create_hint_window(
     let _: () = msg_send![window, setOpaque: false];
     let clear_color: *mut objc::runtime::Object = msg_send![class!(NSColor), clearColor];
     let _: () = msg_send![window, setBackgroundColor: clear_color];
-    let _: () = msg_send![window, setLevel: 25i64]; // kCGPopUpMenuWindowLevel
+    // Use a very high window level to appear above context menus
+    // NSPopUpMenuWindowLevel is 101, NSScreenSaverWindowLevel is 1000
+    // We use 102 to be just above popup menus
+    let _: () = msg_send![window, setLevel: 102i64];
     let _: () = msg_send![window, setIgnoresMouseEvents: true];
 
     // Get content view and set up layer

@@ -412,6 +412,14 @@ struct RawElementData {
     title: String,
 }
 
+/// Helper output with metadata
+#[derive(Debug, Clone, serde::Deserialize)]
+struct HelperOutput {
+    elements: Vec<RawElementData>,
+    /// True if elements were collected from a sheet/dialog (modal UI)
+    is_modal: bool,
+}
+
 /// Get the path to the helper binary in Application Support
 fn get_helper_path() -> Option<std::path::PathBuf> {
     dirs::data_dir().map(|d| d.join("ovim").join("ovim-ax-helper"))
@@ -513,7 +521,7 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
     log::info!("Using helper at {:?}", helper_path);
 
     // Run the helper subprocess with retry logic
-    let mut raw_elements: Option<Vec<RawElementData>> = None;
+    let mut helper_output: Option<HelperOutput> = None;
 
     for attempt in 0..3 {
         if attempt > 0 {
@@ -540,9 +548,9 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        match serde_json::from_str::<Vec<RawElementData>>(&stdout) {
-            Ok(elements) => {
-                raw_elements = Some(elements);
+        match serde_json::from_str::<HelperOutput>(&stdout) {
+            Ok(parsed) => {
+                helper_output = Some(parsed);
                 break;
             }
             Err(e) => {
@@ -552,8 +560,8 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
         }
     }
 
-    let raw_elements = match raw_elements {
-        Some(e) => e,
+    let helper_output = match helper_output {
+        Some(o) => o,
         None => {
             // All subprocess attempts failed - do NOT fall back to direct query
             // as that would crash the main app if the UI is in a bad state
@@ -562,38 +570,45 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
         }
     };
 
-    log::info!("Found {} raw clickable elements via subprocess", raw_elements.len());
+    let is_modal = helper_output.is_modal;
+    log::info!("Found {} raw clickable elements via subprocess (is_modal: {})",
+        helper_output.elements.len(), is_modal);
 
     // Check if this is a browser that needs JavaScript injection for web content
-    let mut all_elements: Vec<RawElementData> = raw_elements;
+    // Skip JS injection if we're in a modal dialog (file picker, etc.)
+    let mut all_elements: Vec<RawElementData> = helper_output.elements;
 
-    if let Some(bundle_id) = get_frontmost_app_bundle_id() {
-        if let Some(browser_type) = super::browser_clickables::detect_browser_type(&bundle_id) {
-            if browser_type.needs_js_injection() {
-                log::info!("Detected Chromium browser {:?}, querying web clickables via JS", browser_type);
+    if !is_modal {
+        if let Some(bundle_id) = get_frontmost_app_bundle_id() {
+            if let Some(browser_type) = super::browser_clickables::detect_browser_type(&bundle_id) {
+                if browser_type.needs_js_injection() {
+                    log::info!("Detected Chromium browser {:?}, querying web clickables via JS", browser_type);
 
-                match super::browser_clickables::get_browser_clickables(browser_type) {
-                    Ok(web_clickables) => {
-                        log::info!("Found {} web clickables via JavaScript", web_clickables.len());
+                    match super::browser_clickables::get_browser_clickables(browser_type) {
+                        Ok(web_clickables) => {
+                            log::info!("Found {} web clickables via JavaScript", web_clickables.len());
 
-                        // Convert web clickables to RawElementData and append
-                        for wc in web_clickables {
-                            all_elements.push(RawElementData {
-                                x: wc.x,
-                                y: wc.y,
-                                width: wc.width,
-                                height: wc.height,
-                                role: wc.tag.clone(),
-                                title: wc.text.clone(),
-                            });
+                            // Convert web clickables to RawElementData and append
+                            for wc in web_clickables {
+                                all_elements.push(RawElementData {
+                                    x: wc.x,
+                                    y: wc.y,
+                                    width: wc.width,
+                                    height: wc.height,
+                                    role: wc.tag.clone(),
+                                    title: wc.text.clone(),
+                                });
+                            }
                         }
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to get web clickables: {}", e);
+                        Err(e) => {
+                            log::warn!("Failed to get web clickables: {}", e);
+                        }
                     }
                 }
             }
         }
+    } else {
+        log::info!("Modal dialog detected, skipping browser JS injection");
     }
 
     log::info!("Total clickable elements: {}", all_elements.len());
@@ -832,6 +847,126 @@ pub fn perform_right_click_at_position(x: f64, y: f64) -> Result<(), String> {
     mouse_up.post(CGEventTapLocation::HID);
 
     log::info!("Right-click completed");
+    Ok(())
+}
+
+/// Perform a double-click at a specific position
+pub fn perform_double_click_at_position(x: f64, y: f64) -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
+    log::info!("Performing double-click at position ({}, {})", x, y);
+
+    let point = CGPoint::new(x, y);
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Could not create event source")?;
+
+    // First click - down
+    let mouse_down1 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse down event")?;
+    mouse_down1.set_integer_value_field(
+        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE,
+        1,
+    );
+    mouse_down1.post(CGEventTapLocation::HID);
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // First click - up
+    let mouse_up1 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse up event")?;
+    mouse_up1.set_integer_value_field(
+        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE,
+        1,
+    );
+    mouse_up1.post(CGEventTapLocation::HID);
+
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Second click - down (click count = 2)
+    let mouse_down2 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse down event")?;
+    mouse_down2.set_integer_value_field(
+        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE,
+        2,
+    );
+    mouse_down2.post(CGEventTapLocation::HID);
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Second click - up (click count = 2)
+    let mouse_up2 = CGEvent::new_mouse_event(
+        source,
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse up event")?;
+    mouse_up2.set_integer_value_field(
+        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE,
+        2,
+    );
+    mouse_up2.post(CGEventTapLocation::HID);
+
+    log::info!("Double-click completed");
+    Ok(())
+}
+
+/// Perform a Cmd+click at a specific position
+pub fn perform_cmd_click_at_position(x: f64, y: f64) -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
+    log::info!("Performing Cmd+click at position ({}, {})", x, y);
+
+    let point = CGPoint::new(x, y);
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Could not create event source")?;
+
+    // Mouse down with Cmd modifier
+    let mouse_down = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse down event")?;
+    mouse_down.set_flags(CGEventFlags::CGEventFlagCommand);
+    mouse_down.post(CGEventTapLocation::HID);
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Mouse up with Cmd modifier
+    let mouse_up = CGEvent::new_mouse_event(
+        source,
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| "Could not create mouse up event")?;
+    mouse_up.set_flags(CGEventFlags::CGEventFlagCommand);
+    mouse_up.post(CGEventTapLocation::HID);
+
+    log::info!("Cmd+click completed");
     Ok(())
 }
 
