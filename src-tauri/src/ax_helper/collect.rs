@@ -3,7 +3,7 @@
 use core_foundation::base::{CFRetain, CFTypeRef, TCFType};
 use core_foundation::string::CFString;
 
-use super::bindings::{AXUIElementCopyAttributeValue, MAX_DEPTH, MAX_ELEMENTS};
+use super::bindings::{AXUIElementCopyAttributeValue, get_max_depth, get_max_elements};
 use super::cf_handle::CFHandle;
 use super::element::{has_press_action, is_clickable_role, is_visible};
 use super::types::{RawElement, WindowBounds};
@@ -16,7 +16,7 @@ pub fn collect_elements_inner(
     window_bounds: Option<WindowBounds>,
     inside_row: bool,
 ) {
-    if depth > MAX_DEPTH || elements.len() >= MAX_ELEMENTS {
+    if depth > get_max_depth() || elements.len() >= get_max_elements() {
         return;
     }
 
@@ -137,7 +137,7 @@ pub fn collect_elements_inner(
     let safe_count = (count as usize).min(100);
 
     for i in 0..safe_count {
-        if elements.len() >= MAX_ELEMENTS {
+        if elements.len() >= get_max_elements() {
             break;
         }
 

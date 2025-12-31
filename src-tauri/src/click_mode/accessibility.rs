@@ -36,6 +36,8 @@ static TIMING_SETTINGS: OnceLock<Mutex<TimingSettings>> = OnceLock::new();
 struct TimingSettings {
     cache_ttl_ms: u128,
     ax_delay_ms: u32,
+    max_depth: u32,
+    max_elements: u32,
 }
 
 impl Default for TimingSettings {
@@ -43,6 +45,8 @@ impl Default for TimingSettings {
         Self {
             cache_ttl_ms: 500,
             ax_delay_ms: 10,
+            max_depth: 10,
+            max_elements: 500,
         }
     }
 }
@@ -52,11 +56,14 @@ fn get_timing_settings() -> &'static Mutex<TimingSettings> {
 }
 
 /// Update timing settings from user configuration
-pub fn update_timing_settings(cache_ttl_ms: u32, ax_delay_ms: u32) {
+pub fn update_timing_settings(cache_ttl_ms: u32, ax_delay_ms: u32, max_depth: u32, max_elements: u32) {
     if let Ok(mut settings) = get_timing_settings().lock() {
         settings.cache_ttl_ms = cache_ttl_ms as u128;
         settings.ax_delay_ms = ax_delay_ms;
-        log::info!("Updated click mode timing: cache_ttl={}ms, ax_delay={}ms", cache_ttl_ms, ax_delay_ms);
+        settings.max_depth = max_depth;
+        settings.max_elements = max_elements;
+        log::info!("Updated click mode settings: cache_ttl={}ms, ax_delay={}ms, max_depth={}, max_elements={}",
+            cache_ttl_ms, ax_delay_ms, max_depth, max_elements);
     }
 }
 
@@ -621,11 +628,11 @@ fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), St
         }
     };
 
-    // Get delay setting
-    let delay_ms = get_timing_settings()
+    // Get settings
+    let (delay_ms, max_depth, max_elements) = get_timing_settings()
         .lock()
-        .map(|s| s.ax_delay_ms)
-        .unwrap_or(10);
+        .map(|s| (s.ax_delay_ms, s.max_depth, s.max_elements))
+        .unwrap_or((10, 30, 500));
 
     log::info!("[TIMING] helper_path lookup: {}ms", start.elapsed().as_millis());
 
@@ -634,6 +641,8 @@ fn query_elements_subprocess(pid: i32) -> Result<(Vec<RawElementData>, bool), St
     let output = std::process::Command::new(&helper_path)
         .arg(pid.to_string())
         .arg(delay_ms.to_string())
+        .arg(max_depth.to_string())
+        .arg(max_elements.to_string())
         .output();
 
     log::info!("[TIMING] subprocess execution: {}ms", subprocess_start.elapsed().as_millis());

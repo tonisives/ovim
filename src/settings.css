@@ -66,6 +66,11 @@ body {
 
 /* Tabs */
 .tabs {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
   display: flex;
   gap: 2px;
   background: var(--bg-tertiary);
@@ -139,6 +144,9 @@ body {
 .tab-content {
   background: var(--bg-secondary);
   padding: 20px;
+  margin-top: 50px;
+  max-height: calc(100vh - 50px);
+  overflow-y: auto;
 }
 
 /* Settings section */
@@ -983,4 +991,3 @@ body {
   border-radius: 6px;
   display: inline-block;
 }
-

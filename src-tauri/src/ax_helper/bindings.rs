@@ -55,6 +55,25 @@ pub const CLICKABLE_ROLES: &[&str] = &[
     "AXHeading",
 ];
 
-/// Depth limit for traversal
-pub const MAX_DEPTH: usize = 12;
-pub const MAX_ELEMENTS: usize = 300;
+/// Default depth limit for traversal
+pub const DEFAULT_MAX_DEPTH: usize = 10;
+pub const DEFAULT_MAX_ELEMENTS: usize = 500;
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Runtime-configurable limits
+pub static MAX_DEPTH: AtomicUsize = AtomicUsize::new(DEFAULT_MAX_DEPTH);
+pub static MAX_ELEMENTS: AtomicUsize = AtomicUsize::new(DEFAULT_MAX_ELEMENTS);
+
+pub fn set_limits(max_depth: usize, max_elements: usize) {
+    MAX_DEPTH.store(max_depth, Ordering::Relaxed);
+    MAX_ELEMENTS.store(max_elements, Ordering::Relaxed);
+}
+
+pub fn get_max_depth() -> usize {
+    MAX_DEPTH.load(Ordering::Relaxed)
+}
+
+pub fn get_max_elements() -> usize {
+    MAX_ELEMENTS.load(Ordering::Relaxed)
+}
