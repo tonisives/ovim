@@ -51,21 +51,6 @@ export function WindowTab({ nvimEdit, onUpdate }: Props) {
         </div>
       )}
 
-      <div className="form-group">
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={nvimEdit.live_sync_enabled}
-            onChange={(e) => onUpdate({ live_sync_enabled: e.target.checked })}
-            disabled={!nvimEdit.enabled}
-          />
-          Live sync text field
-          <span className="beta-badge">BETA</span>
-        </label>
-        <span className="hint">
-          Sync changes to the original text field as you type in the editor. Only works with Neovim.
-        </span>
-      </div>
     </>
   )
 }

@@ -33,7 +33,7 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
   return (
     <div className="settings-section">
       <div className="section-header">
-        <h2>Click Mode</h2>
+        <h2>Click Mode <span className="beta-badge">BETA</span></h2>
       </div>
       <p className="section-description">
         Press a shortcut to show hint labels on clickable elements. Type the hint to click without using the mouse.
