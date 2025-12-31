@@ -26,6 +26,57 @@ use collect::collect_elements_inner;
 use menu::collect_menu_elements;
 use types::{HelperOutput, RawElement, WindowBounds};
 
+/// Remove duplicate elements that are at the same position or fully contained within another element.
+/// This handles cases like emoji buttons in Slack where both the AXButton and its child AXImage
+/// are collected as clickable elements.
+fn deduplicate_elements(elements: Vec<RawElement>) -> Vec<RawElement> {
+    if elements.len() <= 1 {
+        return elements;
+    }
+
+    let mut result: Vec<RawElement> = Vec::with_capacity(elements.len());
+
+    for elem in elements {
+        // Check if this element is contained within or at the same position as an existing element
+        let dominated = result.iter().any(|existing| {
+            // Same position and size (exact duplicate)
+            if (elem.x - existing.x).abs() < 1.0
+                && (elem.y - existing.y).abs() < 1.0
+                && (elem.width - existing.width).abs() < 1.0
+                && (elem.height - existing.height).abs() < 1.0
+            {
+                return true;
+            }
+
+            // elem is fully contained within existing (existing is parent)
+            if elem.x >= existing.x
+                && elem.y >= existing.y
+                && elem.x + elem.width <= existing.x + existing.width + 1.0
+                && elem.y + elem.height <= existing.y + existing.height + 1.0
+            {
+                return true;
+            }
+
+            false
+        });
+
+        // Also check if elem contains (dominates) any existing element - if so, remove the smaller one
+        if !dominated {
+            // Remove any elements that this new element contains
+            result.retain(|existing| {
+                // Keep if existing is NOT contained within elem
+                !(existing.x >= elem.x
+                    && existing.y >= elem.y
+                    && existing.x + existing.width <= elem.x + elem.width + 1.0
+                    && existing.y + existing.height <= elem.y + elem.height + 1.0)
+            });
+            result.push(elem);
+        }
+    }
+
+    result
+}
+
 fn get_frontmost_app_pid() -> Option<i32> {
     unsafe {
         use objc::{class, msg_send, sel, sel_impl};
@@ -72,7 +123,7 @@ fn query_elements_inner(pid: i32) -> Result<HelperOutput, String> {
     // These take priority as they're the most likely target when visible
     if collect_menu_elements(&mut elements, pid) {
         return Ok(HelperOutput {
-            elements,
+            elements: deduplicate_elements(elements),
             is_modal: true,
         });
     }
@@ -124,7 +175,7 @@ fn query_elements_inner(pid: i32) -> Result<HelperOutput, String> {
                     // Collect elements from the sheet instead of the window
                     collect_elements_inner(&sheet, &mut elements, 0, sheet_bounds, false);
                     return Ok(HelperOutput {
-                        elements,
+                        elements: deduplicate_elements(elements),
                         is_modal: true,
                     });
                 }
@@ -145,7 +196,7 @@ fn query_elements_inner(pid: i32) -> Result<HelperOutput, String> {
                     let dialog_bounds = get_window_bounds(&dialog);
                     collect_elements_inner(&dialog, &mut elements, 0, dialog_bounds, false);
                     return Ok(HelperOutput {
-                        elements,
+                        elements: deduplicate_elements(elements),
                         is_modal: true,
                     });
                 }
@@ -224,8 +275,8 @@ fn query_elements(pid: i32) -> Result<HelperOutput, String> {
 pub fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Usage: ovim-ax-helper <pid> [delay_ms]
-    // Or: ovim-ax-helper (uses frontmost app with default delay)
+    // Usage: ovim-ax-helper <pid> [delay_ms] [max_depth] [max_elements]
+    // Or: ovim-ax-helper (uses frontmost app with defaults)
     let pid = if args.len() > 1 {
         args[1].parse::<i32>().ok()
     } else {
@@ -245,6 +296,21 @@ pub fn main() {
         .get(2)
         .and_then(|s| s.parse().ok())
         .unwrap_or(10);
+
+    // Get max_depth from command line arg
+    let max_depth: usize = args
+        .get(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(bindings::DEFAULT_MAX_DEPTH);
+
+    // Get max_elements from command line arg
+    let max_elements: usize = args
+        .get(4)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(bindings::DEFAULT_MAX_ELEMENTS);
+
+    // Set the limits
+    bindings::set_limits(max_depth, max_elements);
 
     // Configurable delay - increase if hints are missing on slower systems
     if delay_ms > 0 {

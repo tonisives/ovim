@@ -206,12 +206,14 @@ pub fn run() {
 
     let settings = Arc::new(Mutex::new(Settings::load()));
 
-    // Initialize click mode timing settings from loaded settings
+    // Initialize click mode settings from loaded settings
     {
         let s = settings.lock().unwrap();
         click_mode::accessibility::update_timing_settings(
             s.click_mode.cache_ttl_ms,
             s.click_mode.ax_stabilization_delay_ms,
+            s.click_mode.max_depth,
+            s.click_mode.max_elements,
         );
     }
 

@@ -37,6 +37,16 @@ pub struct ClickModeSettings {
     /// How long to cache elements (ms). Increase for faster repeat activations.
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_ms: u32,
+
+    // Advanced traversal settings
+    /// Maximum depth to traverse in the accessibility tree.
+    /// Increase for apps with deeply nested elements (e.g., Electron apps like Slack).
+    #[serde(default = "default_max_depth")]
+    pub max_depth: u32,
+    /// Maximum number of elements to collect.
+    /// Increase if hints are missing in apps with many elements.
+    #[serde(default = "default_max_elements")]
+    pub max_elements: u32,
 }
 
 fn default_ax_delay() -> u32 {
@@ -44,6 +54,14 @@ fn default_ax_delay() -> u32 {
 }
 
 fn default_cache_ttl() -> u32 {
+    500
+}
+
+fn default_max_depth() -> u32 {
+    10
+}
+
+fn default_max_elements() -> u32 {
     500
 }
 
@@ -66,6 +84,8 @@ impl Default for ClickModeSettings {
             hint_text_color: "#000000".to_string(), // Black text
             ax_stabilization_delay_ms: default_ax_delay(),
             cache_ttl_ms: default_cache_ttl(),
+            max_depth: default_max_depth(),
+            max_elements: default_max_elements(),
         }
     }
 }

@@ -201,13 +201,59 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
       <div className="color-settings">
         <h3>Advanced</h3>
         <p className="help-text">
-          Timing settings for troubleshooting. Increase delays if some hints are missing on slower systems.
+          Settings for troubleshooting. Increase limits if hints are missing in apps with complex UIs (e.g., Electron apps like Slack).
         </p>
 
         <div className="indicator-controls">
+          {/* Max Depth */}
+          <div className="slider-group">
+            <label title="How deep to traverse the UI hierarchy. Electron apps (Slack, Discord, VS Code) need higher values (30-50).">
+              Max Depth
+            </label>
+            <input
+              type="range"
+              min="5"
+              max="50"
+              step="5"
+              value={clickMode.max_depth ?? 10}
+              onChange={(e) => updateClickMode({ max_depth: parseInt(e.target.value) })}
+              disabled={!clickMode.enabled}
+              title="How deep to traverse the UI hierarchy. Electron apps (Slack, Discord, VS Code) need higher values (30-50)."
+            />
+            <div className="slider-labels">
+              <span>5</span>
+              <span>{clickMode.max_depth ?? 10}</span>
+              <span>50</span>
+            </div>
+          </div>
+
+          {/* Max Elements */}
+          <div className="slider-group">
+            <label title="Maximum number of clickable elements to find. Increase if some buttons are missing.">
+              Max Elements
+            </label>
+            <input
+              type="range"
+              min="100"
+              max="1000"
+              step="50"
+              value={clickMode.max_elements ?? 500}
+              onChange={(e) => updateClickMode({ max_elements: parseInt(e.target.value) })}
+              disabled={!clickMode.enabled}
+              title="Maximum number of clickable elements to find. Increase if some buttons are missing."
+            />
+            <div className="slider-labels">
+              <span>100</span>
+              <span>{clickMode.max_elements ?? 500}</span>
+              <span>1000</span>
+            </div>
+          </div>
+
           {/* Stabilization Delay */}
           <div className="slider-group">
-            <label>Stabilization Delay</label>
+            <label title="Wait time before scanning UI elements. Increase if hints appear before the UI is ready.">
+              Stabilization Delay
+            </label>
             <input
               type="range"
               min="0"
@@ -216,6 +262,7 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
               value={clickMode.ax_stabilization_delay_ms}
               onChange={(e) => updateClickMode({ ax_stabilization_delay_ms: parseInt(e.target.value) })}
               disabled={!clickMode.enabled}
+              title="Wait time before scanning UI elements. Increase if hints appear before the UI is ready."
             />
             <div className="slider-labels">
               <span>0ms</span>
@@ -226,7 +273,9 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
 
           {/* Cache Duration */}
           <div className="slider-group">
-            <label>Cache Duration</label>
+            <label title="How long to reuse scanned elements. Higher values make repeated activations faster.">
+              Cache Duration
+            </label>
             <input
               type="range"
               min="0"
@@ -235,6 +284,7 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
               value={clickMode.cache_ttl_ms}
               onChange={(e) => updateClickMode({ cache_ttl_ms: parseInt(e.target.value) })}
               disabled={!clickMode.enabled}
+              title="How long to reuse scanned elements. Higher values make repeated activations faster."
             />
             <div className="slider-labels">
               <span>0ms</span>

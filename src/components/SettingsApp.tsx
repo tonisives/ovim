@@ -42,6 +42,9 @@ export interface ClickModeSettings {
   // Advanced timing settings
   ax_stabilization_delay_ms: number;
   cache_ttl_ms: number;
+  // Advanced traversal settings
+  max_depth: number;
+  max_elements: number;
 }
 
 export interface RgbColor {
