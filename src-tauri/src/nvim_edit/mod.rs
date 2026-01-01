@@ -41,6 +41,12 @@ pub fn trigger_nvim_edit(
     );
     let text = capture_result.text;
     let element_frame = capture_result.element_frame;
+    let initial_cursor = capture_result.cursor_position;
+    let browser_type = capture_result.browser_type;
+
+    if let Some(ref cursor) = initial_cursor {
+        log::info!("Initial cursor position: line={}, col={}", cursor.line, cursor.column);
+    }
 
     // 4. Calculate window geometry if popup mode is enabled
     let geometry = geometry::calculate_popup_geometry(&settings, element_frame, window_frame);
@@ -59,6 +65,8 @@ pub fn trigger_nvim_edit(
         &session,
         &settings,
         Arc::clone(&live_sync_worked),
+        browser_type,
+        initial_cursor,
     );
 
     // 7. Spawn main thread to wait for nvim to exit and restore text
@@ -77,10 +85,11 @@ fn spawn_rpc_handler(
     session: &session::EditSession,
     settings: &NvimEditSettings,
     live_sync_worked: Arc<AtomicBool>,
+    browser_type: Option<browser_scripting::BrowserType>,
+    initial_cursor: Option<browser_scripting::CursorPosition>,
 ) -> thread::JoinHandle<()> {
     let socket_path = session.socket_path.clone();
     let focus_element = session.focus_context.focused_element.clone();
-    let browser_type = browser_scripting::detect_browser_type(&session.focus_context.app_bundle_id);
     let live_sync_enabled = settings.live_sync_enabled;
 
     thread::spawn(move || {
@@ -106,18 +115,33 @@ fn spawn_rpc_handler(
             let sync_flag = Arc::clone(&live_sync_worked);
             let element_for_callback = focus_element.clone();
 
+            // Track last cursor position from nvim for restoring in browser
+            let last_cursor = Arc::new(std::sync::Mutex::new(initial_cursor));
+            let last_cursor_for_callback = Arc::clone(&last_cursor);
+
             let on_lines = Arc::new(move |lines: Vec<String>| {
                 handle_live_sync_update(
                     &lines,
                     browser_type,
                     element_for_callback.as_ref(),
                     &sync_flag,
+                    last_cursor_for_callback.lock().ok().and_then(|g| *g),
                 );
             });
 
             match rpc::connect_to_nvim(&socket_path, on_lines).await {
                 Ok(rpc_session) => {
                     log::info!("RPC connected, live sync enabled");
+
+                    // Set nvim cursor to match browser's initial cursor position
+                    if let Some(cursor) = initial_cursor {
+                        if let Err(e) = rpc_session.set_cursor(cursor.line, cursor.column).await {
+                            log::debug!("Failed to set initial nvim cursor: {}", e);
+                        } else {
+                            log::info!("Set nvim cursor to line={}, col={}", cursor.line, cursor.column);
+                        }
+                    }
+
                     wait_for_nvim_exit(&socket_path).await;
                     let _ = rpc_session.detach().await;
                 }
@@ -135,6 +159,7 @@ fn handle_live_sync_update(
     browser_type: Option<browser_scripting::BrowserType>,
     focus_element: Option<&accessibility::AXElementHandle>,
     sync_flag: &AtomicBool,
+    cursor_position: Option<browser_scripting::CursorPosition>,
 ) {
     let text = lines.join("\n");
     let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
@@ -146,10 +171,17 @@ fn handle_live_sync_update(
             Ok(()) => {
                 sync_flag.store(true, Ordering::SeqCst);
                 log::info!("Live sync (browser JS): updated text field ({} chars)", text.len());
+
+                // Restore cursor position if available
+                if let Some(cursor) = cursor_position {
+                    if let Err(e) = browser_scripting::set_browser_cursor_position(bt, cursor.line, cursor.column) {
+                        log::debug!("Failed to restore cursor position: {}", e);
+                    }
+                }
                 return;
             }
             Err(e) => {
-                log::debug!("Browser live sync failed: {}", e);
+                log::info!("Browser live sync failed: {}", e);
             }
         }
     }

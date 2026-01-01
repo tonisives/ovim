@@ -1,13 +1,17 @@
 //! Text capture from focused elements
 
 use super::accessibility::{self, ElementFrame};
-use super::browser_scripting::{self, BrowserType};
+use super::browser_scripting::{self, BrowserType, CursorPosition};
 use super::clipboard::capture_text_via_clipboard;
 
 /// Result of text capture with additional context
 pub struct CaptureResult {
     pub text: String,
     pub element_frame: Option<ElementFrame>,
+    /// Initial cursor position (0-based line and column) if available
+    pub cursor_position: Option<CursorPosition>,
+    /// Browser type if this is a browser
+    pub browser_type: Option<BrowserType>,
 }
 
 /// Capture text and element frame from the focused element
@@ -15,11 +19,51 @@ pub fn capture_text_and_frame(
     app_bundle_id: &str,
     initial_element_frame: Option<ElementFrame>,
 ) -> CaptureResult {
+    let browser_type = browser_scripting::detect_browser_type(app_bundle_id);
+
+    // For browsers, try to get text AND cursor in one JS call
+    // This is more reliable as cursor position won't be affected by text capture
+    if let Some(bt) = browser_type {
+        log::info!("Attempting combined text+cursor capture via JS");
+        if let Some(result) = browser_scripting::get_browser_text_and_cursor(bt) {
+            log::info!("JS capture succeeded: {} chars, cursor={:?}", result.text.len(), result.cursor);
+
+            // Get element frame if needed
+            let element_frame = if initial_element_frame.is_none() {
+                log::info!("Getting element frame via browser scripting");
+                browser_scripting::get_browser_element_frame(bt)
+            } else {
+                initial_element_frame
+            };
+
+            return CaptureResult {
+                text: result.text,
+                element_frame,
+                cursor_position: result.cursor,
+                browser_type: Some(bt),
+            };
+        }
+        log::info!("JS capture failed, falling back to clipboard method");
+    }
+
+    // Fallback: capture cursor position BEFORE text capture (which may move cursor via Cmd+A)
+    let cursor_position = if let Some(bt) = browser_type {
+        log::info!("Attempting to capture browser cursor position");
+        let pos = browser_scripting::get_browser_cursor_position(bt);
+        match &pos {
+            Some(p) => log::info!("Captured cursor position: line={}, col={}", p.line, p.column),
+            None => log::info!("Failed to capture cursor position"),
+        }
+        pos
+    } else {
+        None
+    };
+
     // If accessibility API didn't return element frame, try browser scripting for web text fields
     let element_frame = if initial_element_frame.is_none() {
-        if let Some(browser_type) = browser_scripting::detect_browser_type(app_bundle_id) {
-            log::info!("Detected browser type {:?}, attempting browser scripting", browser_type);
-            let browser_frame = browser_scripting::get_browser_element_frame(browser_type);
+        if let Some(bt) = browser_type {
+            log::info!("Detected browser type {:?}, attempting browser scripting", bt);
+            let browser_frame = browser_scripting::get_browser_element_frame(bt);
             log::info!("Browser scripting element frame: {:?}", browser_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
             browser_frame
         } else {
@@ -30,10 +74,9 @@ pub fn capture_text_and_frame(
     };
 
     // Get text from the focused element
-    let browser_type = browser_scripting::detect_browser_type(app_bundle_id);
     let text = capture_text_content(browser_type);
 
-    CaptureResult { text, element_frame }
+    CaptureResult { text, element_frame, cursor_position, browser_type }
 }
 
 /// Capture text content from the focused element
