@@ -15,11 +15,27 @@ pub struct CaptureResult {
 }
 
 /// Capture text and element frame from the focused element
+/// If clipboard_mode is true, always use clipboard-based capture (Cmd+A, Cmd+C)
 pub fn capture_text_and_frame(
     app_bundle_id: &str,
     initial_element_frame: Option<ElementFrame>,
+    clipboard_mode: bool,
 ) -> CaptureResult {
     let browser_type = browser_scripting::detect_browser_type(app_bundle_id);
+
+    // If clipboard_mode is enabled, skip smart detection and use clipboard directly
+    if clipboard_mode {
+        log::info!("Clipboard mode enabled, using Cmd+A/Cmd+C for text capture");
+        let text = capture_text_via_clipboard().unwrap_or_default();
+        log::info!("Clipboard capture: {} chars", text.len());
+
+        return CaptureResult {
+            text,
+            element_frame: initial_element_frame,
+            cursor_position: None, // No cursor tracking in clipboard mode
+            browser_type: None,    // Disable browser-specific features
+        };
+    }
 
     // For browsers, try to get text AND cursor in one JS call
     // This is more reliable as cursor position won't be affected by text capture

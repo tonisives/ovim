@@ -38,6 +38,7 @@ pub fn trigger_nvim_edit(
     let capture_result = text_capture::capture_text_and_frame(
         &focus_context.app_bundle_id,
         element_frame,
+        settings.clipboard_mode,
     );
     let text = capture_result.text;
     let element_frame = capture_result.element_frame;

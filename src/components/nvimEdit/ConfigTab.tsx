@@ -325,6 +325,22 @@ export function ConfigTab({
           Sync changes to the original text field as you type in the editor. Only works with Neovim.
         </span>
       </div>
+
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={nvimEdit.clipboard_mode ?? false}
+            onChange={(e) => onUpdate({ clipboard_mode: e.target.checked })}
+            disabled={!nvimEdit.enabled}
+          />
+          Clipboard mode
+        </label>
+        <span className="hint">
+          Use Cmd+A/Cmd+C/Cmd+V for text capture and restore. Disables smart detection and cursor
+          tracking. Use this if you experience issues with specific apps.
+        </span>
+      </div>
     </>
   )
 }

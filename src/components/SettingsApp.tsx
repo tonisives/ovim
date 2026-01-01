@@ -27,6 +27,7 @@ export interface NvimEditSettings {
   popup_height: number;
   live_sync_enabled: boolean;
   use_custom_script: boolean;
+  clipboard_mode: boolean;
 }
 
 export interface ClickModeSettings {
