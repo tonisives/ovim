@@ -75,19 +75,26 @@ pub fn trigger_nvim_edit(
         session_id,
         rpc_handle,
         live_sync_worked,
+        browser_type,
     );
 
     Ok(())
 }
 
+/// Result from RPC handler including final cursor position
+struct RpcResult {
+    final_cursor: Option<browser_scripting::CursorPosition>,
+}
+
 /// Spawn the RPC handler thread for live sync
+/// Returns a handle that can be joined to get the final cursor position
 fn spawn_rpc_handler(
     session: &session::EditSession,
     settings: &NvimEditSettings,
     live_sync_worked: Arc<AtomicBool>,
     browser_type: Option<browser_scripting::BrowserType>,
     initial_cursor: Option<browser_scripting::CursorPosition>,
-) -> thread::JoinHandle<()> {
+) -> thread::JoinHandle<Option<RpcResult>> {
     let socket_path = session.socket_path.clone();
     let focus_element = session.focus_context.focused_element.clone();
     let live_sync_enabled = settings.live_sync_enabled;
@@ -95,7 +102,7 @@ fn spawn_rpc_handler(
     thread::spawn(move || {
         if !live_sync_enabled {
             log::info!("Live sync disabled, skipping RPC connection");
-            return;
+            return None;
         }
 
         let rt = match tokio::runtime::Builder::new_current_thread()
@@ -105,7 +112,7 @@ fn spawn_rpc_handler(
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("Failed to create tokio runtime: {}", e);
-                return;
+                return None;
             }
         };
 
@@ -115,17 +122,12 @@ fn spawn_rpc_handler(
             let sync_flag = Arc::clone(&live_sync_worked);
             let element_for_callback = focus_element.clone();
 
-            // Track last cursor position from nvim for restoring in browser
-            let last_cursor = Arc::new(std::sync::Mutex::new(initial_cursor));
-            let last_cursor_for_callback = Arc::clone(&last_cursor);
-
             let on_lines = Arc::new(move |lines: Vec<String>| {
                 handle_live_sync_update(
                     &lines,
                     browser_type,
                     element_for_callback.as_ref(),
                     &sync_flag,
-                    last_cursor_for_callback.lock().ok().and_then(|g| *g),
                 );
             });
 
@@ -142,14 +144,43 @@ fn spawn_rpc_handler(
                         }
                     }
 
-                    wait_for_nvim_exit(&socket_path).await;
+                    // Poll cursor position periodically until nvim exits
+                    // This way we have the last known cursor when nvim closes
+                    let mut last_cursor: Option<browser_scripting::CursorPosition> = None;
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+
+                        if !rpc::socket_exists(&socket_path) {
+                            log::info!("Socket removed, nvim has exited");
+                            break;
+                        }
+
+                        // Try to get current cursor position
+                        match rpc_session.get_cursor().await {
+                            Ok((line, col)) => {
+                                last_cursor = Some(browser_scripting::CursorPosition { line, column: col });
+                            }
+                            Err(_) => {
+                                // RPC failed, nvim is probably closing
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(ref cursor) = last_cursor {
+                        log::info!("Final nvim cursor: line={}, col={}", cursor.line, cursor.column);
+                    }
+
                     let _ = rpc_session.detach().await;
+
+                    Some(RpcResult { final_cursor: last_cursor })
                 }
                 Err(e) => {
                     log::warn!("RPC connection failed, falling back to clipboard-only mode: {}", e);
+                    None
                 }
             }
-        });
+        })
     })
 }
 
@@ -159,7 +190,6 @@ fn handle_live_sync_update(
     browser_type: Option<browser_scripting::BrowserType>,
     focus_element: Option<&accessibility::AXElementHandle>,
     sync_flag: &AtomicBool,
-    cursor_position: Option<browser_scripting::CursorPosition>,
 ) {
     let text = lines.join("\n");
     let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
@@ -171,13 +201,6 @@ fn handle_live_sync_update(
             Ok(()) => {
                 sync_flag.store(true, Ordering::SeqCst);
                 log::info!("Live sync (browser JS): updated text field ({} chars)", text.len());
-
-                // Restore cursor position if available
-                if let Some(cursor) = cursor_position {
-                    if let Err(e) = browser_scripting::set_browser_cursor_position(bt, cursor.line, cursor.column) {
-                        log::debug!("Failed to restore cursor position: {}", e);
-                    }
-                }
                 return;
             }
             Err(e) => {
@@ -200,23 +223,13 @@ fn handle_live_sync_update(
     }
 }
 
-/// Wait for nvim to exit by monitoring the socket
-async fn wait_for_nvim_exit(socket_path: &std::path::Path) {
-    loop {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        if !rpc::socket_exists(socket_path) {
-            log::info!("Socket removed, nvim has exited");
-            break;
-        }
-    }
-}
-
 /// Spawn the completion handler thread that waits for nvim and restores text
 fn spawn_completion_handler(
     manager: Arc<EditSessionManager>,
     session_id: uuid::Uuid,
-    rpc_handle: thread::JoinHandle<()>,
+    rpc_handle: thread::JoinHandle<Option<RpcResult>>,
     live_sync_worked: Arc<AtomicBool>,
+    browser_type: Option<browser_scripting::BrowserType>,
 ) {
     thread::spawn(move || {
         let Some(session) = manager.get_session(&session_id) else {
@@ -240,8 +253,9 @@ fn spawn_completion_handler(
 
         log::info!("Terminal process exited, reading edited file");
 
-        // Wait for RPC thread to finish
-        let _ = rpc_handle.join();
+        // Wait for RPC thread to finish and get final cursor position
+        let rpc_result = rpc_handle.join().ok().flatten();
+        let final_cursor = rpc_result.and_then(|r| r.final_cursor);
 
         // Restore focus to the original app immediately
         log::info!("Restoring focus immediately");
@@ -259,6 +273,17 @@ fn spawn_completion_handler(
         // Complete the session - skip clipboard paste if live sync worked
         if let Err(e) = complete_edit_session(&manager, &session_id, did_live_sync) {
             log::error!("Error completing edit session: {}", e);
+        }
+
+        // Restore cursor position in browser if we have it
+        if let (Some(bt), Some(cursor)) = (browser_type, final_cursor) {
+            log::info!("Restoring browser cursor to line={}, col={}", cursor.line, cursor.column);
+            // Small delay for focus to settle before setting cursor
+            thread::sleep(Duration::from_millis(100));
+            match browser_scripting::set_browser_cursor_position(bt, cursor.line, cursor.column) {
+                Ok(()) => log::info!("Browser cursor restored successfully"),
+                Err(e) => log::info!("Failed to restore browser cursor: {}", e),
+            }
         }
 
         // Clean up socket file

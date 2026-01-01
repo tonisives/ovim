@@ -102,6 +102,14 @@ fn build_set_cursor_position_js(line: usize, column: usize) -> String {
                 sel.addRange(range);
                 return 'ok_cm6';
             }}
+
+            // Handle empty lines - set cursor at start of line element
+            // Empty lines have a <br> child but no text nodes
+            range.setStart(line, 0);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return 'ok_cm6_empty';
         }}
     }}
 
