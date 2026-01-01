@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 /// Wait for a specific PID to exit
+#[allow(dead_code)]
 pub fn wait_for_pid(pid: u32) -> Result<(), String> {
     loop {
         // First try waitpid with WNOHANG to reap zombie children (for processes we spawned)

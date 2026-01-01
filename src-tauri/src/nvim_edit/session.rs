@@ -115,6 +115,7 @@ impl EditSessionManager {
     }
 
     /// Cancel a session (clean up without applying changes)
+    #[allow(dead_code)]
     pub fn cancel_session(&self, id: &Uuid) {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(session) = sessions.remove(id) {

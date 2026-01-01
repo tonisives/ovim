@@ -86,6 +86,32 @@ struct RpcResult {
     final_cursor: Option<browser_scripting::CursorPosition>,
 }
 
+/// Check if a terminal window still exists
+fn window_exists(terminal_type: &terminals::TerminalType, window_title: Option<&str>) -> bool {
+    match terminal_type {
+        terminals::TerminalType::Alacritty => {
+            if let Some(title) = window_title {
+                terminals::applescript_utils::find_alacritty_window_by_title(title).is_some()
+            } else {
+                true // Can't check without title, assume exists
+            }
+        }
+        // For other terminals, assume window exists (fall back to socket check)
+        _ => true,
+    }
+}
+
+/// Wait for window to close (used when live sync is disabled)
+fn wait_for_window_close(terminal_type: &terminals::TerminalType, window_title: Option<&str>) {
+    loop {
+        if !window_exists(terminal_type, window_title) {
+            log::info!("Window closed");
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// Spawn the RPC handler thread for live sync
 /// Returns a handle that can be joined to get the final cursor position
 fn spawn_rpc_handler(
@@ -98,10 +124,14 @@ fn spawn_rpc_handler(
     let socket_path = session.socket_path.clone();
     let focus_element = session.focus_context.focused_element.clone();
     let live_sync_enabled = settings.live_sync_enabled;
+    let window_title = session.window_title.clone();
+    let terminal_type = session.terminal_type.clone();
 
     thread::spawn(move || {
         if !live_sync_enabled {
             log::info!("Live sync disabled, skipping RPC connection");
+            // Still need to wait for window to close
+            wait_for_window_close(&terminal_type, window_title.as_deref());
             return None;
         }
 
@@ -144,27 +174,36 @@ fn spawn_rpc_handler(
                         }
                     }
 
-                    // Poll cursor position periodically until nvim exits
-                    // This way we have the last known cursor when nvim closes
+                    // Poll cursor position periodically until window closes or socket removed
+                    // Check window first (faster for Cmd+W), then socket (faster for :q)
                     let mut last_cursor: Option<browser_scripting::CursorPosition> = None;
                     loop {
-                        tokio::time::sleep(Duration::from_millis(200)).await;
-
-                        if !rpc::socket_exists(&socket_path) {
-                            log::info!("Socket removed, nvim has exited");
-                            break;
-                        }
-
-                        // Try to get current cursor position
+                        // Try to get current cursor position first
                         match rpc_session.get_cursor().await {
                             Ok((line, col)) => {
                                 last_cursor = Some(browser_scripting::CursorPosition { line, column: col });
                             }
                             Err(_) => {
                                 // RPC failed, nvim is probably closing
+                                log::info!("RPC get_cursor failed, nvim closing");
                                 break;
                             }
                         }
+
+                        // Check if window is gone (fast for Cmd+W close)
+                        if !window_exists(&terminal_type, window_title.as_deref()) {
+                            log::info!("Window closed, exiting immediately");
+                            break;
+                        }
+
+                        // Check socket (fast for :q/:wq)
+                        if !rpc::socket_exists(&socket_path) {
+                            log::info!("Socket removed, nvim has exited");
+                            break;
+                        }
+
+                        // Poll every 100ms (window check is ~50ms via AppleScript)
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
 
                     if let Some(ref cursor) = last_cursor {
@@ -237,34 +276,31 @@ fn spawn_completion_handler(
             return;
         };
 
-        log::info!("Waiting for process: {:?} (PID: {:?})", session.terminal_type, session.process_id);
-
-        // For Custom terminal without PID, skip wait_for_process - RPC thread handles waiting
-        let is_custom_without_pid = session.terminal_type == terminals::TerminalType::Custom
-            && session.process_id.is_none();
-
-        if is_custom_without_pid {
-            log::info!("Custom terminal without PID, RPC thread will handle wait");
-        } else if let Err(e) = terminals::wait_for_process(&session.terminal_type, session.process_id) {
-            log::error!("Error waiting for terminal process: {}", e);
-            manager.cancel_session(&session_id);
-            return;
-        }
-
-        log::info!("Terminal process exited, reading edited file");
-
-        // Wait for RPC thread to finish and get final cursor position
+        // Wait for RPC thread to finish - this detects nvim exit via socket removal
+        // This is faster than waiting for process exit on Cmd+W window close
+        log::info!("Waiting for nvim to exit (via RPC thread)");
         let rpc_result = rpc_handle.join().ok().flatten();
         let final_cursor = rpc_result.and_then(|r| r.final_cursor);
 
-        // Restore focus to the original app immediately
-        log::info!("Restoring focus immediately");
-        if let Err(e) = accessibility::restore_focus(&session.focus_context) {
-            log::error!("Error restoring focus: {}", e);
-        }
+        log::info!("Nvim exited, restoring focus");
 
-        // Small delay to ensure file is written and focus is settled
-        thread::sleep(Duration::from_millis(100));
+        // Small delay to let the system settle after window close
+        thread::sleep(Duration::from_millis(50));
+
+        // Restore focus to the original app, with retry
+        for attempt in 0..3 {
+            match accessibility::restore_focus(&session.focus_context) {
+                Ok(()) => break,
+                Err(e) => {
+                    if attempt < 2 {
+                        log::info!("Retry {} restoring focus: {}", attempt + 1, e);
+                        thread::sleep(Duration::from_millis(50));
+                    } else {
+                        log::error!("Error restoring focus after retries: {}", e);
+                    }
+                }
+            }
+        }
 
         // Check if live sync was working
         let did_live_sync = live_sync_worked.load(Ordering::SeqCst);
@@ -278,8 +314,6 @@ fn spawn_completion_handler(
         // Restore cursor position in browser if we have it
         if let (Some(bt), Some(cursor)) = (browser_type, final_cursor) {
             log::info!("Restoring browser cursor to line={}, col={}", cursor.line, cursor.column);
-            // Small delay for focus to settle before setting cursor
-            thread::sleep(Duration::from_millis(100));
             match browser_scripting::set_browser_cursor_position(bt, cursor.line, cursor.column) {
                 Ok(()) => log::info!("Browser cursor restored successfully"),
                 Err(e) => log::info!("Failed to restore browser cursor: {}", e),

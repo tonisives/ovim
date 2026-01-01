@@ -4,7 +4,7 @@
 //! with various text editors (Neovim, Vim, Helix, etc.)
 
 mod alacritty;
-mod applescript_utils;
+pub mod applescript_utils;
 mod custom;
 mod ghostty;
 mod iterm;
@@ -151,6 +151,7 @@ pub fn spawn_terminal(
 }
 
 /// Wait for the terminal/nvim process to exit
+#[allow(dead_code)]
 pub fn wait_for_process(
     terminal_type: &TerminalType,
     process_id: Option<u32>,
