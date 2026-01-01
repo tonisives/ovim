@@ -57,128 +57,14 @@ const GET_CURSOR_POSITION_JS: &str = r#"(function(){var e=document.querySelector
 const GET_TEXT_AND_CURSOR_JS: &str = r#"(function(){var NL=String.fromCharCode(10);var result={text:"",cursor:null};var e=document.querySelector(".cm-editor");if(e){var lines=e.querySelectorAll(".cm-line");var textParts=[];for(var j=0;j<lines.length;j++){textParts.push(lines[j].textContent);}result.text=textParts.join(NL);var s=window.getSelection();if(s.rangeCount>0){var r=s.getRangeAt(0);for(var i=0;i<lines.length;i++){if(lines[i].contains(r.startContainer)){var w=document.createTreeWalker(lines[i],NodeFilter.SHOW_TEXT,null,false);var n;var c=0;while(n=w.nextNode()){if(n===r.startContainer){c+=r.startOffset;result.cursor={line:i,column:c};break;}c+=n.textContent.length;}break;}}}}return JSON.stringify(result);})()"#;
 
 /// JavaScript to set cursor position (line, column) in focused element
+/// Minified to avoid issues with newline removal breaking // comments
 fn build_set_cursor_position_js(line: usize, column: usize) -> String {
-    format!(r#"(function() {{
-    var NL = String.fromCharCode(10);
-    function findDeepActiveElement(el) {{
-        if (el.shadowRoot && el.shadowRoot.activeElement) {{
-            return findDeepActiveElement(el.shadowRoot.activeElement);
-        }}
-        return el;
-    }}
-
-    var targetLine = {line};
-    var targetCol = {col};
-
-    // Check for CodeMirror 6 first (used by boot.dev)
-    var cmEditor = document.querySelector('.cm-editor');
-    if (cmEditor) {{
-        var lines = cmEditor.querySelectorAll('.cm-line');
-        if (targetLine < lines.length) {{
-            var line = lines[targetLine];
-            var range = document.createRange();
-            var sel = window.getSelection();
-
-            var walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT, null, false);
-            var node;
-            var offset = 0;
-            var targetNode = null;
-            var targetOffset = 0;
-
-            while (node = walker.nextNode()) {{
-                var len = node.textContent.length;
-                if (offset + len >= targetCol) {{
-                    targetNode = node;
-                    targetOffset = targetCol - offset;
-                    break;
-                }}
-                offset += len;
-            }}
-
-            if (targetNode) {{
-                range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent.length));
-                range.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                return 'ok_cm6';
-            }}
-
-            // Handle empty lines - set cursor at start of line element
-            // Empty lines have a <br> child but no text nodes
-            range.setStart(line, 0);
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            return 'ok_cm6_empty';
-        }}
-    }}
-
-    // Check for Monaco Editor
-    if (typeof monaco !== 'undefined' && monaco.editor) {{
-        var editors = monaco.editor.getEditors();
-        if (editors && editors.length > 0) {{
-            var editor = editors[0];
-            editor.setPosition({{ lineNumber: targetLine + 1, column: targetCol + 1 }});
-            editor.focus();
-            return 'ok_monaco';
-        }}
-    }}
-
-    var el = document.activeElement;
-    if (!el) return 'no_element';
-
-    if (el.tagName === 'IFRAME') {{
-        try {{
-            var iframeDoc = el.contentDocument || el.contentWindow.document;
-            if (iframeDoc && iframeDoc.activeElement) {{
-                el = iframeDoc.activeElement;
-            }}
-        }} catch(e) {{ return 'iframe_error'; }}
-    }}
-
-    el = findDeepActiveElement(el);
-
-    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
-        var lines = el.value.split(NL);
-        var pos = 0;
-        for (var i = 0; i < targetLine && i < lines.length; i++) {{
-            pos += lines[i].length + 1;
-        }}
-        pos += Math.min(targetCol, (lines[targetLine] || '').length);
-        el.setSelectionRange(pos, pos);
-        return 'ok_input';
-    }}
-
-    if (el.isContentEditable) {{
-        var text = el.innerText || el.textContent;
-        var lines = text.split(NL);
-        var pos = 0;
-        for (var i = 0; i < targetLine && i < lines.length; i++) {{
-            pos += lines[i].length + 1;
-        }}
-        pos += Math.min(targetCol, (lines[targetLine] || '').length);
-
-        var range = document.createRange();
-        var sel = window.getSelection();
-        var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
-        var node;
-        var offset = 0;
-
-        while (node = walker.nextNode()) {{
-            var len = node.textContent.length;
-            if (offset + len >= pos) {{
-                range.setStart(node, pos - offset);
-                range.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                return 'ok_ce';
-            }}
-            offset += len;
-        }}
-    }}
-
-    return 'unsupported';
-}})()"#, line = line, col = column)
+    // Minified JS - handles CM6, Monaco, input/textarea, contenteditable
+    format!(
+        r#"(function(){{var NL=String.fromCharCode(10);var targetLine={line};var targetCol={col};var cmEditor=document.querySelector(".cm-editor");if(cmEditor){{var lines=cmEditor.querySelectorAll(".cm-line");if(targetLine<lines.length){{var line=lines[targetLine];var range=document.createRange();var sel=window.getSelection();var walker=document.createTreeWalker(line,NodeFilter.SHOW_TEXT,null,false);var node;var offset=0;var targetNode=null;var targetOffset=0;while(node=walker.nextNode()){{var len=node.textContent.length;if(offset+len>=targetCol){{targetNode=node;targetOffset=targetCol-offset;break;}}offset+=len;}}if(targetNode){{range.setStart(targetNode,Math.min(targetOffset,targetNode.textContent.length));range.collapse(true);sel.removeAllRanges();sel.addRange(range);return"ok_cm6";}}range.setStart(line,0);range.collapse(true);sel.removeAllRanges();sel.addRange(range);return"ok_cm6_empty";}}}}if(typeof monaco!=="undefined"&&monaco.editor){{var editors=monaco.editor.getEditors();if(editors&&editors.length>0){{var editor=editors[0];editor.setPosition({{lineNumber:targetLine+1,column:targetCol+1}});editor.focus();return"ok_monaco";}}}}var el=document.activeElement;if(!el)return"no_element";if(el.tagName==="IFRAME"){{try{{var iframeDoc=el.contentDocument||el.contentWindow.document;if(iframeDoc&&iframeDoc.activeElement){{el=iframeDoc.activeElement;}}}}catch(e){{return"iframe_error";}}}}function findDeep(e){{if(e.shadowRoot&&e.shadowRoot.activeElement)return findDeep(e.shadowRoot.activeElement);return e;}}el=findDeep(el);if(el.tagName==="INPUT"||el.tagName==="TEXTAREA"){{var lines=el.value.split(NL);var pos=0;for(var i=0;i<targetLine&&i<lines.length;i++)pos+=lines[i].length+1;pos+=Math.min(targetCol,(lines[targetLine]||"").length);el.setSelectionRange(pos,pos);return"ok_input";}}if(el.isContentEditable){{var text=el.innerText||el.textContent;var lines=text.split(NL);var pos=0;for(var i=0;i<targetLine&&i<lines.length;i++)pos+=lines[i].length+1;pos+=Math.min(targetCol,(lines[targetLine]||"").length);var range=document.createRange();var sel=window.getSelection();var walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null,false);var node;var offset=0;while(node=walker.nextNode()){{var len=node.textContent.length;if(offset+len>=pos){{range.setStart(node,pos-offset);range.collapse(true);sel.removeAllRanges();sel.addRange(range);return"ok_ce";}}offset+=len;}}}}return"unsupported";}})()"#,
+        line = line,
+        col = column
+    )
 }
 
 /// JavaScript to get text from the focused element
