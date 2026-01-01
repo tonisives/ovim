@@ -31,6 +31,8 @@ extern "C" {
 }
 
 /// Roles that are considered clickable
+/// Note: AXStaticText and AXImage are NOT included here - they often have click
+/// handlers on web pages but are usually redundant with their parent containers
 pub const CLICKABLE_ROLES: &[&str] = &[
     "AXButton",
     "AXLink",
@@ -43,8 +45,6 @@ pub const CLICKABLE_ROLES: &[&str] = &[
     "AXComboBox",
     "AXTextField",
     "AXTextArea",
-    "AXStaticText",
-    "AXImage",
     "AXCell",
     "AXRow",
     "AXTab",

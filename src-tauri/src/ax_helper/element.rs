@@ -63,5 +63,7 @@ pub fn is_visible(element: &CFHandle) -> bool {
         None => return false,
     };
 
-    w > 0.0 && h > 0.0 && x >= -10000.0 && y >= -10000.0
+    // Require minimum size of 4px in both dimensions to filter out
+    // invisible/collapsed elements (tooltips, hidden elements with 1px size)
+    w >= 4.0 && h >= 4.0 && x >= -10000.0 && y >= -10000.0
 }
