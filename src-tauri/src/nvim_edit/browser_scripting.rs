@@ -45,6 +45,214 @@ pub fn detect_browser_type(bundle_id: &str) -> Option<BrowserType> {
 /// JavaScript to get the focused element's viewport-relative position and viewport height
 const GET_ELEMENT_RECT_JS: &str = r#"(function() { function findDeepActiveElement(el) { if (el.shadowRoot && el.shadowRoot.activeElement) { return findDeepActiveElement(el.shadowRoot.activeElement); } return el; } var el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; if (el.tagName === 'IFRAME') { try { var iframeDoc = el.contentDocument || el.contentWindow.document; if (iframeDoc && iframeDoc.activeElement && iframeDoc.activeElement !== iframeDoc.body) { var iframeRect = el.getBoundingClientRect(); var innerEl = findDeepActiveElement(iframeDoc.activeElement); var innerRect = innerEl.getBoundingClientRect(); return JSON.stringify({ x: Math.round(iframeRect.left + innerRect.left), y: Math.round(iframeRect.top + innerRect.top), width: Math.round(innerRect.width), height: Math.round(innerRect.height), viewportHeight: window.innerHeight }); } } catch(e) {} } el = findDeepActiveElement(el); var rect = el.getBoundingClientRect(); if (rect.width === 0 && rect.height === 0) return null; return JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height), viewportHeight: window.innerHeight }); })()"#;
 
+/// JavaScript to get cursor position (line, column) from focused element
+/// Returns JSON: {line: 0-based, column: 0-based} or null
+const GET_CURSOR_POSITION_JS: &str = r#"(function() {
+    function findDeepActiveElement(el) {
+        if (el.shadowRoot && el.shadowRoot.activeElement) {
+            return findDeepActiveElement(el.shadowRoot.activeElement);
+        }
+        return el;
+    }
+
+    // Helper to convert character offset to line/column
+    function offsetToLineCol(text, offset) {
+        var lines = text.substring(0, offset).split('\n');
+        return { line: lines.length - 1, column: lines[lines.length - 1].length };
+    }
+
+    // Check for CodeMirror 6
+    var cmEditor = document.querySelector('.cm-editor');
+    if (cmEditor) {
+        var cmContent = cmEditor.querySelector('.cm-content');
+        if (cmContent) {
+            // Try to get cursor from selection
+            var sel = window.getSelection();
+            if (sel.rangeCount > 0) {
+                var range = sel.getRangeAt(0);
+                // Count characters to cursor by iterating through lines
+                var lines = cmEditor.querySelectorAll('.cm-line');
+                var totalOffset = 0;
+                var lineNum = 0;
+                var colNum = 0;
+                var found = false;
+
+                for (var i = 0; i < lines.length && !found; i++) {
+                    var line = lines[i];
+                    if (line.contains(range.startContainer) || line === range.startContainer) {
+                        lineNum = i;
+                        // Get offset within this line
+                        var walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT, null, false);
+                        var node;
+                        colNum = 0;
+                        while (node = walker.nextNode()) {
+                            if (node === range.startContainer) {
+                                colNum += range.startOffset;
+                                found = true;
+                                break;
+                            }
+                            colNum += node.textContent.length;
+                        }
+                        break;
+                    }
+                }
+                if (found) {
+                    return JSON.stringify({ line: lineNum, column: colNum });
+                }
+            }
+        }
+    }
+
+    var el = document.activeElement;
+    if (!el) return null;
+
+    // Handle iframe
+    if (el.tagName === 'IFRAME') {
+        try {
+            var iframeDoc = el.contentDocument || el.contentWindow.document;
+            if (iframeDoc && iframeDoc.activeElement) {
+                el = iframeDoc.activeElement;
+            }
+        } catch(e) { return null; }
+    }
+
+    el = findDeepActiveElement(el);
+
+    // Input/textarea - use selectionStart
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+        var pos = el.selectionStart || 0;
+        var text = el.value.substring(0, pos);
+        var lines = text.split('\n');
+        return JSON.stringify({ line: lines.length - 1, column: lines[lines.length - 1].length });
+    }
+
+    // Contenteditable
+    if (el.isContentEditable) {
+        var sel = window.getSelection();
+        if (sel.rangeCount > 0) {
+            var range = sel.getRangeAt(0);
+            // Get text content up to cursor
+            var preRange = document.createRange();
+            preRange.setStart(el, 0);
+            preRange.setEnd(range.startContainer, range.startOffset);
+            var text = preRange.toString();
+            var lines = text.split('\n');
+            return JSON.stringify({ line: lines.length - 1, column: lines[lines.length - 1].length });
+        }
+    }
+
+    return null;
+})()"#;
+
+/// JavaScript to set cursor position (line, column) in focused element
+fn build_set_cursor_position_js(line: usize, column: usize) -> String {
+    format!(r#"(function() {{
+    function findDeepActiveElement(el) {{
+        if (el.shadowRoot && el.shadowRoot.activeElement) {{
+            return findDeepActiveElement(el.shadowRoot.activeElement);
+        }}
+        return el;
+    }}
+
+    var targetLine = {line};
+    var targetCol = {col};
+
+    // Check for CodeMirror 6
+    var cmEditor = document.querySelector('.cm-editor');
+    if (cmEditor) {{
+        var lines = cmEditor.querySelectorAll('.cm-line');
+        if (targetLine < lines.length) {{
+            var line = lines[targetLine];
+            var range = document.createRange();
+            var sel = window.getSelection();
+
+            // Find text node and offset within line
+            var walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT, null, false);
+            var node;
+            var offset = 0;
+            var targetNode = null;
+            var targetOffset = 0;
+
+            while (node = walker.nextNode()) {{
+                var len = node.textContent.length;
+                if (offset + len >= targetCol) {{
+                    targetNode = node;
+                    targetOffset = targetCol - offset;
+                    break;
+                }}
+                offset += len;
+            }}
+
+            if (targetNode) {{
+                range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent.length));
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                return 'ok_cm6';
+            }}
+        }}
+    }}
+
+    var el = document.activeElement;
+    if (!el) return 'no_element';
+
+    if (el.tagName === 'IFRAME') {{
+        try {{
+            var iframeDoc = el.contentDocument || el.contentWindow.document;
+            if (iframeDoc && iframeDoc.activeElement) {{
+                el = iframeDoc.activeElement;
+            }}
+        }} catch(e) {{ return 'iframe_error'; }}
+    }}
+
+    el = findDeepActiveElement(el);
+
+    // Input/textarea
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
+        var lines = el.value.split('\n');
+        var pos = 0;
+        for (var i = 0; i < targetLine && i < lines.length; i++) {{
+            pos += lines[i].length + 1;
+        }}
+        pos += Math.min(targetCol, (lines[targetLine] || '').length);
+        el.setSelectionRange(pos, pos);
+        return 'ok_input';
+    }}
+
+    // Contenteditable
+    if (el.isContentEditable) {{
+        var text = el.innerText || el.textContent;
+        var lines = text.split('\n');
+        var pos = 0;
+        for (var i = 0; i < targetLine && i < lines.length; i++) {{
+            pos += lines[i].length + 1;
+        }}
+        pos += Math.min(targetCol, (lines[targetLine] || '').length);
+
+        // Set cursor position
+        var range = document.createRange();
+        var sel = window.getSelection();
+        var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+        var node;
+        var offset = 0;
+
+        while (node = walker.nextNode()) {{
+            var len = node.textContent.length;
+            if (offset + len >= pos) {{
+                range.setStart(node, pos - offset);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                return 'ok_ce';
+            }}
+            offset += len;
+        }}
+    }}
+
+    return 'unsupported';
+}})()"#, line = line, col = column)
+}
+
 /// JavaScript to get text from the focused element
 /// Handles Monaco, CodeMirror, Ace, contenteditable, and standard inputs
 #[allow(dead_code)]
