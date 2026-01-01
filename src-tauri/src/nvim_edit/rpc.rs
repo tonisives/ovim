@@ -77,9 +77,11 @@ impl Handler for BufferHandler {
                     let linedata = &args[4];
 
                     // Extract new lines from the event
+                    // Note: Empty lines come as empty strings "", not null/nil
+                    // We use map instead of filter_map to preserve all lines including empty ones
                     let new_lines: Vec<String> = if let Value::Array(arr) = linedata {
                         arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
+                            .map(|v| v.as_str().unwrap_or("").to_string())
                             .collect()
                     } else {
                         Vec::new()

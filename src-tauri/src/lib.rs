@@ -241,6 +241,10 @@ pub fn run() {
                     log::info!("Mouse click detected - deactivating click mode");
                     mgr.deactivate();
                     click_mode::native_hints::hide_hints();
+                    // Emit deactivation event to update indicator
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-deactivated", ());
+                    }
                 }
             }
             true // Always pass through mouse events
@@ -261,6 +265,10 @@ pub fn run() {
                     log::info!("App focus changed - deactivating click mode");
                     mgr.deactivate();
                     click_mode::native_hints::hide_hints();
+                    // Emit deactivation event to update indicator
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-deactivated", ());
+                    }
                 }
             }
 

@@ -45,6 +45,96 @@ pub fn detect_browser_type(bundle_id: &str) -> Option<BrowserType> {
 /// JavaScript to get the focused element's viewport-relative position and viewport height
 const GET_ELEMENT_RECT_JS: &str = r#"(function() { function findDeepActiveElement(el) { if (el.shadowRoot && el.shadowRoot.activeElement) { return findDeepActiveElement(el.shadowRoot.activeElement); } return el; } var el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; if (el.tagName === 'IFRAME') { try { var iframeDoc = el.contentDocument || el.contentWindow.document; if (iframeDoc && iframeDoc.activeElement && iframeDoc.activeElement !== iframeDoc.body) { var iframeRect = el.getBoundingClientRect(); var innerEl = findDeepActiveElement(iframeDoc.activeElement); var innerRect = innerEl.getBoundingClientRect(); return JSON.stringify({ x: Math.round(iframeRect.left + innerRect.left), y: Math.round(iframeRect.top + innerRect.top), width: Math.round(innerRect.width), height: Math.round(innerRect.height), viewportHeight: window.innerHeight }); } } catch(e) {} } el = findDeepActiveElement(el); var rect = el.getBoundingClientRect(); if (rect.width === 0 && rect.height === 0) return null; return JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height), viewportHeight: window.innerHeight }); })()"#;
 
+/// JavaScript to get text from the focused element
+/// Handles Monaco, CodeMirror, Ace, contenteditable, and standard inputs
+#[allow(dead_code)]
+const GET_ELEMENT_TEXT_JS: &str = r#"(function() {
+    function findDeepActiveElement(el) {
+        if (el.shadowRoot && el.shadowRoot.activeElement) {
+            return findDeepActiveElement(el.shadowRoot.activeElement);
+        }
+        return el;
+    }
+
+    // Check for Monaco Editor (global)
+    if (typeof monaco !== 'undefined' && monaco.editor) {
+        var editors = monaco.editor.getEditors();
+        if (editors && editors.length > 0) {
+            var model = editors[0].getModel();
+            if (model) return 'MONACO:' + model.getValue();
+        }
+    }
+
+    // Check for CodeMirror 6 - try multiple detection methods
+    var cmEditor = document.querySelector('.cm-editor');
+    if (cmEditor) {
+        // Method 1: cmView on element
+        if (cmEditor.cmView) {
+            return 'CM6_VIEW:' + cmEditor.cmView.state.doc.toString();
+        }
+        // Method 2: Look for view in parent's properties
+        var cmContent = cmEditor.querySelector('.cm-content');
+        if (cmContent) {
+            // CM6 stores text in .cm-line elements
+            var lines = cmEditor.querySelectorAll('.cm-line');
+            if (lines.length > 0) {
+                return 'CM6_LINES:' + Array.from(lines).map(function(l) { return l.textContent; }).join('\n');
+            }
+        }
+    }
+
+    // Check for CodeMirror 5
+    var cm5 = document.querySelector('.CodeMirror');
+    if (cm5 && cm5.CodeMirror) {
+        return 'CM5:' + cm5.CodeMirror.getValue();
+    }
+
+    // Check for Ace Editor
+    if (typeof ace !== 'undefined') {
+        var aceEditors = document.querySelectorAll('.ace_editor');
+        if (aceEditors.length > 0) {
+            var aceEditor = ace.edit(aceEditors[0]);
+            if (aceEditor) return 'ACE:' + aceEditor.getValue();
+        }
+    }
+
+    var el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) return null;
+
+    // Handle iframe
+    if (el.tagName === 'IFRAME') {
+        try {
+            var iframeDoc = el.contentDocument || el.contentWindow.document;
+            if (iframeDoc && iframeDoc.activeElement) {
+                el = iframeDoc.activeElement;
+            }
+        } catch(e) { return null; }
+    }
+
+    el = findDeepActiveElement(el);
+
+    // Input/textarea
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+        return 'INPUT:' + el.value;
+    }
+
+    // Contenteditable
+    if (el.isContentEditable) {
+        // For code editors, try to get text from line elements
+        var lines = el.querySelectorAll('.cm-line, .view-line, .ace_line');
+        if (lines.length > 0) {
+            return 'CE_LINES:' + Array.from(lines).map(function(l) { return l.textContent; }).join('\n');
+        }
+        // Use innerText but clean up double newlines
+        var text = el.innerText;
+        // Replace multiple consecutive newlines with double newline (preserve single blank lines)
+        text = text.replace(/\n{3,}/g, '\n\n');
+        return 'CE_INNER:' + text;
+    }
+
+    return null;
+})()"#;
+
 /// JavaScript to set text on the focused element (for live sync in webviews)
 /// This handles input, textarea, and contenteditable elements
 /// Returns "ok" on success, error message on failure
@@ -85,6 +175,66 @@ fn build_set_element_text_js(text: &str) -> String {
 
     var text = '{}';
 
+    // Detect editor type for debugging
+    var editorInfo = 'none';
+    if (typeof monaco !== 'undefined') editorInfo = 'monaco';
+    else if (document.querySelector('.cm-editor')) editorInfo = 'cm6';
+    else if (document.querySelector('.CodeMirror')) editorInfo = 'cm5';
+    else if (typeof ace !== 'undefined') editorInfo = 'ace';
+
+    // Check for Monaco Editor first (used by boot.dev, VS Code web, etc.)
+    // Monaco stores its instance in a global or on DOM elements
+    if (typeof monaco !== 'undefined' && monaco.editor) {{
+        var editors = monaco.editor.getEditors();
+        if (editors && editors.length > 0) {{
+            var editor = editors[0];
+            var model = editor.getModel();
+            if (model) {{
+                // Get full range of document
+                var fullRange = model.getFullModelRange();
+                // Replace entire content
+                editor.executeEdits('ovim-live-sync', [{{
+                    range: fullRange,
+                    text: text,
+                    forceMoveMarkers: true
+                }}]);
+                return 'ok_monaco';
+            }}
+        }}
+    }}
+
+    // Check for CodeMirror 6 (used by some modern editors)
+    // CM6 stores view on the DOM element
+    var cmView = el.closest('.cm-editor');
+    if (cmView && cmView.cmView) {{
+        var view = cmView.cmView;
+        view.dispatch({{
+            changes: {{from: 0, to: view.state.doc.length, insert: text}}
+        }});
+        return 'ok_cm6';
+    }}
+
+    // Check for CodeMirror 5 (legacy but still common)
+    if (el.CodeMirror || (el.closest && el.closest('.CodeMirror'))) {{
+        var cm = el.CodeMirror || el.closest('.CodeMirror').CodeMirror;
+        if (cm) {{
+            cm.setValue(text);
+            return 'ok_cm5';
+        }}
+    }}
+
+    // Check for Ace Editor
+    if (typeof ace !== 'undefined') {{
+        var aceEditors = document.querySelectorAll('.ace_editor');
+        if (aceEditors.length > 0) {{
+            var aceEditor = ace.edit(aceEditors[0]);
+            if (aceEditor) {{
+                aceEditor.setValue(text, -1);
+                return 'ok_ace';
+            }}
+        }}
+    }}
+
     // Handle contenteditable (including Lexical, ProseMirror, etc.)
     if (el.isContentEditable) {{
         // Select all content first
@@ -94,16 +244,44 @@ fn build_set_element_text_js(text: &str) -> String {
         selection.removeAllRanges();
         selection.addRange(range);
 
-        // Use InputEvent with insertText - works with modern rich text editors like Lexical
-        // Only dispatch beforeinput - Lexical handles this and generates its own input event
+        // Try insertFromPaste first - code editors handle paste as literal text
+        // without triggering auto-indent or formatting
+        var dataTransfer = new DataTransfer();
+        dataTransfer.setData('text/plain', text);
         var inputEvent = new InputEvent('beforeinput', {{
+            inputType: 'insertFromPaste',
+            data: text,
+            dataTransfer: dataTransfer,
+            bubbles: true,
+            cancelable: true
+        }});
+        var handled = !el.dispatchEvent(inputEvent);
+        if (handled) return 'ok';
+
+        // Fallback: try insertReplacementText
+        inputEvent = new InputEvent('beforeinput', {{
+            inputType: 'insertReplacementText',
+            data: text,
+            bubbles: true,
+            cancelable: true
+        }});
+        handled = !el.dispatchEvent(inputEvent);
+        if (handled) return 'ok';
+
+        // Fallback: try insertText
+        inputEvent = new InputEvent('beforeinput', {{
             inputType: 'insertText',
             data: text,
             bubbles: true,
             cancelable: true
         }});
-        el.dispatchEvent(inputEvent);
-        return 'ok';
+        handled = !el.dispatchEvent(inputEvent);
+        if (handled) return 'ok';
+
+        // Last resort: set innerText directly (loses rich formatting but preserves whitespace)
+        el.innerText = text;
+        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        return 'ok_innertext_' + editorInfo;
     }}
 
     // Handle input/textarea
@@ -117,10 +295,10 @@ fn build_set_element_text_js(text: &str) -> String {
 
         // Dispatch input event to notify frameworks
         el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-        return 'ok';
+        return 'ok_textarea_' + editorInfo;
     }}
 
-    return 'unsupported_element';
+    return 'unsupported_' + el.tagName + '_' + editorInfo;
 }})()"#,
         escaped
     )
@@ -151,11 +329,55 @@ pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    if stdout == "ok" {
+    if stdout.starts_with("ok") {
+        log::debug!("Browser text sync succeeded: {}", stdout);
         Ok(())
     } else {
         Err(format!("JavaScript returned: {}", stdout))
     }
+}
+
+/// Get text from the focused element in a browser using AppleScript + JavaScript
+/// This bypasses the accessibility API which can return mangled text for code editors
+#[allow(dead_code)]
+pub fn get_browser_element_text(browser_type: BrowserType) -> Option<String> {
+    let script = match browser_type {
+        BrowserType::Safari => build_safari_execute_script(GET_ELEMENT_TEXT_JS),
+        BrowserType::Chrome | BrowserType::Brave | BrowserType::Arc => {
+            build_chrome_execute_script(browser_type.app_name(), GET_ELEMENT_TEXT_JS)
+        }
+    };
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        log::debug!("get_browser_element_text AppleScript failed: {}", String::from_utf8_lossy(&output.stderr));
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    // Handle null/empty responses
+    if stdout.is_empty() || stdout == "null" || stdout == "missing value" {
+        return None;
+    }
+
+    // Extract detection method prefix for logging
+    let (method, text) = if let Some(idx) = stdout.find(':') {
+        let (prefix, rest) = stdout.split_at(idx + 1);
+        (prefix.trim_end_matches(':'), rest.to_string())
+    } else {
+        ("unknown", stdout)
+    };
+
+    // Normalize line endings - browsers may return \r\n or mixed endings
+    let normalized = text.replace("\r\n", "\n").replace("\r", "\n");
+    log::info!("Got text from browser JS ({}): {} chars", method, normalized.len());
+    Some(normalized)
 }
 
 /// Get the focused element frame from a browser using AppleScript
