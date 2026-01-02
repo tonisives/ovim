@@ -13,6 +13,9 @@ use core_graphics::event::{
 /// Return true to pass through, false to suppress (though suppressing mouse events is rare)
 pub type MouseEventCallback = Box<dyn Fn(MouseClickEvent) -> bool + Send + 'static>;
 
+/// Scroll event callback type - called for scroll wheel events
+pub type ScrollEventCallback = Box<dyn Fn() + Send + 'static>;
+
 /// Represents a mouse click event
 #[derive(Debug, Clone, Copy)]
 pub struct MouseClickEvent {
@@ -34,6 +37,7 @@ fn is_event_type(event_type: CGEventType, expected: CGEventType) -> bool {
 pub struct KeyboardCapture {
     callback: Arc<Mutex<Option<KeyEventCallback>>>,
     mouse_callback: Arc<Mutex<Option<MouseEventCallback>>>,
+    scroll_callback: Arc<Mutex<Option<ScrollEventCallback>>>,
     running: Arc<Mutex<bool>>,
 }
 
@@ -42,6 +46,7 @@ impl KeyboardCapture {
         Self {
             callback: Arc::new(Mutex::new(None)),
             mouse_callback: Arc::new(Mutex::new(None)),
+            scroll_callback: Arc::new(Mutex::new(None)),
             running: Arc::new(Mutex::new(false)),
         }
     }
@@ -67,6 +72,15 @@ impl KeyboardCapture {
         *cb = Some(Box::new(callback));
     }
 
+    /// Set the callback for scroll events
+    pub fn set_scroll_callback<F>(&self, callback: F)
+    where
+        F: Fn() + Send + 'static,
+    {
+        let mut cb = self.scroll_callback.lock().unwrap();
+        *cb = Some(Box::new(callback));
+    }
+
     /// Start capturing keyboard events
     /// This spawns a new thread with its own run loop
     pub fn start(&self) -> Result<(), String> {
@@ -79,6 +93,7 @@ impl KeyboardCapture {
 
         let callback = Arc::clone(&self.callback);
         let mouse_callback = Arc::clone(&self.mouse_callback);
+        let scroll_callback = Arc::clone(&self.scroll_callback);
         let running_flag = Arc::clone(&self.running);
 
         // Flag to signal that tap needs re-enabling
@@ -98,6 +113,7 @@ impl KeyboardCapture {
                     CGEventType::FlagsChanged,
                     CGEventType::LeftMouseDown,
                     CGEventType::RightMouseDown,
+                    CGEventType::ScrollWheel,
                 ],
                 move |_proxy: CGEventTapProxy, event_type: CGEventType, event| -> CallbackResult {
                     // Handle tap disabled by timeout - signal re-enable
@@ -127,6 +143,16 @@ impl KeyboardCapture {
                             cb(mouse_event);
                         }
                         // Always pass through mouse events
+                        return CallbackResult::Keep;
+                    }
+
+                    // Handle scroll wheel events
+                    if is_event_type(event_type, CGEventType::ScrollWheel) {
+                        let cb_lock = scroll_callback.lock().unwrap();
+                        if let Some(ref cb) = *cb_lock {
+                            cb();
+                        }
+                        // Always pass through scroll events
                         return CallbackResult::Keep;
                     }
 

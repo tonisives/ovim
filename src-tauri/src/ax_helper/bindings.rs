@@ -29,6 +29,8 @@ extern "C" {
 }
 
 /// Roles that are considered clickable
+/// NOTE: AXStaticText, AXImage, and AXHeading are NOT in this list because they're only
+/// clickable if they have an AXPress action. See collect.rs for the action check.
 pub const CLICKABLE_ROLES: &[&str] = &[
     "AXButton",
     "AXLink",
@@ -41,8 +43,9 @@ pub const CLICKABLE_ROLES: &[&str] = &[
     "AXComboBox",
     "AXTextField",
     "AXTextArea",
-    "AXStaticText",
-    "AXImage",
+    // "AXStaticText", // Only clickable with AXPress action
+    // "AXImage",      // Only clickable with AXPress action
+    // "AXHeading",    // Only clickable with AXPress action
     "AXCell",
     "AXRow",
     "AXTab",
@@ -50,7 +53,6 @@ pub const CLICKABLE_ROLES: &[&str] = &[
     "AXDisclosureTriangle",
     "AXIncrementor",
     "AXSlider",
-    "AXHeading",
 ];
 
 /// Default depth limit for traversal

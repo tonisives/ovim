@@ -45,6 +45,7 @@ pub fn collect_elements_inner(
         inside_row && matches!(role.as_str(), "AXCell" | "AXStaticText" | "AXImage");
 
     // Only check AXActions for roles that commonly have them to avoid crashes
+    // Note: AXStaticText, AXImage, AXHeading are only clickable if they have AXPress action
     let check_actions = matches!(
         role.as_str(),
         "AXButton"
@@ -58,6 +59,7 @@ pub fn collect_elements_inner(
             | "AXToolbarButton"
             | "AXStaticText"
             | "AXImage"
+            | "AXHeading"
             | "AXCell"
             | "AXRow"
     );

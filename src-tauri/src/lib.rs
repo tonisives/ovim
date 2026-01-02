@@ -247,6 +247,25 @@ pub fn run() {
         });
     }
 
+    // Set up scroll callback to hide click mode on scroll
+    {
+        let click_manager_for_scroll = Arc::clone(&click_mode_manager);
+        keyboard_capture.set_scroll_callback(move || {
+            // Check if click mode is active and deactivate it
+            if let Ok(mut mgr) = click_manager_for_scroll.try_lock() {
+                if mgr.is_active() {
+                    log::info!("Scroll detected - deactivating click mode");
+                    mgr.deactivate();
+                    click_mode::native_hints::hide_hints();
+                    // Notify frontend to update indicator
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-deactivated", ());
+                    }
+                }
+            }
+        });
+    }
+
     // Set up focus change observer to hide click mode when app loses focus
     // and prefetch elements for the new app
     {
