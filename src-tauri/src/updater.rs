@@ -48,7 +48,7 @@ pub async fn check_and_install_update(app: &AppHandle) -> Result<Option<String>,
     }
 }
 
-/// Start periodic update checker that runs on startup and every 6 hours
+/// Start periodic update checker that runs on startup and once per day
 pub fn start_update_checker(app: AppHandle, settings: Arc<std::sync::Mutex<Settings>>) {
     tauri::async_runtime::spawn(async move {
         // Check on startup after a short delay
@@ -79,8 +79,8 @@ pub fn start_update_checker(app: AppHandle, settings: Arc<std::sync::Mutex<Setti
                 log::info!("Auto-update disabled, skipping check");
             }
 
-            // Wait 6 hours before next check
-            tokio::time::sleep(Duration::from_secs(6 * 60 * 60)).await;
+            // Wait 24 hours before next check
+            tokio::time::sleep(Duration::from_secs(24 * 60 * 60)).await;
         }
     });
 }
