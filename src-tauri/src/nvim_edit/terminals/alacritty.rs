@@ -259,8 +259,6 @@ impl AlacrittySpawner {
             "-o".to_string(),
             "window.startup_mode=\"Windowed\"".to_string(),
             "-o".to_string(),
-            "window.decorations=\"Full\"".to_string(),
-            "-o".to_string(),
             format!("window.dimensions.columns={}", columns),
             "-o".to_string(),
             format!("window.dimensions.lines={}", lines),
