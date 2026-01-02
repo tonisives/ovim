@@ -16,10 +16,8 @@ extern "C" {
     ) -> i32;
 }
 
-#[allow(non_upper_case_globals)]
-pub const kAXValueCGPointType: i32 = 1;
-#[allow(non_upper_case_globals)]
-pub const kAXValueCGSizeType: i32 = 2;
+pub const K_AX_VALUE_CG_POINT_TYPE: i32 = 1;
+pub const K_AX_VALUE_CG_SIZE_TYPE: i32 = 2;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {

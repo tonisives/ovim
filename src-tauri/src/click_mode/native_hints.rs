@@ -3,7 +3,7 @@
 //! Creates small native windows for each hint label, positioned at element locations.
 //! All AppKit operations are dispatched to the main thread.
 
-#![allow(deprecated)]
+#![allow(deprecated)] // objc/cocoa crates are deprecated, but objc2 migration is future work
 
 use core_foundation::base::CFTypeRef;
 use dispatch::Queue;
