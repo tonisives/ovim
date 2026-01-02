@@ -42,24 +42,30 @@ pub fn capture_text_and_frame(
     if let Some(bt) = browser_type {
         log::info!("Attempting combined text+cursor capture via JS");
         if let Some(result) = browser_scripting::get_browser_text_and_cursor(bt) {
-            log::info!("JS capture succeeded: {} chars, cursor={:?}", result.text.len(), result.cursor);
+            // Only use JS result if we actually got text
+            // Otherwise fall back to clipboard-based capture (for non-CodeMirror editors like GitHub)
+            if !result.text.is_empty() {
+                log::info!("JS capture succeeded: {} chars, cursor={:?}", result.text.len(), result.cursor);
 
-            // Get element frame if needed
-            let element_frame = if initial_element_frame.is_none() {
-                log::info!("Getting element frame via browser scripting");
-                browser_scripting::get_browser_element_frame(bt)
-            } else {
-                initial_element_frame
-            };
+                // Get element frame if needed
+                let element_frame = if initial_element_frame.is_none() {
+                    log::info!("Getting element frame via browser scripting");
+                    browser_scripting::get_browser_element_frame(bt)
+                } else {
+                    initial_element_frame
+                };
 
-            return CaptureResult {
-                text: result.text,
-                element_frame,
-                cursor_position: result.cursor,
-                browser_type: Some(bt),
-            };
+                return CaptureResult {
+                    text: result.text,
+                    element_frame,
+                    cursor_position: result.cursor,
+                    browser_type: Some(bt),
+                };
+            }
+            log::info!("JS capture returned empty text, falling back to clipboard method");
+        } else {
+            log::info!("JS capture failed, falling back to clipboard method");
         }
-        log::info!("JS capture failed, falling back to clipboard method");
     }
 
     // Fallback: capture cursor position BEFORE text capture (which may move cursor via Cmd+A)
