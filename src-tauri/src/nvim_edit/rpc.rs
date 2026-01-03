@@ -77,9 +77,11 @@ impl Handler for BufferHandler {
                     let linedata = &args[4];
 
                     // Extract new lines from the event
+                    // Note: Empty lines come as empty strings "", not null/nil
+                    // We use map instead of filter_map to preserve all lines including empty ones
                     let new_lines: Vec<String> = if let Value::Array(arr) = linedata {
                         arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
+                            .map(|v| v.as_str().unwrap_or("").to_string())
                             .collect()
                     } else {
                         Vec::new()
@@ -145,7 +147,6 @@ impl Handler for BufferHandler {
 /// Active RPC session with neovim
 pub struct NvimRpcSession {
     /// The neovim client
-    #[allow(dead_code)]
     neovim: Neovim<NvimWriter>,
     /// The buffer we're attached to
     buffer: Buffer<NvimWriter>,
@@ -179,6 +180,37 @@ impl NvimRpcSession {
             .await
             .map_err(|e| format!("Failed to detach: {}", e))?;
         Ok(())
+    }
+
+    /// Set cursor position in nvim (1-based line and column)
+    pub async fn set_cursor(&self, line: usize, column: usize) -> Result<(), String> {
+        // nvim uses 1-based line numbers and 0-based column
+        let nvim_line = (line + 1) as i64;
+        let nvim_col = column as i64;
+
+        self.neovim
+            .get_current_win()
+            .await
+            .map_err(|e| format!("Failed to get current window: {}", e))?
+            .set_cursor((nvim_line, nvim_col))
+            .await
+            .map_err(|e| format!("Failed to set cursor: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Get cursor position from nvim (returns 0-based line and column)
+    pub async fn get_cursor(&self) -> Result<(usize, usize), String> {
+        let (line, col) = self.neovim
+            .get_current_win()
+            .await
+            .map_err(|e| format!("Failed to get current window: {}", e))?
+            .get_cursor()
+            .await
+            .map_err(|e| format!("Failed to get cursor: {}", e))?;
+
+        // Convert from nvim's 1-based line to 0-based
+        Ok(((line - 1) as usize, col as usize))
     }
 }
 

@@ -114,27 +114,10 @@ impl EditSessionManager {
         })
     }
 
-    /// Cancel a session (clean up without applying changes)
-    pub fn cancel_session(&self, id: &Uuid) {
-        let mut sessions = self.sessions.lock().unwrap();
-        if let Some(session) = sessions.remove(id) {
-            // Clean up temp file and socket
-            let _ = std::fs::remove_file(&session.temp_file);
-            let _ = std::fs::remove_file(&session.socket_path);
-        }
-    }
-
     /// Remove a session after completion
     pub fn remove_session(&self, id: &Uuid) {
         let mut sessions = self.sessions.lock().unwrap();
         sessions.remove(id);
-    }
-
-    /// Check if there are any active sessions
-    #[allow(dead_code)]
-    pub fn has_active_sessions(&self) -> bool {
-        let sessions = self.sessions.lock().unwrap();
-        !sessions.is_empty()
     }
 }
 

@@ -4,7 +4,7 @@
 //! with various text editors (Neovim, Vim, Helix, etc.)
 
 mod alacritty;
-mod applescript_utils;
+pub mod applescript_utils;
 mod custom;
 mod ghostty;
 mod iterm;
@@ -147,35 +147,6 @@ pub fn spawn_terminal(
         TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, None),
         TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None),
         TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, None),
-    }
-}
-
-/// Wait for the terminal/nvim process to exit
-pub fn wait_for_process(
-    terminal_type: &TerminalType,
-    process_id: Option<u32>,
-) -> Result<(), String> {
-    match terminal_type {
-        TerminalType::Alacritty
-        | TerminalType::Ghostty
-        | TerminalType::Kitty
-        | TerminalType::WezTerm
-        | TerminalType::Custom => {
-            if let Some(pid) = process_id {
-                process_utils::wait_for_pid(pid)
-            } else {
-                Err("No process ID to wait for".to_string())
-            }
-        }
-        TerminalType::ITerm | TerminalType::Default => {
-            if let Some(pid) = process_id {
-                process_utils::wait_for_pid(pid)
-            } else {
-                // Fallback: wait a fixed time (not ideal)
-                std::thread::sleep(std::time::Duration::from_secs(60));
-                Ok(())
-            }
-        }
     }
 }
 
