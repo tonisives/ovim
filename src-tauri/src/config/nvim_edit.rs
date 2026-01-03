@@ -89,6 +89,11 @@ pub struct NvimEditSettings {
     /// Use custom launcher script instead of built-in terminal spawning
     #[serde(default)]
     pub use_custom_script: bool,
+    /// Use clipboard mode (Cmd+A, Cmd+C/V) instead of smart text field detection
+    /// When true, always uses clipboard for text capture/restore
+    /// When false (default), uses JavaScript for browsers and accessibility API for native apps
+    #[serde(default)]
+    pub clipboard_mode: bool,
 }
 
 impl Default for NvimEditSettings {
@@ -111,6 +116,7 @@ impl Default for NvimEditSettings {
             popup_height: 300,
             live_sync_enabled: true, // BETA feature, enabled by default
             use_custom_script: false,
+            clipboard_mode: false, // Use smart detection by default
         }
     }
 }
