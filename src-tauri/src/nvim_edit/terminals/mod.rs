@@ -150,36 +150,6 @@ pub fn spawn_terminal(
     }
 }
 
-/// Wait for the terminal/nvim process to exit
-#[allow(dead_code)]
-pub fn wait_for_process(
-    terminal_type: &TerminalType,
-    process_id: Option<u32>,
-) -> Result<(), String> {
-    match terminal_type {
-        TerminalType::Alacritty
-        | TerminalType::Ghostty
-        | TerminalType::Kitty
-        | TerminalType::WezTerm
-        | TerminalType::Custom => {
-            if let Some(pid) = process_id {
-                process_utils::wait_for_pid(pid)
-            } else {
-                Err("No process ID to wait for".to_string())
-            }
-        }
-        TerminalType::ITerm | TerminalType::Default => {
-            if let Some(pid) = process_id {
-                process_utils::wait_for_pid(pid)
-            } else {
-                // Fallback: wait a fixed time (not ideal)
-                std::thread::sleep(std::time::Duration::from_secs(60));
-                Ok(())
-            }
-        }
-    }
-}
-
 /// Get the launcher script path, ensuring it exists
 /// The script is copied from bundled resources on first use
 pub fn ensure_launcher_script() -> Result<std::path::PathBuf, String> {

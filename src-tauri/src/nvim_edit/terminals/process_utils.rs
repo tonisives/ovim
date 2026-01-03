@@ -4,44 +4,6 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-/// Wait for a specific PID to exit
-#[allow(dead_code)]
-pub fn wait_for_pid(pid: u32) -> Result<(), String> {
-    loop {
-        // First try waitpid with WNOHANG to reap zombie children (for processes we spawned)
-        let mut status: libc::c_int = 0;
-        let wait_result = unsafe { libc::waitpid(pid as i32, &mut status, libc::WNOHANG) };
-
-        if wait_result == pid as i32 {
-            // Process has exited and been reaped
-            log::info!("Process {} reaped via waitpid", pid);
-            break;
-        } else if wait_result == -1 {
-            // Error - check errno
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            if errno == libc::ECHILD {
-                // Not our child - fall back to kill(pid, 0) check
-                let kill_result = unsafe { libc::kill(pid as i32, 0) };
-                if kill_result != 0 {
-                    // Process doesn't exist
-                    log::info!("Process {} no longer exists (kill check)", pid);
-                    break;
-                }
-            } else {
-                // Other error
-                log::warn!("waitpid error for {}: errno={}", pid, errno);
-                break;
-            }
-        }
-        // wait_result == 0 means process still running, continue polling
-
-        // Poll very fast (10ms) so we can restore focus before the window closes
-        thread::sleep(Duration::from_millis(10));
-    }
-
-    Ok(())
-}
-
 /// Find the editor process editing a specific file (with initial delay)
 pub fn find_editor_pid_for_file(file_path: &str, process_name: &str) -> Option<u32> {
     // Small delay to let editor start

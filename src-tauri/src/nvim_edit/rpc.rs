@@ -200,7 +200,6 @@ impl NvimRpcSession {
     }
 
     /// Get cursor position from nvim (returns 0-based line and column)
-    #[allow(dead_code)]
     pub async fn get_cursor(&self) -> Result<(usize, usize), String> {
         let (line, col) = self.neovim
             .get_current_win()
