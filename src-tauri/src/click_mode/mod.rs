@@ -3,20 +3,16 @@
 //! This module provides Vimium-style hint labels for clicking UI elements
 //! using the keyboard instead of the mouse.
 
-// Allow dead code during Phase 1 development - will be used in subsequent phases
-#![allow(dead_code)]
-
 pub mod accessibility;
 pub mod browser_clickables;
 pub mod element;
 pub mod hints;
+pub mod mouse;
 pub mod native_hints;
 
 use std::sync::{Arc, Mutex};
 
 pub use element::{ClickableElement, ClickableElementInternal};
-#[allow(unused_imports)]
-pub use hints::{generate_hints, DEFAULT_HINT_CHARS};
 
 use serde::{Deserialize, Serialize};
 

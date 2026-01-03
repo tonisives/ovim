@@ -1,10 +1,9 @@
 use tauri::WebviewWindow;
 
 /// Set up the indicator window with special properties
-#[allow(unused_variables)]
 pub fn setup_indicator_window(window: &WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    #[allow(deprecated)]
+    #[allow(deprecated)] // cocoa crate is deprecated, but objc2-app-kit migration is future work
     {
         use cocoa::appkit::NSWindowCollectionBehavior;
         use cocoa::base::id;
@@ -12,11 +11,9 @@ pub fn setup_indicator_window(window: &WebviewWindow) -> Result<(), String> {
         let ns_window = window.ns_window().map_err(|e| e.to_string())? as id;
 
         unsafe {
-            // Set window level to floating
             use objc::*;
             let _: () = msg_send![ns_window, setLevel: 3i64]; // NSFloatingWindowLevel
 
-            // Set collection behavior to appear on all spaces
             use cocoa::appkit::NSWindow;
             ns_window.setCollectionBehavior_(
                 NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
@@ -25,14 +22,16 @@ pub fn setup_indicator_window(window: &WebviewWindow) -> Result<(), String> {
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+
     Ok(())
 }
 
 /// Set whether the indicator window ignores mouse events
-#[allow(unused_variables)]
 pub fn set_indicator_ignores_mouse(window: &WebviewWindow, ignore: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    #[allow(deprecated)]
+    #[allow(deprecated)] // cocoa crate is deprecated, but objc2-app-kit migration is future work
     {
         use cocoa::base::id;
 
@@ -44,14 +43,19 @@ pub fn set_indicator_ignores_mouse(window: &WebviewWindow, ignore: bool) -> Resu
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        let _ = ignore;
+    }
+
     Ok(())
 }
 
 /// Set up the click overlay window with special properties
-#[allow(unused_variables)]
 pub fn setup_click_overlay_window(window: &WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    #[allow(deprecated)]
+    #[allow(deprecated)] // cocoa crate is deprecated, but objc2-app-kit migration is future work
     {
         use cocoa::appkit::NSWindowCollectionBehavior;
         use cocoa::base::id;
@@ -77,12 +81,14 @@ pub fn setup_click_overlay_window(window: &WebviewWindow) -> Result<(), String> 
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+
     Ok(())
 }
 
 /// Position the click overlay to cover all screens
 /// Returns the window offset (min_x, min_y) in screen coordinates
-#[allow(unused_variables)]
 pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(f64, f64), String> {
     #[cfg(target_os = "macos")]
     {
@@ -154,5 +160,8 @@ pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(f64,
     }
 
     #[cfg(not(target_os = "macos"))]
-    Ok((0.0, 0.0))
+    {
+        let _ = window;
+        Ok((0.0, 0.0))
+    }
 }

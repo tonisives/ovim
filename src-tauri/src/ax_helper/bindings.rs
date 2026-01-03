@@ -16,10 +16,8 @@ extern "C" {
     ) -> i32;
 }
 
-#[allow(non_upper_case_globals)]
-pub const kAXValueCGPointType: i32 = 1;
-#[allow(non_upper_case_globals)]
-pub const kAXValueCGSizeType: i32 = 2;
+pub const K_AX_VALUE_CG_POINT_TYPE: i32 = 1;
+pub const K_AX_VALUE_CG_SIZE_TYPE: i32 = 2;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
@@ -31,8 +29,8 @@ extern "C" {
 }
 
 /// Roles that are considered clickable
-/// Note: AXStaticText and AXImage are NOT included here - they often have click
-/// handlers on web pages but are usually redundant with their parent containers
+/// NOTE: AXStaticText, AXImage, and AXHeading are NOT in this list because they're only
+/// clickable if they have an AXPress action. See collect.rs for the action check.
 pub const CLICKABLE_ROLES: &[&str] = &[
     "AXButton",
     "AXLink",
@@ -45,6 +43,9 @@ pub const CLICKABLE_ROLES: &[&str] = &[
     "AXComboBox",
     "AXTextField",
     "AXTextArea",
+    // "AXStaticText", // Only clickable with AXPress action
+    // "AXImage",      // Only clickable with AXPress action
+    // "AXHeading",    // Only clickable with AXPress action
     "AXCell",
     "AXRow",
     "AXTab",
@@ -52,7 +53,6 @@ pub const CLICKABLE_ROLES: &[&str] = &[
     "AXDisclosureTriangle",
     "AXIncrementor",
     "AXSlider",
-    "AXHeading",
 ];
 
 /// Default depth limit for traversal

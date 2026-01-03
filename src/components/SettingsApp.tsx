@@ -48,6 +48,24 @@ export interface ClickModeSettings {
   max_elements: number;
 }
 
+export interface ClickModeSettings {
+  enabled: boolean;
+  shortcut_key: string;
+  shortcut_modifiers: VimKeyModifiers;
+  hint_chars: string;
+  show_search_bar: boolean;
+  hint_opacity: number;
+  hint_font_size: number;
+  hint_bg_color: string;
+  hint_text_color: string;
+  // Advanced timing settings
+  ax_stabilization_delay_ms: number;
+  cache_ttl_ms: number;
+  // Advanced traversal settings
+  max_depth: number;
+  max_elements: number;
+}
+
 export interface RgbColor {
   r: number;
   g: number;

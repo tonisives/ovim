@@ -3,7 +3,7 @@
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::CFString;
 
-use super::bindings::{kAXValueCGPointType, kAXValueCGSizeType, AXUIElementCopyAttributeValue, AXValueGetValue};
+use super::bindings::{K_AX_VALUE_CG_POINT_TYPE, K_AX_VALUE_CG_SIZE_TYPE, AXUIElementCopyAttributeValue, AXValueGetValue};
 
 /// RAII wrapper for CFTypeRef
 pub struct CFHandle(pub CFTypeRef);
@@ -45,7 +45,7 @@ impl CFHandle {
         let extracted = unsafe {
             AXValueGetValue(
                 self.0,
-                kAXValueCGPointType,
+                K_AX_VALUE_CG_POINT_TYPE,
                 &mut point as *mut _ as *mut std::ffi::c_void,
             )
         };
@@ -61,7 +61,7 @@ impl CFHandle {
         let extracted = unsafe {
             AXValueGetValue(
                 self.0,
-                kAXValueCGSizeType,
+                K_AX_VALUE_CG_SIZE_TYPE,
                 &mut size as *mut _ as *mut std::ffi::c_void,
             )
         };
