@@ -8,6 +8,11 @@ use super::process_utils::find_editor_pid_for_file;
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
+/// Escape a string for use in shell (single-quote escaping)
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 pub struct TerminalAppSpawner;
 
 impl TerminalSpawner for TerminalAppSpawner {
@@ -40,12 +45,14 @@ impl TerminalSpawner for TerminalAppSpawner {
         };
 
         // Build the command string for AppleScript (socket args + editor args)
+        // Each argument must be shell-escaped to preserve integrity through AppleScript
         let mut all_args: Vec<String> = socket_args;
         all_args.extend(editor_args.iter().map(|s| s.to_string()));
         let args_str = if all_args.is_empty() {
             String::new()
         } else {
-            format!(" {}", all_args.join(" "))
+            let escaped_args: Vec<String> = all_args.iter().map(|s| shell_escape(s)).collect();
+            format!(" {}", escaped_args.join(" "))
         };
 
         // Build environment export commands for custom env
