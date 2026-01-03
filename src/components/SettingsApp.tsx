@@ -5,6 +5,7 @@ import { IndicatorSettings } from "./IndicatorSettings";
 import { WidgetSettings } from "./WidgetSettings";
 import { IgnoredAppsSettings } from "./IgnoredAppsSettings";
 import { NvimEditSettings } from "./NvimEditSettings";
+import { ClickModeSettingsComponent } from "./ClickModeSettings";
 
 export interface VimKeyModifiers {
   shift: boolean;
@@ -26,6 +27,24 @@ export interface NvimEditSettings {
   popup_height: number;
   live_sync_enabled: boolean;
   use_custom_script: boolean;
+}
+
+export interface ClickModeSettings {
+  enabled: boolean;
+  shortcut_key: string;
+  shortcut_modifiers: VimKeyModifiers;
+  hint_chars: string;
+  show_search_bar: boolean;
+  hint_opacity: number;
+  hint_font_size: number;
+  hint_bg_color: string;
+  hint_text_color: string;
+  // Advanced timing settings
+  ax_stabilization_delay_ms: number;
+  cache_ttl_ms: number;
+  // Advanced traversal settings
+  max_depth: number;
+  max_elements: number;
 }
 
 export interface RgbColor {
@@ -60,10 +79,11 @@ export interface Settings {
   bottom_widget: string;
   electron_apps: string[];
   nvim_edit: NvimEditSettings;
+  click_mode: ClickModeSettings;
   auto_update_enabled: boolean;
 }
 
-type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim-config" | "nvim-window";
+type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim-config" | "nvim-window" | "click-mode";
 
 export function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -101,6 +121,10 @@ export function SettingsApp() {
   const editPopupTabs: { id: TabId; label: string; icon: string }[] = [
     { id: "nvim-config", label: "Config", icon: "gear" },
     { id: "nvim-window", label: "Window", icon: "window" },
+  ];
+
+  const clickModeTabs: { id: TabId; label: string; icon: string }[] = [
+    { id: "click-mode", label: "Settings", icon: "cursor" },
   ];
 
   return (
@@ -145,6 +169,22 @@ export function SettingsApp() {
             ))}
           </div>
         </div>
+
+        <div className="tab-group">
+          <span className="tab-group-label">Click Mode</span>
+          <div className="tab-group-tabs">
+            {clickModeTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={`tab ${activeTab === tab.id ? "active" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="tab-icon">{getIcon(tab.icon)}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="tab-content">
@@ -163,6 +203,9 @@ export function SettingsApp() {
         {(activeTab === "nvim-config" || activeTab === "nvim-window") && (
           <NvimEditSettings settings={settings} onUpdate={updateSettings} activeTab={activeTab} />
         )}
+        {activeTab === "click-mode" && (
+          <ClickModeSettingsComponent settings={settings} onUpdate={updateSettings} />
+        )}
       </div>
 
     </div>
@@ -177,6 +220,7 @@ function getIcon(name: string): string {
     pause: "\u23F8",
     edit: "\u270E",
     window: "\u25A1",
+    cursor: "\u2316",
   };
   return icons[name] || "";
 }

@@ -1,3 +1,4 @@
+mod click_mode;
 mod colors;
 mod nvim_edit;
 mod settings;

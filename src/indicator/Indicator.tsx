@@ -10,6 +10,8 @@ interface PendingUpdate {
   version: string
 }
 
+type ClickAction = "Click" | "RightClick" | "CmdClick" | "DoubleClick"
+
 const defaultColors: ModeColors = {
   insert: { r: 74, g: 144, b: 217 },
   normal: { r: 232, g: 148, b: 74 },
@@ -22,6 +24,8 @@ export function Indicator() {
   const [isHoverable, setIsHoverable] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null)
+  const [clickModeActive, setClickModeActive] = useState(false)
+  const [clickAction, setClickAction] = useState<ClickAction>("Click")
 
   useEffect(() => {
     invoke<Settings>("get_settings")
@@ -121,6 +125,29 @@ export function Indicator() {
     }
   }, [])
 
+  // Listen for click mode events
+  useEffect(() => {
+    const unlistenActivated = listen("click-mode-activated", () => {
+      setClickModeActive(true)
+      setClickAction("Click") // Reset to default on activation
+    })
+
+    const unlistenDeactivated = listen("click-mode-deactivated", () => {
+      setClickModeActive(false)
+      setClickAction("Click")
+    })
+
+    const unlistenActionChanged = listen<ClickAction>("click-action-changed", (event) => {
+      setClickAction(event.payload)
+    })
+
+    return () => {
+      unlistenActivated.then((fn) => fn())
+      unlistenDeactivated.then((fn) => fn())
+      unlistenActionChanged.then((fn) => fn())
+    }
+  }, [])
+
   const handleRestartClick = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -212,8 +239,49 @@ export function Indicator() {
             padding: 0,
           }}
         >
-          ↑
+          ^
         </button>
+      )}
+
+      {/* Click mode overlay - shows action shortcuts */}
+      {clickModeActive && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.85)",
+            borderRadius: "8px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "3px",
+            zIndex: 15,
+            padding: "4px",
+          }}
+        >
+          {/* Current action name */}
+          <div style={{ fontSize: "11px", fontWeight: "bold" }}>
+            {clickAction === "Click" && "click"}
+            {clickAction === "RightClick" && "right"}
+            {clickAction === "CmdClick" && "cmd"}
+            {clickAction === "DoubleClick" && "double"}
+          </div>
+          {/* Action shortcuts - just the key to switch */}
+          <div
+            style={{
+              display: "flex",
+              gap: "3px",
+              fontSize: "8px",
+              opacity: 0.7,
+            }}
+          >
+            <span style={{ opacity: clickAction === "RightClick" ? 1 : 0.5 }}>r</span>
+            <span style={{ opacity: clickAction === "CmdClick" ? 1 : 0.5 }}>c</span>
+            <span style={{ opacity: clickAction === "DoubleClick" ? 1 : 0.5 }}>d</span>
+            <span style={{ opacity: clickAction === "Click" ? 1 : 0.5 }}>n</span>
+          </div>
+        </div>
       )}
       {hasTop && <Widget type={topWidget} fontFamily={fontFamily} />}
       <div

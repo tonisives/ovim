@@ -1,6 +1,7 @@
 // Allow unexpected_cfgs from the objc crate's macros which use cfg(feature = "cargo-clippy")
 #![allow(unexpected_cfgs)]
 
+mod click_mode;
 mod commands;
 mod config;
 pub mod ipc;
@@ -22,6 +23,7 @@ use tauri::{
     AppHandle, Emitter, Listener, Manager, State,
 };
 
+use click_mode::SharedClickModeManager;
 use commands::RecordedKey;
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
@@ -30,13 +32,19 @@ use keyboard_handler::create_keyboard_callback;
 use nvim_edit::terminals::install_scripts;
 use nvim_edit::EditSessionManager;
 use vim::{VimMode, VimState};
-use window::setup_indicator_window;
+use window::{setup_click_overlay_window, setup_indicator_window};
 
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::OnceLock;
 
 static LOG_FILE: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+/// Get a reference to the global app handle (for emitting events from keyboard handler)
+pub fn get_app_handle() -> Option<&'static AppHandle> {
+    APP_HANDLE.get()
+}
 
 fn init_file_logger() {
     let file = OpenOptions::new()
@@ -78,6 +86,7 @@ pub struct AppState {
     pub record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>>,
     #[allow(dead_code)]
     edit_session_manager: Arc<EditSessionManager>,
+    pub click_mode_manager: SharedClickModeManager,
 }
 
 fn handle_ipc_command(
@@ -189,13 +198,29 @@ pub fn run() {
     init_file_logger();
     log::info!("ovim-rust started");
 
+    // Initialize the accessibility helper binary
+    click_mode::accessibility::init_helper();
+
     let (vim_state, mode_rx) = VimState::new();
     let vim_state = Arc::new(Mutex::new(vim_state));
 
     let settings = Arc::new(Mutex::new(Settings::load()));
+
+    // Initialize click mode settings from loaded settings
+    {
+        let s = settings.lock().unwrap();
+        click_mode::accessibility::update_timing_settings(
+            s.click_mode.cache_ttl_ms,
+            s.click_mode.ax_stabilization_delay_ms,
+            s.click_mode.max_depth,
+            s.click_mode.max_elements,
+        );
+    }
+
     let record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>> =
         Arc::new(Mutex::new(None));
     let edit_session_manager = Arc::new(EditSessionManager::new());
+    let click_mode_manager = click_mode::create_manager();
 
     let keyboard_capture = KeyboardCapture::new();
     keyboard_capture.set_callback(create_keyboard_callback(
@@ -203,7 +228,66 @@ pub fn run() {
         Arc::clone(&settings),
         Arc::clone(&record_key_tx),
         Arc::clone(&edit_session_manager),
+        Arc::clone(&click_mode_manager),
     ));
+
+    // Set up mouse click callback to hide click mode on any mouse click
+    {
+        let click_manager_for_mouse = Arc::clone(&click_mode_manager);
+        keyboard_capture.set_mouse_callback(move |_event| {
+            // Check if click mode is active and deactivate it
+            if let Ok(mut mgr) = click_manager_for_mouse.try_lock() {
+                if mgr.is_active() {
+                    log::info!("Mouse click detected - deactivating click mode");
+                    mgr.deactivate();
+                    click_mode::native_hints::hide_hints();
+                }
+            }
+            true // Always pass through mouse events
+        });
+    }
+
+    // Set up scroll callback to hide click mode on scroll
+    {
+        let click_manager_for_scroll = Arc::clone(&click_mode_manager);
+        keyboard_capture.set_scroll_callback(move || {
+            // Check if click mode is active and deactivate it
+            if let Ok(mut mgr) = click_manager_for_scroll.try_lock() {
+                if mgr.is_active() {
+                    log::info!("Scroll detected - deactivating click mode");
+                    mgr.deactivate();
+                    click_mode::native_hints::hide_hints();
+                    // Notify frontend to update indicator
+                    if let Some(app) = get_app_handle() {
+                        let _ = app.emit("click-mode-deactivated", ());
+                    }
+                }
+            }
+        });
+    }
+
+    // Set up focus change observer to hide click mode when app loses focus
+    // and prefetch elements for the new app
+    {
+        let click_manager_for_focus = Arc::clone(&click_mode_manager);
+        click_mode::start_focus_observer(move || {
+            // Invalidate cache since we're now on a different app
+            click_mode::accessibility::invalidate_cache();
+
+            // Check if click mode is active and deactivate it
+            if let Ok(mut mgr) = click_manager_for_focus.try_lock() {
+                if mgr.is_active() {
+                    log::info!("App focus changed - deactivating click mode");
+                    mgr.deactivate();
+                    click_mode::native_hints::hide_hints();
+                }
+            }
+
+            // Prefetch elements for the new app in background
+            // This warms the cache so click mode activation is faster
+            click_mode::accessibility::prefetch_elements();
+        });
+    }
 
     let app_state = AppState {
         settings,
@@ -211,6 +295,7 @@ pub fn run() {
         keyboard_capture,
         record_key_tx,
         edit_session_manager,
+        click_mode_manager,
     };
 
     let mode_rx = Arc::new(Mutex::new(mode_rx));
@@ -251,10 +336,21 @@ pub fn run() {
             commands::check_for_update,
             commands::restart_app,
             commands::set_indicator_clickable,
+            // Click mode commands
+            commands::activate_click_mode,
+            commands::deactivate_click_mode,
+            commands::get_click_mode_state,
+            commands::click_mode_click_element,
+            commands::click_mode_right_click_element,
+            commands::click_mode_input_hint,
+            commands::get_click_mode_elements,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Store app handle for global access (used by keyboard handler for events)
+            let _ = APP_HANDLE.set(app.handle().clone());
 
             // Initialize launcher callback registry
             launcher_callback::init();
@@ -309,6 +405,13 @@ pub fn run() {
             if let Some(indicator_window) = app.get_webview_window("indicator") {
                 if let Err(e) = setup_indicator_window(&indicator_window) {
                     log::error!("Failed to setup indicator window: {}", e);
+                }
+            }
+
+            // Set up click overlay window (hidden initially)
+            if let Some(click_overlay) = app.get_webview_window("click-overlay") {
+                if let Err(e) = setup_click_overlay_window(&click_overlay) {
+                    log::error!("Failed to setup click overlay window: {}", e);
                 }
             }
 
