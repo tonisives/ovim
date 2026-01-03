@@ -2,20 +2,20 @@
 
 pub mod accessibility;
 mod browser_scripting;
+mod clipboard;
+mod geometry;
 mod rpc;
 mod session;
 pub mod terminals;
+mod text_capture;
 
 pub use session::EditSessionManager;
 
 use crate::config::NvimEditSettings;
-use crate::keyboard::{inject_key_press, KeyCode, Modifiers};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use terminals::WindowGeometry;
 
 /// Trigger the "Edit with Neovim" flow
 pub fn trigger_nvim_edit(
@@ -34,275 +34,307 @@ pub fn trigger_nvim_edit(
     log::info!("Element frame from accessibility: {:?}", element_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
     log::info!("Window frame: {:?}", window_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
 
-    // If accessibility API didn't return element frame, try browser scripting for web text fields
-    let element_frame = if element_frame.is_none() {
-        if let Some(browser_type) = browser_scripting::detect_browser_type(&focus_context.app_bundle_id) {
-            log::info!("Detected browser type {:?}, attempting browser scripting", browser_type);
-            let browser_frame = browser_scripting::get_browser_element_frame(browser_type);
-            log::info!("Browser scripting element frame: {:?}", browser_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
-            browser_frame
-        } else {
-            None
-        }
-    } else {
-        element_frame
-    };
+    // 3. Capture text and get element frame (may use browser scripting as fallback)
+    let capture_result = text_capture::capture_text_and_frame(
+        &focus_context.app_bundle_id,
+        element_frame,
+        settings.clipboard_mode,
+    );
+    let text = capture_result.text;
+    let element_frame = capture_result.element_frame;
+    let initial_cursor = capture_result.cursor_position;
+    let browser_type = capture_result.browser_type;
 
-    // 3. Get text from the focused element (try accessibility first, then clipboard fallback)
-    let mut text = accessibility::get_focused_element_text().unwrap_or_default();
-    log::info!("Got text from accessibility API: {} chars", text.len());
-
-    // If accessibility returned empty, try clipboard-based capture (for web text fields)
-    if text.is_empty() {
-        log::info!("Accessibility returned empty, trying clipboard-based capture");
-        if let Some(captured) = capture_text_via_clipboard() {
-            text = captured;
-            log::info!("Captured {} chars via clipboard", text.len());
-        }
+    if let Some(ref cursor) = initial_cursor {
+        log::info!("Initial cursor position: line={}, col={}", cursor.line, cursor.column);
     }
 
     // 4. Calculate window geometry if popup mode is enabled
-    let geometry = if settings.popup_mode {
-        // Try to get element frame from accessibility API
-        let frame_geometry = element_frame.map(|frame| {
-            let gap = 5;
-            let x = frame.x as i32;
-
-            // Use configured width, or match text field width (min 400)
-            let width = if settings.popup_width > 0 {
-                settings.popup_width
-            } else {
-                (frame.width as u32).max(400)
-            };
-
-            let height = settings.popup_height;
-            let popup_height = height as i32;
-
-            // Default: position below the text field
-            let mut y = (frame.y + frame.height) as i32 + gap;
-
-            // Get screen bounds to check if popup fits
-            if let Some(screen) = accessibility::get_screen_bounds_for_point(frame.x, frame.y) {
-                let screen_bottom = (screen.y + screen.height) as i32;
-                let popup_bottom = y + popup_height;
-
-                // If popup would go off screen bottom, try positioning above
-                if popup_bottom > screen_bottom {
-                    let above_y = frame.y as i32 - popup_height - gap;
-                    let screen_top = screen.y as i32;
-
-                    if above_y >= screen_top {
-                        // Fits above - use that position
-                        y = above_y;
-                        log::info!("Popup doesn't fit below, positioning above at y={}", y);
-                    } else {
-                        // Neither above nor below fits - center on screen
-                        y = (screen.y + (screen.height - popup_height as f64) / 2.0) as i32;
-                        log::info!("Popup doesn't fit above or below, centering at y={}", y);
-                    }
-                }
-            }
-
-            log::info!("Using element frame geometry: x={}, y={}, w={}, h={}", x, y, width, height);
-            WindowGeometry { x, y, width, height }
-        });
-
-        // If element frame not available (e.g., web views), center in the focused window
-        let result = frame_geometry.or_else(|| {
-            window_frame.map(|wf| {
-                let width = if settings.popup_width > 0 {
-                    settings.popup_width
-                } else {
-                    500 // Default width for web views
-                };
-
-                let height = settings.popup_height;
-
-                // Center popup in the focused window
-                let x = (wf.x + (wf.width - width as f64) / 2.0) as i32;
-                let y = (wf.y + (wf.height - height as f64) / 2.0) as i32;
-
-                log::info!("Using window frame geometry (centered): x={}, y={}, w={}, h={}", x, y, width, height);
-                WindowGeometry { x, y, width, height }
-            })
-        });
-
-        if result.is_none() {
-            log::warn!("No geometry available - window will open at default size/position");
-        }
-
-        result
-    } else {
-        log::info!("popup_mode is disabled");
-        None
-    };
-
+    let geometry = geometry::calculate_popup_geometry(&settings, element_frame, window_frame);
     log::info!("Final geometry: {:?}", geometry);
 
-    // 4. Start edit session (writes temp file, spawns terminal)
+    // 5. Start edit session (writes temp file, spawns terminal)
     let session_id = manager.start_session(focus_context, text.clone(), settings.clone(), geometry)?;
     log::info!("Started edit session: {}", session_id);
 
-    // 5. Start RPC connection and live sync in background (if enabled)
+    // 6. Start RPC connection and live sync in background
     let session = manager.get_session(&session_id)
         .ok_or("Session not found immediately after creation")?;
 
-    // Flag to track if live sync was active (successful at least once)
     let live_sync_worked = Arc::new(AtomicBool::new(false));
-    let live_sync_worked_clone = Arc::clone(&live_sync_worked);
+    let rpc_handle = spawn_rpc_handler(
+        &session,
+        &settings,
+        Arc::clone(&live_sync_worked),
+        browser_type,
+        initial_cursor,
+    );
 
-    // Clone what we need for the RPC task
+    // 7. Spawn main thread to wait for nvim to exit and restore text
+    spawn_completion_handler(
+        manager,
+        session_id,
+        rpc_handle,
+        live_sync_worked,
+        browser_type,
+    );
+
+    Ok(())
+}
+
+/// Result from RPC handler including final cursor position
+struct RpcResult {
+    final_cursor: Option<browser_scripting::CursorPosition>,
+}
+
+/// Check if a terminal window still exists
+fn window_exists(terminal_type: &terminals::TerminalType, window_title: Option<&str>) -> bool {
+    match terminal_type {
+        terminals::TerminalType::Alacritty => {
+            if let Some(title) = window_title {
+                terminals::applescript_utils::find_alacritty_window_by_title(title).is_some()
+            } else {
+                true // Can't check without title, assume exists
+            }
+        }
+        // For other terminals, assume window exists (fall back to socket check)
+        _ => true,
+    }
+}
+
+/// Wait for window to close (used when live sync is disabled)
+fn wait_for_window_close(terminal_type: &terminals::TerminalType, window_title: Option<&str>) {
+    loop {
+        if !window_exists(terminal_type, window_title) {
+            log::info!("Window closed");
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Spawn the RPC handler thread for live sync
+/// Returns a handle that can be joined to get the final cursor position
+fn spawn_rpc_handler(
+    session: &session::EditSession,
+    settings: &NvimEditSettings,
+    live_sync_worked: Arc<AtomicBool>,
+    browser_type: Option<browser_scripting::BrowserType>,
+    initial_cursor: Option<browser_scripting::CursorPosition>,
+) -> thread::JoinHandle<Option<RpcResult>> {
     let socket_path = session.socket_path.clone();
     let focus_element = session.focus_context.focused_element.clone();
-    let browser_type = browser_scripting::detect_browser_type(&session.focus_context.app_bundle_id);
     let live_sync_enabled = settings.live_sync_enabled;
+    let window_title = session.window_title.clone();
+    let terminal_type = session.terminal_type.clone();
 
-    // Spawn async task for RPC communication
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("Failed to create tokio runtime: {}", e))?;
-
-    // Spawn the RPC handler in a separate thread with its own runtime
-    let rpc_handle = thread::spawn(move || {
-        // Skip RPC if live sync is disabled
+    thread::spawn(move || {
         if !live_sync_enabled {
             log::info!("Live sync disabled, skipping RPC connection");
-            return;
+            // Still need to wait for window to close
+            wait_for_window_close(&terminal_type, window_title.as_deref());
+            return None;
         }
 
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                log::error!("Failed to create tokio runtime: {}", e);
+                return None;
+            }
+        };
+
         rt.block_on(async {
-            // Try to connect to nvim via RPC
             log::info!("Attempting RPC connection to {:?}", socket_path);
 
-            // Create the callback for buffer changes
+            let sync_flag = Arc::clone(&live_sync_worked);
             let element_for_callback = focus_element.clone();
-            let sync_flag = Arc::clone(&live_sync_worked_clone);
 
             let on_lines = Arc::new(move |lines: Vec<String>| {
-                let text = lines.join("\n");
-
-                // Try to update the text field via accessibility first
-                if let Some(ref element) = element_for_callback {
-                    match accessibility::set_element_text(element, &text) {
-                        Ok(()) => {
-                            sync_flag.store(true, Ordering::SeqCst);
-                            log::debug!("Live sync: updated text field ({} chars)", text.len());
-                            return;
-                        }
-                        Err(e) => {
-                            log::debug!("Accessibility live sync failed: {}", e);
-                        }
-                    }
-                }
-
-                // Fallback to browser scripting for webviews
-                if let Some(bt) = browser_type {
-                    match browser_scripting::set_browser_element_text(bt, &text) {
-                        Ok(()) => {
-                            sync_flag.store(true, Ordering::SeqCst);
-                            log::debug!("Live sync (browser): updated text field ({} chars)", text.len());
-                        }
-                        Err(e) => {
-                            log::debug!("Browser live sync failed: {}", e);
-                        }
-                    }
-                }
+                handle_live_sync_update(
+                    &lines,
+                    browser_type,
+                    element_for_callback.as_ref(),
+                    &sync_flag,
+                );
             });
 
             match rpc::connect_to_nvim(&socket_path, on_lines).await {
                 Ok(rpc_session) => {
                     log::info!("RPC connected, live sync enabled");
 
-                    // Keep checking if nvim is still running
-                    // The RPC session will stay alive until nvim exits
-                    loop {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    // Set nvim cursor to match browser's initial cursor position
+                    if let Some(cursor) = initial_cursor {
+                        if let Err(e) = rpc_session.set_cursor(cursor.line, cursor.column).await {
+                            log::debug!("Failed to set initial nvim cursor: {}", e);
+                        } else {
+                            log::info!("Set nvim cursor to line={}, col={}", cursor.line, cursor.column);
+                        }
+                    }
 
-                        // Check if socket still exists (nvim exited)
+                    // Poll cursor position periodically until window closes or socket removed
+                    // Check window first (faster for Cmd+W), then socket (faster for :q)
+                    let mut last_cursor: Option<browser_scripting::CursorPosition> = None;
+                    loop {
+                        // Try to get current cursor position first
+                        match rpc_session.get_cursor().await {
+                            Ok((line, col)) => {
+                                last_cursor = Some(browser_scripting::CursorPosition { line, column: col });
+                            }
+                            Err(_) => {
+                                // RPC failed, nvim is probably closing
+                                log::info!("RPC get_cursor failed, nvim closing");
+                                break;
+                            }
+                        }
+
+                        // Check if window is gone (fast for Cmd+W close)
+                        if !window_exists(&terminal_type, window_title.as_deref()) {
+                            log::info!("Window closed, exiting immediately");
+                            break;
+                        }
+
+                        // Check socket (fast for :q/:wq)
                         if !rpc::socket_exists(&socket_path) {
                             log::info!("Socket removed, nvim has exited");
                             break;
                         }
+
+                        // Poll every 100ms (window check is ~50ms via AppleScript)
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
 
-                    // Try to detach cleanly
+                    if let Some(ref cursor) = last_cursor {
+                        log::info!("Final nvim cursor: line={}, col={}", cursor.line, cursor.column);
+                    }
+
                     let _ = rpc_session.detach().await;
+
+                    Some(RpcResult { final_cursor: last_cursor })
                 }
                 Err(e) => {
                     log::warn!("RPC connection failed, falling back to clipboard-only mode: {}", e);
+                    None
                 }
             }
-        });
-    });
+        })
+    })
+}
 
-    // 6. Spawn main thread to wait for nvim to exit and restore text
-    let manager_clone2 = Arc::clone(&manager);
-    thread::spawn(move || {
-        // Wait for the terminal process to exit
-        if let Some(session) = manager_clone2.get_session(&session_id) {
-            log::info!("Waiting for process: {:?} (PID: {:?})", session.terminal_type, session.process_id);
+/// Handle a live sync update from nvim
+fn handle_live_sync_update(
+    lines: &[String],
+    browser_type: Option<browser_scripting::BrowserType>,
+    focus_element: Option<&accessibility::AXElementHandle>,
+    sync_flag: &AtomicBool,
+) {
+    let text = lines.join("\n");
+    let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
+    log::info!("Live sync: {} lines, {} chars, preview: {}", lines.len(), text.len(), preview);
 
-            // For Custom terminal without PID, skip wait_for_process - RPC thread handles waiting
-            let is_custom_without_pid = session.terminal_type == terminals::TerminalType::Custom
-                && session.process_id.is_none();
-
-            if is_custom_without_pid {
-                log::info!("Custom terminal without PID, RPC thread will handle wait");
-            } else {
-                // Wait for process
-                if let Err(e) = terminals::wait_for_process(&session.terminal_type, session.process_id) {
-                    log::error!("Error waiting for terminal process: {}", e);
-                    manager_clone2.cancel_session(&session_id);
-                    return;
-                }
+    // For browsers, use browser scripting (JS) which works with code editors
+    if let Some(bt) = browser_type {
+        match browser_scripting::set_browser_element_text(bt, &text) {
+            Ok(()) => {
+                sync_flag.store(true, Ordering::SeqCst);
+                log::info!("Live sync (browser JS): updated text field ({} chars)", text.len());
+                return;
             }
-
-            log::info!("Terminal process exited, reading edited file");
-
-            // Wait for RPC thread to finish
-            let _ = rpc_handle.join();
-
-            // Restore focus to the original app immediately
-            log::info!("Restoring focus immediately");
-            if let Err(e) = accessibility::restore_focus(&session.focus_context) {
-                log::error!("Error restoring focus: {}", e);
+            Err(e) => {
+                log::info!("Browser live sync failed: {}", e);
             }
-
-            // Small delay to ensure file is written and focus is settled
-            thread::sleep(Duration::from_millis(100));
-
-            // Check if live sync was working - if so, text is already updated, skip clipboard paste
-            let did_live_sync = live_sync_worked.load(Ordering::SeqCst);
-            log::info!("Live sync status: {}", if did_live_sync { "worked" } else { "not used" });
-
-            // Complete the session - skip clipboard paste if live sync worked
-            if let Err(e) = complete_edit_session_no_focus(&manager_clone2, &session_id, did_live_sync) {
-                log::error!("Error completing edit session: {}", e);
-            }
-
-            // Clean up socket file
-            let _ = std::fs::remove_file(&session.socket_path);
-
-            // Clean up session
-            manager_clone2.remove_session(&session_id);
-        } else {
-            log::error!("Session not found: {}", session_id);
         }
-    });
+    }
 
-    Ok(())
+    // For non-browsers, use accessibility API
+    if let Some(element) = focus_element {
+        match accessibility::set_element_text(element, &text) {
+            Ok(()) => {
+                sync_flag.store(true, Ordering::SeqCst);
+                log::info!("Live sync (AX): updated text field ({} chars)", text.len());
+            }
+            Err(e) => {
+                log::debug!("Accessibility live sync failed: {}", e);
+            }
+        }
+    }
+}
+
+/// Spawn the completion handler thread that waits for nvim and restores text
+fn spawn_completion_handler(
+    manager: Arc<EditSessionManager>,
+    session_id: uuid::Uuid,
+    rpc_handle: thread::JoinHandle<Option<RpcResult>>,
+    live_sync_worked: Arc<AtomicBool>,
+    browser_type: Option<browser_scripting::BrowserType>,
+) {
+    thread::spawn(move || {
+        let Some(session) = manager.get_session(&session_id) else {
+            log::error!("Session not found: {}", session_id);
+            return;
+        };
+
+        // Wait for RPC thread to finish - this detects nvim exit via socket removal
+        // This is faster than waiting for process exit on Cmd+W window close
+        log::info!("Waiting for nvim to exit (via RPC thread)");
+        let rpc_result = rpc_handle.join().ok().flatten();
+        let final_cursor = rpc_result.and_then(|r| r.final_cursor);
+
+        log::info!("Nvim exited, restoring focus");
+
+        // Small delay to let the system settle after window close
+        thread::sleep(Duration::from_millis(50));
+
+        // Restore focus to the original app, with retry
+        for attempt in 0..3 {
+            match accessibility::restore_focus(&session.focus_context) {
+                Ok(()) => break,
+                Err(e) => {
+                    if attempt < 2 {
+                        log::info!("Retry {} restoring focus: {}", attempt + 1, e);
+                        thread::sleep(Duration::from_millis(50));
+                    } else {
+                        log::error!("Error restoring focus after retries: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Check if live sync was working
+        let did_live_sync = live_sync_worked.load(Ordering::SeqCst);
+        log::info!("Live sync status: {}", if did_live_sync { "worked" } else { "not used" });
+
+        // Complete the session - skip clipboard paste if live sync worked
+        if let Err(e) = complete_edit_session(&manager, &session_id, did_live_sync) {
+            log::error!("Error completing edit session: {}", e);
+        }
+
+        // Restore cursor position in browser if we have it
+        if let (Some(bt), Some(cursor)) = (browser_type, final_cursor) {
+            log::info!("Restoring browser cursor to line={}, col={}", cursor.line, cursor.column);
+            match browser_scripting::set_browser_cursor_position(bt, cursor.line, cursor.column) {
+                Ok(()) => log::info!("Browser cursor restored successfully"),
+                Err(e) => log::info!("Failed to restore browser cursor: {}", e),
+            }
+        }
+
+        // Clean up socket file
+        let _ = std::fs::remove_file(&session.socket_path);
+
+        // Clean up session
+        manager.remove_session(&session_id);
+    });
 }
 
 /// Complete the edit session: clean up temp file and optionally restore text via clipboard
-/// Note: Focus should already be restored before calling this function
-/// If live_sync_worked is true, the text field already has the correct content, so we skip clipboard paste
-fn complete_edit_session_no_focus(
+fn complete_edit_session(
     manager: &EditSessionManager,
     session_id: &uuid::Uuid,
     live_sync_worked: bool,
 ) -> Result<(), String> {
-    // Read the temp file
     let session = manager.get_session(session_id)
         .ok_or("Session not found")?;
 
@@ -315,7 +347,6 @@ fn complete_edit_session_no_focus(
 
     if current_mtime == session.file_mtime {
         log::info!("File not modified (nvim quit without saving), skipping restoration");
-        // Clean up temp file
         let _ = std::fs::remove_file(&session.temp_file);
         return Ok(());
     }
@@ -324,7 +355,6 @@ fn complete_edit_session_no_focus(
         .map_err(|e| format!("Failed to read temp file: {}", e))?;
 
     // Strip trailing newline that nvim adds (fixeol option)
-    // This ensures we don't add extra newlines when pasting back
     let edited_text = edited_text.strip_suffix('\n').unwrap_or(&edited_text).to_string();
 
     log::info!("Read {} chars from temp file", edited_text.len());
@@ -338,152 +368,12 @@ fn complete_edit_session_no_focus(
         return Ok(());
     }
 
-    // Small delay for focus to settle (focus was restored before this call)
+    // Small delay for focus to settle
     thread::sleep(Duration::from_millis(100));
 
     log::info!("Replacing text via clipboard (live sync was not available)");
-
-    // Replace text via clipboard
-    replace_text_via_clipboard(&edited_text)?;
+    clipboard::replace_text_via_clipboard(&edited_text)?;
 
     log::info!("Successfully restored edited text");
     Ok(())
-}
-
-/// Replace text in the focused field using clipboard
-fn replace_text_via_clipboard(text: &str) -> Result<(), String> {
-    log::info!("Saving current clipboard and setting new content ({} chars)", text.len());
-
-    // Save current clipboard
-    let original_clipboard = Command::new("pbpaste")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok());
-
-    // Set new clipboard content
-    let mut pbcopy = Command::new("pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn pbcopy: {}", e))?;
-
-    if let Some(mut stdin) = pbcopy.stdin.take() {
-        use std::io::Write;
-        stdin.write_all(text.as_bytes())
-            .map_err(|e| format!("Failed to write to pbcopy: {}", e))?;
-    }
-    pbcopy.wait().map_err(|e| format!("pbcopy failed: {}", e))?;
-
-    log::info!("Clipboard set, now sending Cmd+A");
-
-    // Select all and paste
-    thread::sleep(Duration::from_millis(100));
-    inject_key_press(
-        KeyCode::A,
-        Modifiers { command: true, ..Default::default() },
-    )?;
-
-    log::info!("Sent Cmd+A, now sending Cmd+V");
-
-    thread::sleep(Duration::from_millis(100));
-    inject_key_press(
-        KeyCode::V,
-        Modifiers { command: true, ..Default::default() },
-    )?;
-
-    log::info!("Sent Cmd+V");
-
-    // Restore original clipboard after a delay
-    if let Some(original) = original_clipboard {
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(500));
-            let _ = Command::new("pbcopy")
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-                .and_then(|mut p| {
-                    if let Some(mut stdin) = p.stdin.take() {
-                        use std::io::Write;
-                        let _ = stdin.write_all(original.as_bytes());
-                    }
-                    p.wait()
-                });
-        });
-    }
-
-    Ok(())
-}
-
-/// Capture text from focused element via clipboard (fallback for web text fields)
-fn capture_text_via_clipboard() -> Option<String> {
-    // Save current clipboard
-    let original_clipboard = Command::new("pbpaste")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok());
-
-    // Clear clipboard with a unique marker to detect if copy actually worked
-    let marker = "\x00__OVIM_EMPTY_MARKER__\x00";
-    let _ = Command::new("pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut p| {
-            if let Some(mut stdin) = p.stdin.take() {
-                use std::io::Write;
-                let _ = stdin.write_all(marker.as_bytes());
-            }
-            p.wait()
-        });
-
-    thread::sleep(Duration::from_millis(50));
-
-    // Select all (Cmd+A)
-    if inject_key_press(
-        KeyCode::A,
-        Modifiers { command: true, ..Default::default() },
-    ).is_err() {
-        return None;
-    }
-
-    thread::sleep(Duration::from_millis(50));
-
-    // Copy (Cmd+C)
-    if inject_key_press(
-        KeyCode::C,
-        Modifiers { command: true, ..Default::default() },
-    ).is_err() {
-        return None;
-    }
-
-    thread::sleep(Duration::from_millis(100));
-
-    // Read clipboard
-    let captured_text = Command::new("pbpaste")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok());
-
-    // Deselect by pressing Right arrow (moves cursor to end of selection)
-    let _ = inject_key_press(
-        KeyCode::Right,
-        Modifiers::default(),
-    );
-
-    // Restore original clipboard
-    if let Some(original) = original_clipboard {
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(100));
-            let _ = Command::new("pbcopy")
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-                .and_then(|mut p| {
-                    if let Some(mut stdin) = p.stdin.take() {
-                        use std::io::Write;
-                        let _ = stdin.write_all(original.as_bytes());
-                    }
-                    p.wait()
-                });
-        });
-    }
-
-    // If clipboard still contains our marker, the field was empty
-    captured_text.filter(|text| text != marker)
 }
