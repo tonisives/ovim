@@ -2,8 +2,9 @@
 //!
 //! This is a standalone binary - the ax_helper module must be self-contained.
 
+#![allow(unexpected_cfgs)]
+
 #[path = "../ax_helper/mod.rs"]
-#[allow(unexpected_cfgs)]
 mod ax_helper;
 
 fn main() {
