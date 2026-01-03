@@ -15,7 +15,10 @@ export async function applyWindowSettings(settings: Settings): Promise<void> {
     await window.hide()
     return
   }
-  await window.show()
+  // Only show if currently hidden to avoid stealing focus from other windows
+  if (!(await window.isVisible())) {
+    await window.show()
+  }
 
   const baseSize = Math.round(BASE_SIZE * settings.indicator_size)
 
