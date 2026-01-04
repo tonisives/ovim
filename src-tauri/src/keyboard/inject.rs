@@ -1,4 +1,4 @@
-use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, EventField};
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, EventField, ScrollEventUnit};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
 use super::keycode::{KeyCode, Modifiers};
@@ -350,4 +350,133 @@ pub fn type_char(keycode: KeyCode, shift: bool) -> Result<(), String> {
         Modifiers::default()
     };
     inject_key_press(keycode, mods)
+}
+
+// ============================================================================
+// Scroll Mode Functions (Vimium-style navigation)
+// ============================================================================
+
+/// Inject a scroll wheel event
+pub fn scroll_wheel(delta_x: i32, delta_y: i32) -> Result<(), String> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Failed to create event source")?;
+
+    // Create scroll wheel event with pixel-based scrolling
+    // wheel_count=2 means we're providing both vertical and horizontal axes
+    // For vertical (wheel1): negative delta scrolls content down (user sees content move up, scrolling down)
+    // For horizontal (wheel2): positive delta scrolls content left
+    let event = CGEvent::new_scroll_event(
+        source,
+        ScrollEventUnit::PIXEL,
+        2, // wheel_count: 2 for both vertical and horizontal
+        delta_y,
+        delta_x,
+        0,
+    )
+    .map_err(|_| "Failed to create scroll event")?;
+
+    // Mark the event as injected by us
+    event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, INJECTED_EVENT_MARKER);
+
+    event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
+/// Scroll down (j key in scroll mode)
+pub fn scroll_down(amount: u32) -> Result<(), String> {
+    // Negative delta scrolls content up, which means user scrolls down
+    scroll_wheel(0, -(amount as i32))
+}
+
+/// Scroll up (k key in scroll mode)
+pub fn scroll_up(amount: u32) -> Result<(), String> {
+    // Positive delta scrolls content down, which means user scrolls up
+    scroll_wheel(0, amount as i32)
+}
+
+/// Scroll left (h key in scroll mode)
+pub fn scroll_left(amount: u32) -> Result<(), String> {
+    // Positive delta scrolls content right, which means user scrolls left
+    scroll_wheel(amount as i32, 0)
+}
+
+/// Scroll right (l key in scroll mode)
+pub fn scroll_right(amount: u32) -> Result<(), String> {
+    // Negative delta scrolls content left, which means user scrolls right
+    scroll_wheel(-(amount as i32), 0)
+}
+
+/// Half page scroll down (d key in scroll mode)
+/// Uses PageDown key for half-page scroll behavior
+pub fn half_page_scroll_down() -> Result<(), String> {
+    // Use a larger scroll amount for half-page
+    scroll_wheel(0, -400)
+}
+
+/// Half page scroll up (u key in scroll mode)
+/// Uses PageUp key for half-page scroll behavior
+pub fn half_page_scroll_up() -> Result<(), String> {
+    // Use a larger scroll amount for half-page
+    scroll_wheel(0, 400)
+}
+
+/// History back (H key in scroll mode) - Cmd+[
+pub fn history_back() -> Result<(), String> {
+    inject_key_press(
+        KeyCode::LeftBracket,
+        Modifiers {
+            command: true,
+            ..Default::default()
+        },
+    )
+}
+
+/// History forward (L key in scroll mode) - Cmd+]
+pub fn history_forward() -> Result<(), String> {
+    inject_key_press(
+        KeyCode::RightBracket,
+        Modifiers {
+            command: true,
+            ..Default::default()
+        },
+    )
+}
+
+/// Reload page (r key in scroll mode) - Cmd+R or Cmd+Shift+R for hard reload
+pub fn reload_page(hard: bool) -> Result<(), String> {
+    inject_key_press(
+        KeyCode::R,
+        Modifiers {
+            command: true,
+            shift: hard,
+            ..Default::default()
+        },
+    )
+}
+
+/// Open find dialog (/ key in scroll mode) - Cmd+F
+pub fn open_find() -> Result<(), String> {
+    inject_key_press(
+        KeyCode::F,
+        Modifiers {
+            command: true,
+            ..Default::default()
+        },
+    )
+}
+
+/// Scroll to top of page (gg in scroll mode) - Cmd+Up
+pub fn scroll_to_top() -> Result<(), String> {
+    inject_key_press(
+        KeyCode::Home,
+        Modifiers::default(),
+    )
+}
+
+/// Scroll to bottom of page (G in scroll mode) - Cmd+Down
+pub fn scroll_to_bottom() -> Result<(), String> {
+    inject_key_press(
+        KeyCode::End,
+        Modifiers::default(),
+    )
 }

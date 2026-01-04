@@ -6,6 +6,7 @@ import { WidgetSettings } from "./WidgetSettings";
 import { IgnoredAppsSettings } from "./IgnoredAppsSettings";
 import { NvimEditSettings } from "./NvimEditSettings";
 import { ClickModeSettingsComponent } from "./ClickModeSettings";
+import { ScrollModeSettingsComponent } from "./ScrollModeSettings";
 
 export interface VimKeyModifiers {
   shift: boolean;
@@ -53,6 +54,12 @@ export interface ClickModeSettings {
   max_elements: number;
 }
 
+export interface ScrollModeSettings {
+  enabled: boolean;
+  scroll_step: number;
+  enabled_apps: string[];
+}
+
 export interface RgbColor {
   r: number;
   g: number;
@@ -86,10 +93,11 @@ export interface Settings {
   electron_apps: string[];
   nvim_edit: NvimEditSettings;
   click_mode: ClickModeSettings;
+  scroll_mode: ScrollModeSettings;
   auto_update_enabled: boolean;
 }
 
-type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim-config" | "nvim-window" | "click-mode";
+type TabId = "general" | "indicator" | "widgets" | "ignored" | "nvim-config" | "nvim-window" | "click-mode" | "scroll-mode";
 
 export function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -145,6 +153,10 @@ export function SettingsApp() {
 
   const clickModeTabs: { id: TabId; label: string; icon: string }[] = [
     { id: "click-mode", label: "Settings", icon: "cursor" },
+  ];
+
+  const scrollModeTabs: { id: TabId; label: string; icon: string }[] = [
+    { id: "scroll-mode", label: "Settings", icon: "scroll" },
   ];
 
   return (
@@ -205,6 +217,22 @@ export function SettingsApp() {
             ))}
           </div>
         </div>
+
+        <div className="tab-group">
+          <span className="tab-group-label">Scroll Mode</span>
+          <div className="tab-group-tabs">
+            {scrollModeTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={`tab ${activeTab === tab.id ? "active" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="tab-icon">{getIcon(tab.icon)}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="tab-content">
@@ -226,6 +254,9 @@ export function SettingsApp() {
         {activeTab === "click-mode" && (
           <ClickModeSettingsComponent settings={settings} onUpdate={updateSettings} />
         )}
+        {activeTab === "scroll-mode" && (
+          <ScrollModeSettingsComponent settings={settings} onUpdate={updateSettings} />
+        )}
       </div>
 
     </div>
@@ -241,6 +272,7 @@ function getIcon(name: string): string {
     edit: "\u270E",
     window: "\u25A1",
     cursor: "\u2316",
+    scroll: "\u21C5",
   };
   return icons[name] || "";
 }
