@@ -9,6 +9,7 @@ mod keyboard;
 mod keyboard_handler;
 pub mod launcher_callback;
 mod nvim_edit;
+mod scroll_mode;
 mod updater;
 mod vim;
 mod widgets;
@@ -31,6 +32,7 @@ use keyboard::{check_accessibility_permission, request_accessibility_permission,
 use keyboard_handler::create_keyboard_callback;
 use nvim_edit::terminals::install_scripts;
 use nvim_edit::EditSessionManager;
+use scroll_mode::SharedScrollModeState;
 use vim::{VimMode, VimState};
 use window::{setup_click_overlay_window, setup_indicator_window};
 
@@ -87,6 +89,8 @@ pub struct AppState {
     #[allow(dead_code)]
     edit_session_manager: Arc<EditSessionManager>,
     pub click_mode_manager: SharedClickModeManager,
+    #[allow(dead_code)]
+    pub scroll_state: SharedScrollModeState,
 }
 
 fn handle_ipc_command(
@@ -221,6 +225,7 @@ pub fn run() {
         Arc::new(Mutex::new(None));
     let edit_session_manager = Arc::new(EditSessionManager::new());
     let click_mode_manager = click_mode::create_manager();
+    let scroll_state = scroll_mode::create_scroll_state();
 
     let keyboard_capture = KeyboardCapture::new();
     keyboard_capture.set_callback(create_keyboard_callback(
@@ -229,6 +234,7 @@ pub fn run() {
         Arc::clone(&record_key_tx),
         Arc::clone(&edit_session_manager),
         Arc::clone(&click_mode_manager),
+        Arc::clone(&scroll_state),
     ));
 
     // Set up mouse click callback to hide click mode on any mouse click
@@ -296,6 +302,7 @@ pub fn run() {
         record_key_tx,
         edit_session_manager,
         click_mode_manager,
+        scroll_state,
     };
 
     let mode_rx = Arc::new(Mutex::new(mode_rx));
