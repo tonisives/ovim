@@ -395,6 +395,37 @@ pub fn get_focused_element_text() -> Option<String> {
     value.into_string()
 }
 
+/// Check if the currently focused element is a text input field (AXTextField, AXTextArea, etc.)
+/// Returns true if a text field is focused, false otherwise
+pub fn is_text_field_focused() -> bool {
+    let system_wide = match CFHandle::new(unsafe { AXUIElementCreateSystemWide() }) {
+        Some(sw) => sw,
+        None => return false,
+    };
+    let focused_app = match system_wide.get_attribute("AXFocusedApplication") {
+        Some(app) => app,
+        None => return false,
+    };
+    let focused_element = match focused_app.get_attribute("AXFocusedUIElement") {
+        Some(el) => el,
+        None => return false,
+    };
+    let role = match focused_element.get_attribute("AXRole") {
+        Some(r) => r,
+        None => return false,
+    };
+    let role_str = match role.into_string() {
+        Some(s) => s,
+        None => return false,
+    };
+
+    // Check for text input roles
+    matches!(
+        role_str.as_str(),
+        "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField"
+    )
+}
+
 /// Get the bounds of the screen containing a given point
 /// Returns the screen frame (x, y, width, height) in screen coordinates
 pub fn get_screen_bounds_for_point(x: f64, y: f64) -> Option<ElementFrame> {
