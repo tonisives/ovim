@@ -10,6 +10,9 @@ pub struct ScrollModeSettings {
     pub scroll_step: u32,
     /// Bundle identifiers of apps where scroll mode is enabled
     pub enabled_apps: Vec<String>,
+    /// Bundle identifiers of apps that disable scroll mode when they have visible windows
+    /// (e.g., overlay apps like Keyboard Maestro palettes)
+    pub overlay_blocklist: Vec<String>,
 }
 
 impl Default for ScrollModeSettings {
@@ -30,6 +33,9 @@ impl Default for ScrollModeSettings {
                 "com.apple.Preview".to_string(),
                 "com.apple.Notes".to_string(),
                 "com.apple.mail".to_string(),
+            ],
+            overlay_blocklist: vec![
+                "com.stairways.keyboardmaestro.engine".to_string(),
             ],
         }
     }

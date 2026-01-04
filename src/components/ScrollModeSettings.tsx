@@ -54,6 +54,39 @@ export function ScrollModeSettingsComponent({ settings, onUpdate }: Props) {
     [scrollMode.enabled_apps, updateScrollMode],
   )
 
+  const handleAddBlocklistApp = useCallback(async () => {
+    try {
+      const bundleId = await invoke<string | null>("pick_app")
+      if (bundleId && !scrollMode.overlay_blocklist.includes(bundleId)) {
+        updateScrollMode({
+          overlay_blocklist: [...scrollMode.overlay_blocklist, bundleId],
+        })
+      }
+    } catch (e) {
+      console.error("Failed to pick app:", e)
+    }
+  }, [scrollMode.overlay_blocklist, updateScrollMode])
+
+  const handleAddManualBlocklistApp = useCallback(
+    (bundleId: string) => {
+      if (!scrollMode.overlay_blocklist.includes(bundleId)) {
+        updateScrollMode({
+          overlay_blocklist: [...scrollMode.overlay_blocklist, bundleId],
+        })
+      }
+    },
+    [scrollMode.overlay_blocklist, updateScrollMode],
+  )
+
+  const handleRemoveBlocklistApp = useCallback(
+    (bundleId: string) => {
+      updateScrollMode({
+        overlay_blocklist: scrollMode.overlay_blocklist.filter((id) => id !== bundleId),
+      })
+    },
+    [scrollMode.overlay_blocklist, updateScrollMode],
+  )
+
   return (
     <div className="settings-section">
       <div className="section-header">
@@ -124,6 +157,20 @@ export function ScrollModeSettingsComponent({ settings, onUpdate }: Props) {
           onAdd={handleAddEnabledApp}
           onAddManual={handleAddManualApp}
           onRemove={handleRemoveEnabledApp}
+        />
+      </div>
+
+      {/* Overlay Blocklist */}
+      <div className="color-settings">
+        <h3>Overlay Blocklist</h3>
+        <p className="help-text">
+          Scroll mode is disabled when these apps have visible windows (e.g., Keyboard Maestro palettes).
+        </p>
+        <AppList
+          items={scrollMode.overlay_blocklist}
+          onAdd={handleAddBlocklistApp}
+          onAddManual={handleAddManualBlocklistApp}
+          onRemove={handleRemoveBlocklistApp}
         />
       </div>
     </div>

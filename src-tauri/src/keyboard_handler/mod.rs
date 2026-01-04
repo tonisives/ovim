@@ -109,8 +109,9 @@ pub fn create_keyboard_callback(
         // Check scroll mode - process if:
         // 1. Scroll mode is enabled
         // 2. App is in enabled_apps list
-        // 3. No text field is currently focused
-        // 4. Vim mode is in Insert mode (so scroll mode doesn't interfere with vim Normal mode)
+        // 3. No overlay window from blocklisted apps is visible
+        // 4. No text field is currently focused
+        // 5. Vim mode is in Insert mode (so scroll mode doesn't interfere with vim Normal mode)
         //    OR vim mode is disabled for this app
         {
             let settings_guard = settings.lock().unwrap();
@@ -120,8 +121,10 @@ pub fn create_keyboard_callback(
                 let app_enabled = is_scroll_mode_enabled_for_app(&scroll_settings.enabled_apps);
 
                 if app_enabled {
-                    // Skip scroll mode if a text field is focused
-                    if crate::nvim_edit::accessibility::is_text_field_focused() {
+                    // Skip scroll mode if an overlay from a blocklisted app is visible
+                    if crate::nvim_edit::accessibility::has_visible_overlay_window(&scroll_settings.overlay_blocklist) {
+                        // Overlay window visible, don't intercept keys
+                    } else if crate::nvim_edit::accessibility::is_text_field_focused() {
                         // Text field is focused, don't intercept hjkl for scrolling
                     } else {
                         let vim_mode = vim_state.lock().unwrap().mode();

@@ -428,6 +428,134 @@ pub fn is_text_field_focused() -> bool {
     )
 }
 
+/// Check if any app in the blocklist has visible windows
+/// Returns true if an overlay from a blocklisted app is visible
+pub fn has_visible_overlay_window(blocklist: &[String]) -> bool {
+    if blocklist.is_empty() {
+        return false;
+    }
+
+    unsafe {
+        use objc::{class, msg_send, sel, sel_impl};
+
+        let workspace: *mut objc::runtime::Object =
+            msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return false;
+        }
+
+        let running_apps: *mut objc::runtime::Object = msg_send![workspace, runningApplications];
+        if running_apps.is_null() {
+            return false;
+        }
+
+        let count: usize = msg_send![running_apps, count];
+
+        for i in 0..count {
+            let app: *mut objc::runtime::Object = msg_send![running_apps, objectAtIndex: i];
+            if app.is_null() {
+                continue;
+            }
+
+            let bundle_id: *mut objc::runtime::Object = msg_send![app, bundleIdentifier];
+            if bundle_id.is_null() {
+                continue;
+            }
+
+            let utf8: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
+            if utf8.is_null() {
+                continue;
+            }
+
+            let bundle_str = std::ffi::CStr::from_ptr(utf8)
+                .to_string_lossy()
+                .into_owned();
+
+            if blocklist.contains(&bundle_str) {
+                // Check if this app has any visible windows using CGWindowList
+                let pid: i32 = msg_send![app, processIdentifier];
+                if has_visible_windows_for_pid(pid) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if a process has any visible windows using CGWindowListCopyWindowInfo
+fn has_visible_windows_for_pid(pid: i32) -> bool {
+    use core_graphics::window::{
+        kCGNullWindowID, kCGWindowListOptionOnScreenOnly, CGWindowListCopyWindowInfo,
+    };
+
+    unsafe {
+        let window_list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+        if window_list.is_null() {
+            return false;
+        }
+
+        let count = core_foundation::array::CFArrayGetCount(window_list as _);
+
+        for i in 0..count {
+            let window_info = core_foundation::array::CFArrayGetValueAtIndex(window_list as _, i)
+                as core_foundation::dictionary::CFDictionaryRef;
+            if window_info.is_null() {
+                continue;
+            }
+
+            // Get the owner PID
+            let pid_key = core_foundation::string::CFString::new("kCGWindowOwnerPID");
+            let mut pid_value: *const std::ffi::c_void = std::ptr::null();
+
+            if core_foundation::dictionary::CFDictionaryGetValueIfPresent(
+                window_info,
+                pid_key.as_CFTypeRef() as _,
+                &mut pid_value,
+            ) != 0 && !pid_value.is_null()
+            {
+                let mut owner_pid: i32 = 0;
+                if core_foundation::number::CFNumberGetValue(
+                    pid_value as core_foundation::number::CFNumberRef,
+                    core_foundation::number::kCFNumberSInt32Type,
+                    &mut owner_pid as *mut i32 as *mut std::ffi::c_void,
+                ) && owner_pid == pid
+                {
+                    // Check window layer - layer 0 is normal windows
+                    let layer_key = core_foundation::string::CFString::new("kCGWindowLayer");
+                    let mut layer_value: *const std::ffi::c_void = std::ptr::null();
+
+                    if core_foundation::dictionary::CFDictionaryGetValueIfPresent(
+                        window_info,
+                        layer_key.as_CFTypeRef() as _,
+                        &mut layer_value,
+                    ) != 0 && !layer_value.is_null()
+                    {
+                        let mut layer: i32 = -1;
+                        core_foundation::number::CFNumberGetValue(
+                            layer_value as core_foundation::number::CFNumberRef,
+                            core_foundation::number::kCFNumberSInt32Type,
+                            &mut layer as *mut i32 as *mut std::ffi::c_void,
+                        );
+
+                        // Normal windows are at layer 0, some overlays might be higher
+                        // Accept layer 0 and above as visible windows
+                        if layer >= 0 {
+                            core_foundation::base::CFRelease(window_list as _);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        core_foundation::base::CFRelease(window_list as _);
+    }
+
+    false
+}
+
 /// Get the bounds of the screen containing a given point
 /// Returns the screen frame (x, y, width, height) in screen coordinates
 pub fn get_screen_bounds_for_point(x: f64, y: f64) -> Option<ElementFrame> {

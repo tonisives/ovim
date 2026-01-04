@@ -58,6 +58,7 @@ export interface ScrollModeSettings {
   enabled: boolean;
   scroll_step: number;
   enabled_apps: string[];
+  overlay_blocklist: string[];
 }
 
 export interface RgbColor {
