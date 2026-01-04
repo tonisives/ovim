@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use super::click_mode::ClickModeSettings;
 use super::colors::ModeColors;
 use super::nvim_edit::NvimEditSettings;
+use super::scroll_mode::ScrollModeSettings;
 
 /// Modifier keys for vim key activation
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -67,6 +68,9 @@ pub struct Settings {
     /// Settings for Click Mode feature
     #[serde(default)]
     pub click_mode: ClickModeSettings,
+    /// Settings for Scroll Mode feature (Vimium-style navigation)
+    #[serde(default)]
+    pub scroll_mode: ScrollModeSettings,
     /// Enable automatic update checking
     #[serde(default = "default_true")]
     pub auto_update_enabled: bool,
@@ -107,6 +111,7 @@ impl Default for Settings {
             electron_apps: vec![],
             nvim_edit: NvimEditSettings::default(),
             click_mode: ClickModeSettings::default(),
+            scroll_mode: ScrollModeSettings::default(),
             auto_update_enabled: true,
         }
     }
