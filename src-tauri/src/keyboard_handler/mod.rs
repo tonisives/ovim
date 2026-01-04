@@ -109,7 +109,8 @@ pub fn create_keyboard_callback(
         // Check scroll mode - process if:
         // 1. Scroll mode is enabled
         // 2. App is in enabled_apps list
-        // 3. Vim mode is in Insert mode (so scroll mode doesn't interfere with vim Normal mode)
+        // 3. No text field is currently focused
+        // 4. Vim mode is in Insert mode (so scroll mode doesn't interfere with vim Normal mode)
         //    OR vim mode is disabled for this app
         {
             let settings_guard = settings.lock().unwrap();
@@ -119,37 +120,42 @@ pub fn create_keyboard_callback(
                 let app_enabled = is_scroll_mode_enabled_for_app(&scroll_settings.enabled_apps);
 
                 if app_enabled {
-                    let vim_mode = vim_state.lock().unwrap().mode();
-                    let vim_disabled_for_app =
-                        settings_guard.ignored_apps.iter().any(|app| {
-                            #[cfg(target_os = "macos")]
-                            {
-                                if let Some(bundle_id) = get_frontmost_app_bundle_id() {
-                                    return app == &bundle_id;
+                    // Skip scroll mode if a text field is focused
+                    if crate::nvim_edit::accessibility::is_text_field_focused() {
+                        // Text field is focused, don't intercept hjkl for scrolling
+                    } else {
+                        let vim_mode = vim_state.lock().unwrap().mode();
+                        let vim_disabled_for_app =
+                            settings_guard.ignored_apps.iter().any(|app| {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    if let Some(bundle_id) = get_frontmost_app_bundle_id() {
+                                        return app == &bundle_id;
+                                    }
                                 }
+                                false
+                            });
+
+                        // Only process scroll mode if vim is in Insert mode or vim is disabled for this app
+                        if vim_mode == VimMode::Insert || vim_disabled_for_app || !settings_guard.enabled
+                        {
+                            let scroll_step = scroll_settings.scroll_step;
+                            drop(settings_guard);
+
+                            // Process scroll mode key
+                            let result = handle_scroll_mode_key(
+                                event,
+                                &scroll_state,
+                                scroll_step,
+                            );
+
+                            // If scroll mode handled the key, return the result
+                            if result.is_none() {
+                                return None;
                             }
-                            false
-                        });
-
-                    // Only process scroll mode if vim is in Insert mode or vim is disabled for this app
-                    if vim_mode == VimMode::Insert || vim_disabled_for_app || !settings_guard.enabled
-                    {
-                        let scroll_step = scroll_settings.scroll_step;
-                        drop(settings_guard);
-
-                        // Process scroll mode key
-                        let result = handle_scroll_mode_key(
-                            event,
-                            &scroll_state,
-                            scroll_step,
-                        );
-
-                        // If scroll mode handled the key, return the result
-                        if result.is_none() {
-                            return None;
+                            // Otherwise continue to vim processing
+                            return result;
                         }
-                        // Otherwise continue to vim processing
-                        return result;
                     }
                 }
             }

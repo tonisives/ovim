@@ -413,6 +413,21 @@ pub fn get_focused_element_subrole() -> Option<String> {
     subrole.into_string()
 }
 
+/// Check if the currently focused element is a text input field (AXTextField, AXTextArea, etc.)
+/// Returns true if a text field is focused, false otherwise
+pub fn is_text_field_focused() -> bool {
+    let role_str = match get_focused_element_role() {
+        Some(s) => s,
+        None => return false,
+    };
+
+    // Check for text input roles
+    matches!(
+        role_str.as_str(),
+        "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField"
+    )
+}
+
 /// Get the bounds of the screen containing a given point
 /// Returns the screen frame (x, y, width, height) in screen coordinates
 pub fn get_screen_bounds_for_point(x: f64, y: f64) -> Option<ElementFrame> {
