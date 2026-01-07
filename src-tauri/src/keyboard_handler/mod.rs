@@ -2,6 +2,7 @@
 
 mod click_mode;
 pub mod double_tap;
+mod list_mode;
 mod scroll_mode;
 mod shortcuts;
 
@@ -12,12 +13,14 @@ use crate::commands::RecordedKey;
 use crate::config::click_mode::DoubleTapModifier;
 use crate::config::Settings;
 use crate::keyboard::{KeyCode, KeyEvent};
+use crate::list_mode::SharedListModeState;
 use crate::nvim_edit::EditSessionManager;
 use crate::scroll_mode::SharedScrollModeState;
 use crate::vim::{VimMode, VimState};
 
 use click_mode::handle_click_mode_key;
 use double_tap::{DoubleTapKey, DoubleTapManager};
+use list_mode::handle_list_mode_key;
 use scroll_mode::handle_scroll_mode_key;
 use shortcuts::{
     check_click_mode_shortcut, check_nvim_edit_shortcut, check_vim_key,
@@ -37,6 +40,7 @@ pub fn create_keyboard_callback(
     double_tap_manager: Arc<Mutex<DoubleTapManager>>,
     double_tap_callback: DoubleTapCallback,
     scroll_state: SharedScrollModeState,
+    list_state: SharedListModeState,
 ) -> impl Fn(KeyEvent) -> Option<KeyEvent> + Send + 'static {
     move |event| {
         // Check for Escape key double-tap (for non-modifier double-tap shortcuts)
@@ -103,6 +107,63 @@ pub fn create_keyboard_callback(
             // Check vim key
             if let Some(result) = check_vim_key(&event, &settings_guard, Arc::clone(&vim_state)) {
                 return result;
+            }
+        }
+
+        // Check list mode first - process if:
+        // 1. List navigation is enabled in scroll_mode settings
+        // 2. App is in list_navigation_apps list (or enabled_apps if list_navigation_apps is empty)
+        // 3. No overlay window from blocklisted apps is visible
+        // 4. No text field is currently focused
+        // 5. Vim mode is in Insert mode OR vim is disabled for this app
+        {
+            let settings_guard = settings.lock().unwrap();
+            let scroll_settings = &settings_guard.scroll_mode;
+
+            if scroll_settings.enabled && scroll_settings.list_navigation {
+                // Use list_navigation_apps if non-empty, otherwise check enabled_apps
+                let list_apps = if !scroll_settings.list_navigation_apps.is_empty() {
+                    &scroll_settings.list_navigation_apps
+                } else {
+                    &scroll_settings.enabled_apps
+                };
+                let app_enabled = is_scroll_mode_enabled_for_app(list_apps);
+
+                if app_enabled {
+                    // Skip list mode if an overlay from a blocklisted app is visible
+                    if crate::nvim_edit::accessibility::has_visible_overlay_window(&scroll_settings.overlay_blocklist) {
+                        // Overlay window visible, don't intercept keys
+                    } else if crate::nvim_edit::accessibility::is_text_field_focused() {
+                        // Text field is focused, don't intercept hjkl for navigation
+                    } else {
+                        let vim_mode = vim_state.lock().unwrap().mode();
+                        let vim_disabled_for_app =
+                            settings_guard.ignored_apps.iter().any(|app| {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    if let Some(bundle_id) = get_frontmost_app_bundle_id() {
+                                        return app == &bundle_id;
+                                    }
+                                }
+                                false
+                            });
+
+                        // Only process list mode if vim is in Insert mode or vim is disabled for this app
+                        if vim_mode == VimMode::Insert || vim_disabled_for_app || !settings_guard.enabled
+                        {
+                            drop(settings_guard);
+
+                            // Process list mode key
+                            let result = handle_list_mode_key(event, &list_state);
+
+                            // If list mode handled the key, return the result
+                            if result.is_none() {
+                                return None;
+                            }
+                            // Otherwise continue to scroll/vim processing
+                        }
+                    }
+                }
             }
         }
 

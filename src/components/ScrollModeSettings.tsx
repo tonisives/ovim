@@ -150,7 +150,7 @@ export function ScrollModeSettingsComponent({ settings, onUpdate }: Props) {
       <div className="color-settings">
         <h3>Enabled Applications</h3>
         <p className="help-text">
-          Scroll mode only works in these apps. Browsers and common system apps are enabled by default.
+          Scroll mode only works in these apps. Common browsers are enabled by default.
         </p>
         <AppList
           items={scrollMode.enabled_apps}

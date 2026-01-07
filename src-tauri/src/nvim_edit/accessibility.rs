@@ -413,19 +413,87 @@ pub fn get_focused_element_subrole() -> Option<String> {
     subrole.into_string()
 }
 
-/// Check if the currently focused element is a text input field (AXTextField, AXTextArea, etc.)
+/// Check if the currently focused element is a text input field or editable area
 /// Returns true if a text field is focused, false otherwise
 pub fn is_text_field_focused() -> bool {
-    let role_str = match get_focused_element_role() {
+    let system_wide = match CFHandle::new(unsafe { AXUIElementCreateSystemWide() }) {
+        Some(sw) => sw,
+        None => return false,
+    };
+    let focused_app = match system_wide.get_attribute("AXFocusedApplication") {
+        Some(app) => app,
+        None => return false,
+    };
+    let focused_element = match focused_app.get_attribute("AXFocusedUIElement") {
+        Some(el) => el,
+        None => return false,
+    };
+    let role = match focused_element.get_attribute("AXRole") {
+        Some(r) => r,
+        None => return false,
+    };
+    let role_str = match role.into_string() {
         Some(s) => s,
         None => return false,
     };
 
-    // Check for text input roles
-    matches!(
+    // Check for known text input roles
+    // - AXTextField: standard single-line text input
+    // - AXTextArea: multi-line text input (e.g., notes, code editors)
+    // - AXComboBox: dropdown with text input
+    // - AXSearchField: search input field
+    let is_known_text_role = matches!(
         role_str.as_str(),
         "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField"
-    )
+    );
+
+    if is_known_text_role {
+        return true;
+    }
+
+    // Check for autocomplete/suggestion list elements
+    // When these are focused, the user is still in a text editing context
+    // (e.g., Monaco Editor's IntelliSense popup, VS Code suggestions)
+    // - AXList: list of suggestions
+    // - AXRow: individual suggestion row
+    // - AXCell: table cell in suggestions
+    // - AXMenuItem/AXMenu: context menus that appear during typing
+    let is_autocomplete_element = matches!(
+        role_str.as_str(),
+        "AXList" | "AXRow" | "AXCell" | "AXMenuItem" | "AXMenu" | "AXPopover"
+    );
+
+    if is_autocomplete_element {
+        return true;
+    }
+
+    // For web content and other elements, check if the element is editable
+    // This handles contenteditable elements in browsers (email composers, etc.)
+    // Note: We need to get focused_element again since it was consumed by into_string
+    if let Some(focused_app) = system_wide.get_attribute("AXFocusedApplication") {
+        if let Some(focused_element) = focused_app.get_attribute("AXFocusedUIElement") {
+            if let Some(editable_attr) = focused_element.get_attribute("AXEditable") {
+                // AXEditable is a boolean attribute
+                // The value is a CFBoolean - check if it's true
+                if is_cf_boolean_true(&editable_attr) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    log::trace!("is_text_field_focused: role={} (not editable)", role_str);
+    false
+}
+
+/// Check if a CFHandle wraps a CFBoolean with value true
+fn is_cf_boolean_true(handle: &CFHandle) -> bool {
+    // Check if this is kCFBooleanTrue
+    // CFBoolean values are singletons, so we can compare pointers
+    unsafe {
+        let cf_true = core_foundation::boolean::kCFBooleanTrue;
+        handle.0 == cf_true as CFTypeRef
+    }
 }
 
 /// Check if any app in the blocklist has visible windows

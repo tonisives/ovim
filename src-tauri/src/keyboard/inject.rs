@@ -480,3 +480,66 @@ pub fn scroll_to_bottom() -> Result<(), String> {
         Modifiers::default(),
     )
 }
+
+// ============================================================================
+// List Mode Functions - Arrow key navigation for list views
+// ============================================================================
+
+/// Move up in list (k in list mode) - Up Arrow
+pub fn list_up() -> Result<(), String> {
+    inject_arrow(ArrowDirection::Up, Modifiers::default())
+}
+
+/// Move down in list (j in list mode) - Down Arrow
+pub fn list_down() -> Result<(), String> {
+    inject_arrow(ArrowDirection::Down, Modifiers::default())
+}
+
+/// Move left in list (h in list mode) - Left Arrow
+/// Also collapses folders in tree views like Finder
+pub fn list_left() -> Result<(), String> {
+    inject_arrow(ArrowDirection::Left, Modifiers::default())
+}
+
+/// Move right in list (l in list mode) - Right Arrow
+/// Also expands folders in tree views like Finder
+pub fn list_right() -> Result<(), String> {
+    inject_arrow(ArrowDirection::Right, Modifiers::default())
+}
+
+/// Extend selection up (K in list mode) - Shift+Up Arrow
+pub fn list_select_up() -> Result<(), String> {
+    inject_arrow(
+        ArrowDirection::Up,
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    )
+}
+
+/// Extend selection down (J in list mode) - Shift+Down Arrow
+pub fn list_select_down() -> Result<(), String> {
+    inject_arrow(
+        ArrowDirection::Down,
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    )
+}
+
+/// Go to top of list (gg in list mode) - Home key
+pub fn list_go_top() -> Result<(), String> {
+    inject_key_press(KeyCode::Home, Modifiers::default())
+}
+
+/// Go to bottom of list (G in list mode) - End key
+pub fn list_go_bottom() -> Result<(), String> {
+    inject_key_press(KeyCode::End, Modifiers::default())
+}
+
+/// Inject Return key (for opening items with 'o')
+pub fn inject_return() -> Result<(), String> {
+    inject_key_press(KeyCode::Return, Modifiers::default())
+}

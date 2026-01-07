@@ -8,6 +8,7 @@ pub mod ipc;
 mod keyboard;
 mod keyboard_handler;
 pub mod launcher_callback;
+mod list_mode;
 mod nvim_edit;
 mod scroll_mode;
 mod updater;
@@ -404,6 +405,7 @@ pub fn run() {
     let click_mode_manager = click_mode::create_manager();
     let double_tap_manager = Arc::new(Mutex::new(DoubleTapManager::new()));
     let scroll_state = scroll_mode::create_scroll_state();
+    let list_state = list_mode::create_list_state();
 
     // Create double-tap callback that handles mode activation
     let double_tap_callback = {
@@ -431,6 +433,7 @@ pub fn run() {
         Arc::clone(&double_tap_manager),
         double_tap_callback,
         Arc::clone(&scroll_state),
+        Arc::clone(&list_state),
     ));
 
     // Set up mouse click callback to hide click mode on any mouse click
