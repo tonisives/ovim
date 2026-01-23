@@ -46,7 +46,7 @@ jobs:
         run: pnpm install
 
       - name: Build Tauri app
-        run: pnpm tauri build ${{ matrix.args }}
+        run: pnpm tauri build ${{ matrix.args }} --no-bundle
         env:
           CI: true
 
