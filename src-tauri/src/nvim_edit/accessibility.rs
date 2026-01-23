@@ -265,7 +265,7 @@ fn capture_focused_element() -> Option<AXElementHandle> {
     }
 }
 
-/// Restore focus to a previously captured application
+/// Restore focus to a previously captured application and element
 pub fn restore_focus(context: &FocusContext) -> Result<(), String> {
     log::info!("Attempting to restore focus to PID {}", context.app_pid);
 
@@ -293,13 +293,35 @@ pub fn restore_focus(context: &FocusContext) -> Result<(), String> {
         let options: u64 = 2;
         let success: bool = msg_send![app, activateWithOptions: options];
 
-        if success {
-            log::info!("Successfully activated application");
-            Ok(())
-        } else {
+        if !success {
             log::error!("Failed to activate application");
-            Err("Failed to activate application".to_string())
+            return Err("Failed to activate application".to_string());
         }
+
+        log::info!("Successfully activated application");
+
+        // Try to restore focus to the specific element if we have it
+        if let Some(ref element) = context.focused_element {
+            // Small delay for app activation to complete
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Try to set focus on the element using AXFocused attribute
+            let focused_attr = CFString::new("AXFocused");
+            let cf_true = core_foundation::boolean::CFBoolean::true_value();
+            let result = AXUIElementSetAttributeValue(
+                element.as_ptr(),
+                focused_attr.as_CFTypeRef(),
+                cf_true.as_CFTypeRef(),
+            );
+
+            if result == 0 {
+                log::info!("Successfully set focus on element");
+            } else {
+                log::info!("Could not set focus on element (error {}), app is active though", result);
+            }
+        }
+
+        Ok(())
     }
 }
 
