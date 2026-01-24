@@ -84,6 +84,7 @@ pub fn find_window_by_title(process_names: &[&str], title: &str) -> Option<usize
 }
 
 /// Get the current position of a window by title
+#[allow(dead_code)]
 pub fn get_window_position_by_title(process_names: &[&str], title: &str) -> Option<(i32, i32)> {
     let name_conditions: Vec<String> = process_names
         .iter()
@@ -125,7 +126,49 @@ pub fn get_window_position_by_title(process_names: &[&str], title: &str) -> Opti
     Some((x, y))
 }
 
+/// Set window size by title (without changing position)
+pub fn set_window_size_by_title(process_names: &[&str], title: &str, width: u32, height: u32) {
+    let name_conditions: Vec<String> = process_names
+        .iter()
+        .map(|n| format!("name is \"{}\"", n))
+        .collect();
+    let condition = name_conditions.join(" or ");
+
+    let script = format!(
+        r#"
+        tell application "System Events"
+            repeat with p in (every process whose {})
+                try
+                    repeat with w in windows of p
+                        if name of w contains "{}" then
+                            set size of w to {{{}, {}}}
+                            return "ok"
+                        end if
+                    end repeat
+                end try
+            end repeat
+            return "no_window_found"
+        end tell
+        "#,
+        condition, title, width, height
+    );
+
+    log::debug!("Setting window '{}' size to {}x{}", title, width, height);
+
+    let output = Command::new("osascript").arg("-e").arg(&script).output();
+
+    if let Ok(out) = output {
+        if !out.status.success() {
+            log::error!(
+                "AppleScript set size failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+}
+
 /// Set window bounds by title (position and size in one call)
+#[allow(dead_code)]
 pub fn set_window_bounds_by_title(process_names: &[&str], title: &str, x: i32, y: i32, width: u32, height: u32) {
     let name_conditions: Vec<String> = process_names
         .iter()

@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
-use super::applescript_utils::{
-    find_window_by_title, get_window_position_by_title, set_window_bounds_by_title,
-};
+use super::applescript_utils::find_window_by_title;
 use super::process_utils::{find_editor_pid_for_file, resolve_command_path, resolve_terminal_path};
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
@@ -21,6 +19,10 @@ struct SpawnConfig {
     title: String,
     columns: u32,
     lines: u32,
+    x: Option<i32>,
+    y: Option<i32>,
+    width: Option<u32>,
+    height: Option<u32>,
     editor_cmd: Vec<String>,
     terminal_path: String,
 }
@@ -58,6 +60,10 @@ impl SpawnConfig {
             title: format!("ovim-edit-{}", std::process::id()),
             columns: 80,
             lines: 24,
+            x: None,
+            y: None,
+            width: None,
+            height: None,
             editor_cmd,
             terminal_path,
         }
@@ -67,6 +73,10 @@ impl SpawnConfig {
         if let Some(geo) = geometry {
             self.columns = (geo.width / 8).max(40);
             self.lines = (geo.height / 16).max(10);
+            self.x = Some(geo.x);
+            self.y = Some(geo.y);
+            self.width = Some(geo.width);
+            self.height = Some(geo.height);
         }
         self
     }
@@ -116,11 +126,18 @@ impl TerminalSpawner for AlacrittySpawner {
 
 impl AlacrittySpawner {
     /// Try to spawn using `alacritty msg create-window` (faster)
+    /// Note: msg create-window doesn't support window.position, so we skip it when positioning is needed
     fn try_msg_spawn(
         &self,
         config: &SpawnConfig,
         custom_env: Option<&HashMap<String, String>>,
     ) -> Option<Result<std::process::Child, String>> {
+        // Skip msg create-window when position is specified - it doesn't support window.position
+        if config.x.is_some() && config.y.is_some() {
+            log::info!("Skipping msg create-window because position is specified");
+            return None;
+        }
+
         let args = self.build_msg_args(config, custom_env);
 
         match Command::new(&config.terminal_path).args(&args).status() {
@@ -155,7 +172,7 @@ impl AlacrittySpawner {
             "create-window".to_string(),
         ];
 
-        args.extend(self.window_options(&config.title, config.columns, config.lines));
+        args.extend(self.window_options(config));
 
         args.push("-e".to_string());
 
@@ -178,7 +195,7 @@ impl AlacrittySpawner {
         config: &SpawnConfig,
         custom_env: Option<&HashMap<String, String>>,
     ) -> Result<std::process::Child, String> {
-        let mut args = self.window_options(&config.title, config.columns, config.lines);
+        let mut args = self.window_options(config);
         args.push("-e".to_string());
         args.extend(config.editor_cmd.clone());
 
@@ -195,19 +212,36 @@ impl AlacrittySpawner {
     }
 
     /// Common window options for Alacritty
-    fn window_options(&self, title: &str, columns: u32, lines: u32) -> Vec<String> {
-        vec![
+    fn window_options(&self, config: &SpawnConfig) -> Vec<String> {
+        let mut args = vec![
             "-o".to_string(),
-            format!("window.title=\"{}\"", title),
+            format!("window.title=\"{}\"", config.title),
             "-o".to_string(),
             "window.dynamic_title=false".to_string(),
             "-o".to_string(),
             "window.startup_mode=\"Windowed\"".to_string(),
             "-o".to_string(),
-            format!("window.dimensions.columns={}", columns),
+            format!("window.dimensions.columns={}", config.columns),
             "-o".to_string(),
-            format!("window.dimensions.lines={}", lines),
-        ]
+            format!("window.dimensions.lines={}", config.lines),
+        ];
+
+        // Add position if available - this positions the window at spawn time
+        // avoiding the slow AppleScript animation.
+        // Must use object syntax to set both x and y together, otherwise only one axis applies.
+        // See: https://github.com/alacritty/alacritty/issues/7518
+        // Note: Alacritty uses physical pixels, but our coordinates are in points (macOS).
+        // On Retina displays, we need to multiply by the scale factor (typically 2).
+        if let (Some(x), Some(y)) = (config.x, config.y) {
+            // TODO: Get actual scale factor instead of assuming 2x
+            let scale = 2;
+            let pos_opt = format!("window.position={{x={},y={}}}", x * scale, y * scale);
+            log::info!("Alacritty position option: {}", pos_opt);
+            args.push("-o".to_string());
+            args.push(pos_opt);
+        }
+
+        args
     }
 
     /// Wrap editor command with environment variable exports
@@ -222,7 +256,8 @@ impl AlacrittySpawner {
         script
     }
 
-    /// Spawn a thread to find and position the new window
+    /// Spawn a thread to find the window and ensure size is correct
+    /// Position is set at spawn time via window.position.x/y options
     fn spawn_position_watcher(&self, title: &str, geometry: Option<WindowGeometry>) {
         let title = title.to_string();
         let geo = geometry;
@@ -233,11 +268,11 @@ impl AlacrittySpawner {
                 if find_window_by_title(ALACRITTY_PROCESS_NAMES, &title).is_some() {
                     log::info!("Found window '{}'", title);
 
+                    // Only set size as a fallback - position should already be correct from spawn
                     if let Some(ref g) = geo {
-                        position_window_with_retry(&title, g);
+                        ensure_window_size(&title, g);
                     }
 
-                    // Window is already focused when spawned, no need to focus again
                     return;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
@@ -247,24 +282,12 @@ impl AlacrittySpawner {
     }
 }
 
-/// Position a window by title, retrying until position is correct (handles startup_mode override)
-fn position_window_with_retry(title: &str, geo: &WindowGeometry) {
-    const MAX_ATTEMPTS: u32 = 20;
-    const TOLERANCE: i32 = 10;
+/// Ensure window size is correct (position is set at spawn time)
+fn ensure_window_size(title: &str, geo: &WindowGeometry) {
+    use super::applescript_utils::set_window_size_by_title;
 
-    for attempt in 0..MAX_ATTEMPTS {
-        // Check current position
-        if let Some((actual_x, actual_y)) = get_window_position_by_title(ALACRITTY_PROCESS_NAMES, title) {
-            if (actual_x - geo.x).abs() <= TOLERANCE && (actual_y - geo.y).abs() <= TOLERANCE {
-                log::info!("Position correct after {} attempts", attempt);
-                return;
-            }
-        }
-
-        // Position not correct, set it
-        set_window_bounds_by_title(ALACRITTY_PROCESS_NAMES, title, geo.x, geo.y, geo.width, geo.height);
-        std::thread::sleep(std::time::Duration::from_millis(30));
-    }
+    // Single attempt to set size - position should already be correct from spawn
+    set_window_size_by_title(ALACRITTY_PROCESS_NAMES, title, geo.width, geo.height);
 }
 
 /// Escape a string for use in shell
