@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::applescript_utils::{
-    find_window_by_title, focus_window_by_index, get_window_position, set_window_bounds,
+    find_window_by_title, get_window_position_by_title, set_window_bounds_by_title,
 };
 use super::process_utils::{find_editor_pid_for_file, resolve_command_path, resolve_terminal_path};
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
@@ -222,7 +222,7 @@ impl AlacrittySpawner {
         script
     }
 
-    /// Spawn a thread to find, position, and focus the new window
+    /// Spawn a thread to find and position the new window
     fn spawn_position_watcher(&self, title: &str, geometry: Option<WindowGeometry>) {
         let title = title.to_string();
         let geo = geometry;
@@ -230,14 +230,14 @@ impl AlacrittySpawner {
         std::thread::spawn(move || {
             // Poll rapidly to catch the window as soon as it appears
             for _attempt in 0..200 {
-                if let Some(index) = find_window_by_title(ALACRITTY_PROCESS_NAMES, &title) {
-                    log::info!("Found window '{}' at index {}", title, index);
+                if find_window_by_title(ALACRITTY_PROCESS_NAMES, &title).is_some() {
+                    log::info!("Found window '{}'", title);
 
                     if let Some(ref g) = geo {
-                        position_window_with_retry(index, g);
+                        position_window_with_retry(&title, g);
                     }
 
-                    focus_window_by_index(ALACRITTY_PROCESS_NAMES, index);
+                    // Window is already focused when spawned, no need to focus again
                     return;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
@@ -247,14 +247,14 @@ impl AlacrittySpawner {
     }
 }
 
-/// Position a window, retrying until position is correct (handles startup_mode override)
-fn position_window_with_retry(index: usize, geo: &WindowGeometry) {
+/// Position a window by title, retrying until position is correct (handles startup_mode override)
+fn position_window_with_retry(title: &str, geo: &WindowGeometry) {
     const MAX_ATTEMPTS: u32 = 20;
     const TOLERANCE: i32 = 10;
 
     for attempt in 0..MAX_ATTEMPTS {
         // Check current position
-        if let Some((actual_x, actual_y)) = get_window_position(ALACRITTY_PROCESS_NAMES, index) {
+        if let Some((actual_x, actual_y)) = get_window_position_by_title(ALACRITTY_PROCESS_NAMES, title) {
             if (actual_x - geo.x).abs() <= TOLERANCE && (actual_y - geo.y).abs() <= TOLERANCE {
                 log::info!("Position correct after {} attempts", attempt);
                 return;
@@ -262,7 +262,7 @@ fn position_window_with_retry(index: usize, geo: &WindowGeometry) {
         }
 
         // Position not correct, set it
-        set_window_bounds(ALACRITTY_PROCESS_NAMES, index, geo.x, geo.y, geo.width, geo.height);
+        set_window_bounds_by_title(ALACRITTY_PROCESS_NAMES, title, geo.x, geo.y, geo.width, geo.height);
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
 }
