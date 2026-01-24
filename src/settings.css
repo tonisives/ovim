@@ -76,6 +76,22 @@ body {
   background: var(--bg-tertiary);
   padding: 8px 12px 0;
   border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tabs::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 2px;
 }
 
 .tab {
@@ -91,6 +107,8 @@ body {
   font-size: 13px;
   font-weight: 500;
   transition: all 0.15s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .tab:hover {
@@ -116,6 +134,7 @@ body {
   border-radius: 6px 6px 0 0;
   padding: 0 2px;
   margin: 0 4px;
+  flex-shrink: 0;
 }
 
 .tab-group-label {
@@ -1056,4 +1075,38 @@ body {
   background: var(--bg-primary);
   border-radius: 6px;
   display: inline-block;
+}
+
+/* Shortcuts table for Scroll Mode */
+.shortcuts-table {
+  background: var(--bg-primary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.shortcuts-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.shortcuts-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+}
+
+.shortcuts-table tr:last-child td {
+  border-bottom: none;
+}
+
+.shortcuts-table .shortcut-key {
+  font-family: "SF Mono", Monaco, monospace;
+  font-weight: 500;
+  color: var(--accent-color);
+  white-space: nowrap;
+  width: 100px;
+}
+
+.shortcuts-table td:last-child {
+  color: var(--text-secondary);
 }
