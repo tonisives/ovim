@@ -5,7 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use super::applescript_utils::{
-    find_alacritty_window_by_title, focus_alacritty_window_by_index, set_window_bounds_atomic,
+    find_alacritty_window_by_title, focus_alacritty_window_by_index, get_alacritty_window_position,
+    set_window_bounds_atomic,
 };
 use super::process_utils::{find_editor_pid_for_file, resolve_command_path, resolve_terminal_path};
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
@@ -85,10 +86,16 @@ impl TerminalSpawner for AlacrittySpawner {
             None
         };
 
+        // Extract position from geometry for Alacritty's window.position option
+        // Note: Alacritty uses Cocoa coordinates (y=0 at bottom), so we need to convert
+        // We pass None for position here and let AppleScript handle positioning after spawn
+        // because Alacritty's window.position has offset issues with menu bar
+        let position: Option<(i32, i32)> = None;
+
         // Try msg create-window first (faster, reuses existing daemon)
         let msg_args = if let Some(ref script) = shell_script {
             // Use shell wrapper: bash -c 'export ...; cmd'
-            self.build_msg_args_shell(&unique_title, init_columns, init_lines, "bash", "-c", script)
+            self.build_msg_args_shell(&unique_title, init_columns, init_lines, "bash", "-c", script, position)
         } else {
             // Direct editor command
             self.build_msg_args(
@@ -99,6 +106,7 @@ impl TerminalSpawner for AlacrittySpawner {
                 &socket_args,
                 &editor_args,
                 file_path,
+                position,
             )
         };
 
@@ -123,12 +131,14 @@ impl TerminalSpawner for AlacrittySpawner {
                     &editor_args,
                     file_path,
                     custom_env,
+                    position,
                 )?)
             }
         };
 
         // Start a watcher thread to find the window, set bounds, and focus it
-        // This runs AFTER spawning so the window has a chance to appear
+        // Alacritty's startup_mode config can override initial position, so we
+        // keep setting bounds until the position matches (or timeout)
         {
             let title = unique_title.clone();
             let geo = geometry.clone();
@@ -138,7 +148,20 @@ impl TerminalSpawner for AlacrittySpawner {
                     if let Some(index) = find_alacritty_window_by_title(&title) {
                         log::info!("Found window '{}' at index {}", title, index);
                         if let Some(ref g) = geo {
-                            set_window_bounds_atomic("Alacritty", index, g.x, g.y, g.width, g.height);
+                            // Keep setting bounds until position is correct (max 1 second)
+                            for attempt in 0..20 {
+                                // Check current position first
+                                if let Some((actual_x, actual_y)) = get_alacritty_window_position(index) {
+                                    let tolerance = 10;
+                                    if (actual_x - g.x).abs() <= tolerance && (actual_y - g.y).abs() <= tolerance {
+                                        log::info!("Position correct after {} attempts", attempt);
+                                        break;
+                                    }
+                                }
+                                // Position not correct, set it
+                                set_window_bounds_atomic("Alacritty", index, g.x, g.y, g.width, g.height);
+                                std::thread::sleep(std::time::Duration::from_millis(30));
+                            }
                         }
                         // Focus the new window
                         focus_alacritty_window_by_index(index);
@@ -186,36 +209,7 @@ impl AlacrittySpawner {
         shell: &str,
         shell_flag: &str,
         script: &str,
-    ) -> Vec<String> {
-        vec![
-            "msg".to_string(),
-            "create-window".to_string(),
-            "-o".to_string(),
-            format!("window.title=\"{}\"", title),
-            "-o".to_string(),
-            "window.dynamic_title=false".to_string(),
-            "-o".to_string(),
-            "window.startup_mode=\"Windowed\"".to_string(),
-            "-o".to_string(),
-            format!("window.dimensions.columns={}", columns),
-            "-o".to_string(),
-            format!("window.dimensions.lines={}", lines),
-            "-e".to_string(),
-            shell.to_string(),
-            shell_flag.to_string(),
-            script.to_string(),
-        ]
-    }
-
-    fn build_msg_args(
-        &self,
-        title: &str,
-        columns: u32,
-        lines: u32,
-        editor: &str,
-        socket_args: &[String],
-        editor_args: &[&str],
-        file_path: &str,
+        position: Option<(i32, i32)>,
     ) -> Vec<String> {
         let mut args = vec![
             "msg".to_string(),
@@ -230,9 +224,53 @@ impl AlacrittySpawner {
             format!("window.dimensions.columns={}", columns),
             "-o".to_string(),
             format!("window.dimensions.lines={}", lines),
-            "-e".to_string(),
-            editor.to_string(),
         ];
+        if let Some((x, y)) = position {
+            args.push("-o".to_string());
+            args.push(format!("window.position.x={}", x));
+            args.push("-o".to_string());
+            args.push(format!("window.position.y={}", y));
+        }
+        args.push("-e".to_string());
+        args.push(shell.to_string());
+        args.push(shell_flag.to_string());
+        args.push(script.to_string());
+        args
+    }
+
+    fn build_msg_args(
+        &self,
+        title: &str,
+        columns: u32,
+        lines: u32,
+        editor: &str,
+        socket_args: &[String],
+        editor_args: &[&str],
+        file_path: &str,
+        position: Option<(i32, i32)>,
+    ) -> Vec<String> {
+        let mut args = vec![
+            "msg".to_string(),
+            "create-window".to_string(),
+            "-o".to_string(),
+            format!("window.title=\"{}\"", title),
+            "-o".to_string(),
+            "window.dynamic_title=false".to_string(),
+            "-o".to_string(),
+            "window.startup_mode=\"Windowed\"".to_string(),
+            "-o".to_string(),
+            format!("window.dimensions.columns={}", columns),
+            "-o".to_string(),
+            format!("window.dimensions.lines={}", lines),
+        ];
+        if let Some((x, y)) = position {
+            args.push("-o".to_string());
+            args.push(format!("window.position.x={}", x));
+            args.push("-o".to_string());
+            args.push(format!("window.position.y={}", y));
+        }
+        args.push("-e".to_string());
+        args.push(editor.to_string());
         args.extend(socket_args.iter().cloned());
         args.extend(editor_args.iter().map(|s| s.to_string()));
         args.push(file_path.to_string());
@@ -250,6 +288,7 @@ impl AlacrittySpawner {
         editor_args: &[&str],
         file_path: &str,
         custom_env: Option<&HashMap<String, String>>,
+        position: Option<(i32, i32)>,
     ) -> Result<std::process::Child, String> {
         let mut args: Vec<String> = vec![
             "-o".to_string(),
@@ -262,9 +301,15 @@ impl AlacrittySpawner {
             format!("window.dimensions.columns={}", columns),
             "-o".to_string(),
             format!("window.dimensions.lines={}", lines),
-            "-e".to_string(),
-            editor.to_string(),
         ];
+        if let Some((x, y)) = position {
+            args.push("-o".to_string());
+            args.push(format!("window.position.x={}", x));
+            args.push("-o".to_string());
+            args.push(format!("window.position.y={}", y));
+        }
+        args.push("-e".to_string());
+        args.push(editor.to_string());
         args.extend(socket_args.iter().cloned());
         args.extend(editor_args.iter().map(|s| s.to_string()));
         args.push(file_path.to_string());

@@ -223,11 +223,43 @@ pub fn set_window_bounds_by_index(
     }
 }
 
+/// Get the current position of an Alacritty window by index
+pub fn get_alacritty_window_position(index: usize) -> Option<(i32, i32)> {
+    let script = format!(
+        r#"
+        tell application "System Events"
+            repeat with p in (every process whose name is "alacritty" or name is "Alacritty")
+                try
+                    if (count of windows of p) >= {} then
+                        set pos to position of window {} of p
+                        return (item 1 of pos as text) & "," & (item 2 of pos as text)
+                    end if
+                end try
+            end repeat
+        end tell
+        "#,
+        index, index
+    );
+
+    let output = Command::new("osascript").arg("-e").arg(&script).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let pos_str = String::from_utf8_lossy(&output.stdout);
+    let pos_str = pos_str.trim();
+    let (x_str, y_str) = pos_str.split_once(',')?;
+    let x = x_str.trim().parse::<i32>().ok()?;
+    let y = y_str.trim().parse::<i32>().ok()?;
+    Some((x, y))
+}
+
 /// Focus an Alacritty window by index (without bringing all app windows to front)
 #[allow(dead_code)]
 pub fn focus_alacritty_window_by_index(index: usize) {
-    // Use AXRaise to bring the specific window to front and give it keyboard focus.
-    // Search across all alacritty processes (spawned ones are lowercase)
+    // Use AXRaise to bring the specific window to front, then activate the app
+    // to give it keyboard focus. We avoid clicking because that can cause error
+    // sounds when there's a text selection in the background.
     let script = format!(
         r#"
         tell application "System Events"
@@ -237,9 +269,9 @@ pub fn focus_alacritty_window_by_index(index: usize) {
                         set w to window {} of p
                         -- Raise just this window to the front
                         perform action "AXRaise" of w
-                        -- Return the window position for clicking
-                        set winPos to position of w
-                        return (item 1 of winPos) & "," & (item 2 of winPos)
+                        -- Set frontmost to give keyboard focus
+                        set frontmost of p to true
+                        return "ok"
                     end if
                 end try
             end repeat
@@ -253,17 +285,7 @@ pub fn focus_alacritty_window_by_index(index: usize) {
     let output = Command::new("osascript").arg("-e").arg(&script).output();
 
     if let Ok(out) = output {
-        if out.status.success() {
-            // Parse the position and click to give keyboard focus
-            let pos_str = String::from_utf8_lossy(&out.stdout);
-            let pos_str = pos_str.trim();
-            if let Some((x_str, y_str)) = pos_str.split_once(',') {
-                if let (Ok(x), Ok(y)) = (x_str.trim().parse::<i32>(), y_str.trim().parse::<i32>()) {
-                    // Click inside the window to give it keyboard focus
-                    click_at_position(x + 50, y + 50);
-                }
-            }
-        } else {
+        if !out.status.success() {
             log::error!(
                 "Failed to focus window: {}",
                 String::from_utf8_lossy(&out.stderr)
@@ -325,10 +347,11 @@ pub fn set_window_bounds_atomic(
                             set w to window {} of p
                             set position of w to {{{}, {}}}
                             set size of w to {{{}, {}}}
-                            return
+                            return "ok"
                         end if
                     end try
                 end repeat
+                return "no_window_found"
             end tell
             "#,
             index, index, x, y, width, height
@@ -350,7 +373,7 @@ pub fn set_window_bounds_atomic(
         )
     };
 
-    log::info!(
+    log::debug!(
         "Setting window {} index {} to {}x{} at ({}, {})",
         app_name,
         index,
