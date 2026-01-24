@@ -25,6 +25,10 @@ pub enum IpcCommand {
     Normal,
     /// Set to visual mode
     Visual,
+    /// Activate Edit Popup
+    EditPopup,
+    /// Activate Click Mode
+    ClickMode,
     /// Launcher script signals it handled spawning
     LauncherHandled {
         session_id: String,

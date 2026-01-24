@@ -92,6 +92,9 @@ pub struct AppState {
 fn handle_ipc_command(
     state: &mut VimState,
     app_handle: &AppHandle,
+    settings: &Arc<Mutex<Settings>>,
+    edit_session_manager: &Arc<EditSessionManager>,
+    click_mode_manager: &SharedClickModeManager,
     cmd: IpcCommand,
 ) -> IpcResponse {
     match cmd {
@@ -117,6 +120,69 @@ fn handle_ipc_command(
             IpcResponse::Ok
         }
         IpcCommand::SetMode(mode_str) => handle_set_mode(state, app_handle, &mode_str),
+        IpcCommand::EditPopup => {
+            let nvim_settings = {
+                let s = settings.lock().unwrap();
+                if !s.nvim_edit.enabled {
+                    return IpcResponse::Error("Edit Popup is disabled".to_string());
+                }
+                s.nvim_edit.clone()
+            };
+            let manager = Arc::clone(edit_session_manager);
+            std::thread::spawn(move || {
+                if let Err(e) = nvim_edit::trigger_nvim_edit(manager, nvim_settings) {
+                    log::error!("Failed to trigger nvim edit via IPC: {}", e);
+                }
+            });
+            IpcResponse::Ok
+        }
+        IpcCommand::ClickMode => {
+            let is_enabled = {
+                let s = settings.lock().unwrap();
+                s.click_mode.enabled
+            };
+            if !is_enabled {
+                return IpcResponse::Error("Click Mode is disabled".to_string());
+            }
+
+            // Set click mode to activating state
+            {
+                let mut mgr = click_mode_manager.lock().unwrap();
+                if mgr.is_active() {
+                    return IpcResponse::Error("Click Mode is already active".to_string());
+                }
+                mgr.set_activating();
+            }
+
+            let manager = Arc::clone(click_mode_manager);
+            std::thread::spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut mgr = manager.lock().unwrap();
+                    match mgr.activate() {
+                        Ok(elements) => {
+                            log::info!("Click mode activated via IPC with {} elements", elements.len());
+                            let style = click_mode::native_hints::HintStyle::default();
+                            click_mode::native_hints::show_hints(&elements, &style);
+                            if let Some(app) = get_app_handle() {
+                                let _ = app.emit("click-mode-activated", ());
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to activate click mode via IPC: {}", e);
+                            mgr.deactivate();
+                        }
+                    }
+                }));
+
+                if let Err(e) = result {
+                    log::error!("Panic in click mode activation via IPC: {:?}", e);
+                    if let Ok(mut mgr) = manager.lock() {
+                        mgr.deactivate();
+                    }
+                }
+            });
+            IpcResponse::Ok
+        }
         IpcCommand::LauncherHandled {
             session_id,
             editor_pid,
@@ -289,6 +355,11 @@ pub fn run() {
         });
     }
 
+    // Clone for IPC handler before moving into app_state
+    let settings_for_ipc = Arc::clone(&settings);
+    let edit_session_manager_for_ipc = Arc::clone(&edit_session_manager);
+    let click_mode_manager_for_ipc = Arc::clone(&click_mode_manager);
+
     let app_state = AppState {
         settings,
         vim_state: Arc::clone(&vim_state),
@@ -452,12 +523,19 @@ pub fn run() {
                 log::warn!("Failed to install scripts: {}", e);
             }
 
-            let vim_state_for_ipc = Arc::clone(&vim_state);
+            let vim_state_for_ipc2 = Arc::clone(&vim_state);
             let app_handle_for_ipc = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let handler = move |cmd: IpcCommand| -> IpcResponse {
-                    let mut state = vim_state_for_ipc.lock().unwrap();
-                    handle_ipc_command(&mut state, &app_handle_for_ipc, cmd)
+                    let mut state = vim_state_for_ipc2.lock().unwrap();
+                    handle_ipc_command(
+                        &mut state,
+                        &app_handle_for_ipc,
+                        &settings_for_ipc,
+                        &edit_session_manager_for_ipc,
+                        &click_mode_manager_for_ipc,
+                        cmd,
+                    )
                 };
 
                 if let Err(e) = ipc::start_ipc_server(handler).await {
