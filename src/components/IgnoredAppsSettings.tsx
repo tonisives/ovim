@@ -19,6 +19,12 @@ export function IgnoredAppsSettings({ settings, onUpdate }: Props) {
     }
   };
 
+  const handleAddManualApp = (bundleId: string) => {
+    if (!settings.ignored_apps.includes(bundleId)) {
+      onUpdate({ ignored_apps: [...settings.ignored_apps, bundleId] });
+    }
+  };
+
   const handleRemoveApp = (bundleId: string) => {
     onUpdate({
       ignored_apps: settings.ignored_apps.filter((id) => id !== bundleId),
@@ -35,6 +41,7 @@ export function IgnoredAppsSettings({ settings, onUpdate }: Props) {
       <AppList
         items={settings.ignored_apps}
         onAdd={handleAddApp}
+        onAddManual={handleAddManualApp}
         onRemove={handleRemoveApp}
       />
     </div>

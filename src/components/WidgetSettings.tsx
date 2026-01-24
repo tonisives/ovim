@@ -31,6 +31,12 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
     }
   };
 
+  const handleAddManualElectronApp = (bundleId: string) => {
+    if (!settings.electron_apps.includes(bundleId)) {
+      onUpdate({ electron_apps: [...settings.electron_apps, bundleId] });
+    }
+  };
+
   const handleRemoveElectronApp = (bundleId: string) => {
     onUpdate({
       electron_apps: settings.electron_apps.filter((id) => id !== bundleId),
@@ -83,6 +89,7 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
         <AppList
           items={settings.electron_apps}
           onAdd={handleAddElectronApp}
+          onAddManual={handleAddManualElectronApp}
           onRemove={handleRemoveElectronApp}
         />
         <p className="help-text">
