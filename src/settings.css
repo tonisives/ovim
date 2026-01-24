@@ -510,10 +510,10 @@ body {
 @keyframes pulse {
   0%,
   100% {
-    opacity: 1;
+    box-shadow: 0 0 0 2px var(--accent-color);
   }
   50% {
-    opacity: 0.7;
+    box-shadow: 0 0 0 4px var(--accent-hover);
   }
 }
 
@@ -558,7 +558,7 @@ body {
 }
 
 .current-key.clickable.recording {
-  background: var(--accent-bg);
+  background: var(--bg-secondary);
   border-color: var(--accent-color);
   color: var(--accent-color);
   animation: pulse 1.5s infinite;
