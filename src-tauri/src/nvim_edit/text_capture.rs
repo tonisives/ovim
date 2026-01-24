@@ -102,27 +102,16 @@ pub fn capture_text_and_frame(
 }
 
 /// Capture text content from the focused element
-fn capture_text_content(browser_type: Option<BrowserType>) -> String {
-    // For browsers, use clipboard-based capture (Cmd+A, Cmd+C) as it's the most reliable
-    // Both accessibility API and JavaScript DOM access can return mangled text for code editors
-    let mut text = if browser_type.is_some() {
-        log::info!("Browser detected, using clipboard-based text capture");
-        capture_text_via_clipboard()
-            .or_else(|| {
-                log::info!("Clipboard capture failed, falling back to accessibility API");
-                accessibility::get_focused_element_text()
-            })
-            .unwrap_or_default()
-    } else {
-        accessibility::get_focused_element_text().unwrap_or_default()
-    };
+fn capture_text_content(_browser_type: Option<BrowserType>) -> String {
+    // First try accessibility API (doesn't cause beeps)
+    let mut text = accessibility::get_focused_element_text().unwrap_or_default();
 
     let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
     log::info!("Got text: {} chars, preview: {}", text.len(), preview);
 
-    // If still empty, try clipboard-based capture (for non-browser apps)
+    // If accessibility API failed/empty, try clipboard-based capture as fallback
     if text.is_empty() {
-        log::info!("Text capture returned empty, trying clipboard-based capture");
+        log::info!("Accessibility text capture returned empty, trying clipboard-based capture");
         if let Some(captured) = capture_text_via_clipboard() {
             text = captured;
             log::info!("Captured {} chars via clipboard", text.len());

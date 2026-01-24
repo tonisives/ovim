@@ -58,17 +58,31 @@ pub fn trigger_nvim_edit(
     log::info!("Started edit session: {}", session_id);
 
     // 6. Start RPC connection and live sync in background
+    // If clipboard_mode is enabled, skip live sync entirely
     let session = manager.get_session(&session_id)
         .ok_or("Session not found immediately after creation")?;
 
     let live_sync_worked = Arc::new(AtomicBool::new(false));
-    let rpc_handle = spawn_rpc_handler(
-        &session,
-        &settings,
-        Arc::clone(&live_sync_worked),
-        browser_type,
-        initial_cursor,
-    );
+    let clipboard_mode = settings.clipboard_mode;
+
+    let rpc_handle = if clipboard_mode {
+        // In clipboard mode, don't do live sync - but still wait for window to close
+        log::info!("Clipboard mode enabled, skipping live sync");
+        let terminal_type = session.terminal_type.clone();
+        let window_title = session.window_title.clone();
+        thread::spawn(move || {
+            wait_for_window_close(&terminal_type, window_title.as_deref());
+            None
+        })
+    } else {
+        spawn_rpc_handler(
+            &session,
+            &settings,
+            Arc::clone(&live_sync_worked),
+            browser_type,
+            initial_cursor,
+        )
+    };
 
     // 7. Spawn main thread to wait for nvim to exit and restore text
     spawn_completion_handler(
@@ -77,6 +91,7 @@ pub fn trigger_nvim_edit(
         rpc_handle,
         live_sync_worked,
         browser_type,
+        clipboard_mode,
     );
 
     Ok(())
@@ -270,6 +285,7 @@ fn spawn_completion_handler(
     rpc_handle: thread::JoinHandle<Option<RpcResult>>,
     live_sync_worked: Arc<AtomicBool>,
     browser_type: Option<browser_scripting::BrowserType>,
+    clipboard_mode: bool,
 ) {
     thread::spawn(move || {
         let Some(session) = manager.get_session(&session_id) else {
@@ -303,9 +319,13 @@ fn spawn_completion_handler(
             }
         }
 
-        // Check if live sync was working
-        let did_live_sync = live_sync_worked.load(Ordering::SeqCst);
-        log::info!("Live sync status: {}", if did_live_sync { "worked" } else { "not used" });
+        // Check if live sync was working (but ignore if clipboard_mode is enabled)
+        let did_live_sync = if clipboard_mode {
+            false // Force clipboard paste in clipboard mode
+        } else {
+            live_sync_worked.load(Ordering::SeqCst)
+        };
+        log::info!("Live sync status: {}, clipboard_mode: {}", if did_live_sync { "worked" } else { "not used" }, clipboard_mode);
 
         // Complete the session - skip clipboard paste if live sync worked
         if let Err(e) = complete_edit_session(&manager, &session_id, did_live_sync) {
