@@ -102,10 +102,10 @@ impl Default for NvimEditSettings {
             enabled: true,
             shortcut_key: "e".to_string(),
             shortcut_modifiers: VimKeyModifiers {
-                shift: true,
-                control: false,
+                shift: false,
+                control: true,
                 option: false,
-                command: true, // Cmd+Shift+E
+                command: true, // Ctrl+Cmd+E
             },
             terminal: "alacritty".to_string(),
             terminal_path: "".to_string(), // Empty means auto-detect

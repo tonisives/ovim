@@ -68,23 +68,14 @@ export function ConfigTab({
       <div className="form-group">
         <label>Keyboard shortcut</label>
         <div className="key-display">
-          {isRecording ? (
-            <button type="button" className="record-key-btn recording" onClick={onCancelRecord}>
-              Press any key...
-            </button>
-          ) : (
-            <>
-              <span className="current-key">{displayName || nvimEdit.shortcut_key}</span>
-              <button
-                type="button"
-                className="record-key-btn"
-                onClick={onRecordKey}
-                disabled={!nvimEdit.enabled}
-              >
-                Record Key
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            className={`current-key clickable${isRecording ? " recording" : ""}`}
+            onClick={isRecording ? onCancelRecord : onRecordKey}
+            disabled={!nvimEdit.enabled && !isRecording}
+          >
+            {isRecording ? "Press any key..." : displayName || nvimEdit.shortcut_key}
+          </button>
         </div>
       </div>
 
