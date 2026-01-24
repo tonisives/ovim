@@ -4,13 +4,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
-use super::applescript_utils::find_window_by_title;
 use super::process_utils::{find_editor_pid_for_file, resolve_command_path, resolve_terminal_path};
 use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
-/// Process names to search for Alacritty windows (spawned processes are lowercase)
-const ALACRITTY_PROCESS_NAMES: &[&str] = &["alacritty", "Alacritty"];
 
 pub struct AlacrittySpawner;
 
@@ -99,6 +96,7 @@ impl TerminalSpawner for AlacrittySpawner {
             .with_geometry(geometry.as_ref());
 
         // Try msg create-window first (faster, reuses existing daemon)
+        // Note: skipped when geometry is specified since msg doesn't support position
         let spawn_result = self.try_msg_spawn(&config, custom_env)
             .or_else(|| self.fallback_spawn(&config, custom_env));
 
@@ -107,9 +105,6 @@ impl TerminalSpawner for AlacrittySpawner {
             Some(Err(e)) => return Err(e),
             None => None,
         };
-
-        // Start window positioning thread
-        self.spawn_position_watcher(&config.title, geometry);
 
         // Find editor PID
         let pid = find_editor_pid_for_file(file_path, settings.editor_process_name());
@@ -256,38 +251,6 @@ impl AlacrittySpawner {
         script
     }
 
-    /// Spawn a thread to find the window and ensure size is correct
-    /// Position is set at spawn time via window.position.x/y options
-    fn spawn_position_watcher(&self, title: &str, geometry: Option<WindowGeometry>) {
-        let title = title.to_string();
-        let geo = geometry;
-
-        std::thread::spawn(move || {
-            // Poll rapidly to catch the window as soon as it appears
-            for _attempt in 0..200 {
-                if find_window_by_title(ALACRITTY_PROCESS_NAMES, &title).is_some() {
-                    log::info!("Found window '{}'", title);
-
-                    // Only set size as a fallback - position should already be correct from spawn
-                    if let Some(ref g) = geo {
-                        ensure_window_size(&title, g);
-                    }
-
-                    return;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            log::warn!("Timeout waiting for Alacritty window '{}'", title);
-        });
-    }
-}
-
-/// Ensure window size is correct (position is set at spawn time)
-fn ensure_window_size(title: &str, geo: &WindowGeometry) {
-    use super::applescript_utils::set_window_size_by_title;
-
-    // Single attempt to set size - position should already be correct from spawn
-    set_window_size_by_title(ALACRITTY_PROCESS_NAMES, title, geo.width, geo.height);
 }
 
 /// Escape a string for use in shell

@@ -43,6 +43,7 @@ pub fn move_window_to_position(app_name: &str, x: i32, y: i32) {
 
 /// Find a window by title across all processes matching the given names (case-insensitive)
 /// Returns 1-based window index if found
+#[allow(dead_code)]
 pub fn find_window_by_title(process_names: &[&str], title: &str) -> Option<usize> {
     let name_conditions: Vec<String> = process_names
         .iter()
@@ -127,6 +128,7 @@ pub fn get_window_position_by_title(process_names: &[&str], title: &str) -> Opti
 }
 
 /// Set window size by title (without changing position)
+#[allow(dead_code)]
 pub fn set_window_size_by_title(process_names: &[&str], title: &str, width: u32, height: u32) {
     let name_conditions: Vec<String> = process_names
         .iter()
