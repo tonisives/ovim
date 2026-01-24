@@ -102,18 +102,21 @@ struct RpcResult {
     final_cursor: Option<browser_scripting::CursorPosition>,
 }
 
+/// Process names for each terminal type (used for window detection)
+fn terminal_process_names(terminal_type: &terminals::TerminalType) -> Option<&'static [&'static str]> {
+    match terminal_type {
+        terminals::TerminalType::Alacritty => Some(&["alacritty", "Alacritty"]),
+        // Add other terminals here as needed
+        _ => None,
+    }
+}
+
 /// Check if a terminal window still exists
 fn window_exists(terminal_type: &terminals::TerminalType, window_title: Option<&str>) -> bool {
-    match terminal_type {
-        terminals::TerminalType::Alacritty => {
-            if let Some(title) = window_title {
-                terminals::applescript_utils::find_alacritty_window_by_title(title).is_some()
-            } else {
-                true // Can't check without title, assume exists
-            }
-        }
-        // For other terminals, assume window exists (fall back to socket check)
-        _ => true,
+    if let (Some(names), Some(title)) = (terminal_process_names(terminal_type), window_title) {
+        terminals::applescript_utils::find_window_by_title(names, title).is_some()
+    } else {
+        true // Can't check without title or process names, assume exists
     }
 }
 
