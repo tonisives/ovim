@@ -11,6 +11,8 @@ ovim insert        # Switch to insert mode (alias: i)
 ovim normal        # Switch to normal mode (alias: n)
 ovim visual        # Switch to visual mode (alias: v)
 ovim set <mode>    # Set mode to insert/normal/visual
+ovim edit          # Activate Edit Popup (alias: e)
+ovim click         # Activate Click Mode (alias: c)
 ```
 
 ## Installation
