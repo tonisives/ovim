@@ -173,6 +173,14 @@ fn build_set_element_text_js(text: &str) -> String {
         selection.removeAllRanges();
         selection.addRange(range);
 
+        // Check for Lexical editor - these only respond to trusted events
+        // so synthetic JS events won't work. Return a specific error so we
+        // can fall back to clipboard mode.
+        var isLexical = el.hasAttribute('data-lexical-editor') || el.__lexicalEditor;
+        if (isLexical) {{
+            return 'unsupported_lexical';
+        }}
+
         // Try insertFromPaste first - code editors handle paste as literal text
         // without triggering auto-indent or formatting
         var dataTransfer = new DataTransfer();
@@ -184,8 +192,10 @@ fn build_set_element_text_js(text: &str) -> String {
             bubbles: true,
             cancelable: true
         }});
-        var handled = !el.dispatchEvent(inputEvent);
-        if (handled) return 'ok';
+        var prevText = el.innerText;
+        el.dispatchEvent(inputEvent);
+        // Verify text actually changed (some editors handle the event but do nothing)
+        if (el.innerText !== prevText) return 'ok_paste';
 
         // Fallback: try insertReplacementText
         inputEvent = new InputEvent('beforeinput', {{
@@ -194,18 +204,20 @@ fn build_set_element_text_js(text: &str) -> String {
             bubbles: true,
             cancelable: true
         }});
-        handled = !el.dispatchEvent(inputEvent);
-        if (handled) return 'ok';
+        el.dispatchEvent(inputEvent);
+        if (el.innerText !== prevText) return 'ok_replacement';
 
-        // Fallback: try insertText
-        inputEvent = new InputEvent('beforeinput', {{
-            inputType: 'insertText',
-            data: text,
-            bubbles: true,
-            cancelable: true
-        }});
-        handled = !el.dispatchEvent(inputEvent);
-        if (handled) return 'ok';
+        // Fallback: try character-by-character insertText (works for most editors)
+        for (var i = 0; i < text.length; i++) {{
+            var charEvent = new InputEvent('beforeinput', {{
+                inputType: 'insertText',
+                data: text[i],
+                bubbles: true,
+                cancelable: true
+            }});
+            el.dispatchEvent(charEvent);
+        }}
+        if (el.innerText !== prevText) return 'ok_inserttext';
 
         // Last resort: set innerText directly (loses rich formatting but preserves whitespace)
         el.innerText = text;
@@ -245,8 +257,9 @@ pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result
         }
     };
 
-    // Debug: log script length and first/last parts
-    log::debug!("AppleScript length: {}, first 200: {}", script.len(), &script[..script.len().min(200)]);
+    // Debug: write script to file for inspection
+    let _ = std::fs::write("/tmp/set_text_script.txt", &script);
+    log::info!("set_browser_element_text: browser={:?}, text_len={}, script_len={}", browser_type, text.len(), script.len());
 
     let output = Command::new("osascript")
         .arg("-e")
@@ -254,15 +267,17 @@ pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result
         .output()
         .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
 
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    log::info!("set_browser_element_text: exit_code={}, stdout='{}', stderr='{}'", output.status, stdout, stderr);
+
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("AppleScript failed: {}", stderr));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
     if stdout.starts_with("ok") {
-        log::debug!("Browser text sync succeeded: {}", stdout);
+        log::info!("Browser text sync succeeded: {}", stdout);
         Ok(())
     } else {
         Err(format!("JavaScript returned: {}", stdout))
@@ -516,9 +531,8 @@ end tell"#,
 
 /// Build AppleScript to execute arbitrary JavaScript in Safari
 fn build_safari_execute_script(js: &str) -> String {
-    // Remove newlines and escape quotes for AppleScript string
+    // Escape quotes for AppleScript string - keep newlines as they work fine
     let js_escaped = js
-        .replace('\n', " ")
         .replace('\r', "")
         .replace('"', "\\\"");
     format!(
@@ -539,9 +553,8 @@ end tell"#,
 
 /// Build AppleScript to execute arbitrary JavaScript in Chrome-based browsers
 fn build_chrome_execute_script(app_name: &str, js: &str) -> String {
-    // Remove newlines and escape quotes for AppleScript string
+    // Escape quotes for AppleScript string - keep newlines as they work fine
     let js_escaped = js
-        .replace('\n', " ")
         .replace('\r', "")
         .replace('"', "\\\"");
     format!(
