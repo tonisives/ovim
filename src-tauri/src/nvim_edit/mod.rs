@@ -160,6 +160,8 @@ fn spawn_rpc_handler(
 
             let sync_flag = Arc::clone(&live_sync_worked);
             let element_for_callback = focus_element.clone();
+            let cached_element_id = Arc::new(std::sync::Mutex::new(None::<String>));
+            let cached_id_for_callback = Arc::clone(&cached_element_id);
 
             let on_lines = Arc::new(move |lines: Vec<String>| {
                 handle_live_sync_update(
@@ -167,6 +169,7 @@ fn spawn_rpc_handler(
                     browser_type,
                     element_for_callback.as_ref(),
                     &sync_flag,
+                    &cached_id_for_callback,
                 );
             });
 
@@ -238,6 +241,7 @@ fn handle_live_sync_update(
     browser_type: Option<browser_scripting::BrowserType>,
     focus_element: Option<&accessibility::AXElementHandle>,
     sync_flag: &AtomicBool,
+    cached_element_id: &std::sync::Mutex<Option<String>>,
 ) {
     let text = lines.join("\n");
     let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
@@ -246,10 +250,18 @@ fn handle_live_sync_update(
     // For browsers, use browser scripting (JS) which works with code editors
     let mut skip_ax_fallback = false;
     if let Some(bt) = browser_type {
-        match browser_scripting::set_browser_element_text(bt, &text) {
-            Ok(()) => {
+        // Get cached element ID if any
+        let target_id = cached_element_id.lock().ok().and_then(|g| g.clone());
+        match browser_scripting::set_browser_element_text(bt, &text, target_id.as_deref()) {
+            Ok(new_element_id) => {
                 sync_flag.store(true, Ordering::SeqCst);
                 log::info!("Live sync (browser JS): updated text field ({} chars)", text.len());
+                // Cache the element ID for subsequent calls
+                if let Some(id) = new_element_id {
+                    if let Ok(mut guard) = cached_element_id.lock() {
+                        *guard = Some(id);
+                    }
+                }
                 return;
             }
             Err(e) => {

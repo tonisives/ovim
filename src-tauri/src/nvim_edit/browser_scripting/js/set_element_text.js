@@ -1,6 +1,8 @@
 // Set text on the focused element (for live sync in webviews)
 // This handles input, textarea, and contenteditable elements
-// Template variable: {{BASE64_TEXT}} - base64 encoded text to set
+// Template variables:
+//   {{BASE64_TEXT}} - base64 encoded text to set
+//   {{TARGET_ELEMENT_ID}} - optional element ID from previous call (for Draft.js)
 // Returns "ok_*" on success, error message on failure
 (function () {
   // === Helper Functions ===
@@ -13,31 +15,14 @@
     return el;
   }
 
-  // Check if element IS a Lexical editor or is INSIDE one (check ancestors, not descendants)
+  // Check if element IS a Lexical editor or is INSIDE one
   function findLexicalEditor(el) {
-    // Check the element itself
     if (el.hasAttribute && el.hasAttribute("data-lexical-editor")) {
       return el;
     }
-    // Check ancestors using closest (for regular DOM)
     if (el.closest) {
       var lexicalEl = el.closest("[data-lexical-editor]");
       if (lexicalEl) return lexicalEl;
-    }
-    // For shadow DOM, we need to check the host chain
-    var current = el;
-    while (current) {
-      if (current.hasAttribute && current.hasAttribute("data-lexical-editor")) {
-        return current;
-      }
-      // Move to parent or shadow host
-      if (current.parentElement) {
-        current = current.parentElement;
-      } else if (current.getRootNode && current.getRootNode().host) {
-        current = current.getRootNode().host;
-      } else {
-        break;
-      }
     }
     return null;
   }
@@ -49,11 +34,11 @@
     if (document.querySelector(".cm-editor")) return "cm6";
     if (document.querySelector(".CodeMirror")) return "cm5";
     if (typeof ace !== "undefined") return "ace";
+    if (document.querySelector(".DraftEditor-root")) return "draftjs";
     return "none";
   }
 
   // === Monaco Editor Handler ===
-  // Uses script injection to access page context (works with coderpad.io, VS Code web, etc.)
   function tryMonaco(text) {
     if (!document.querySelector(".monaco-editor")) return null;
 
@@ -67,7 +52,6 @@
     commDiv.setAttribute("data-text", text);
     commDiv.setAttribute("data-result", "");
 
-    // Inject script that runs in page context
     var script = document.createElement("script");
     script.textContent =
       '(function() {' +
@@ -75,7 +59,6 @@
       'if (!commDiv) { commDiv.setAttribute("data-result", "no_comm_div"); return; }' +
       'var textToSet = commDiv.getAttribute("data-text") || "";' +
       'try {' +
-      // Method 1: Global editor variable (coderpad.io)
       'if (typeof editor !== "undefined" && typeof editor.executeEdits === "function" && typeof editor.getModel === "function") {' +
       'var model = editor.getModel();' +
       'if (model) {' +
@@ -85,7 +68,6 @@
       'return;' +
       '}' +
       '}' +
-      // Method 2: monaco.editor.getEditors() (boot.dev, standard Monaco)
       'if (typeof monaco !== "undefined" && monaco.editor && monaco.editor.getEditors) {' +
       'var editors = monaco.editor.getEditors();' +
       'if (editors && editors.length > 0) {' +
@@ -152,8 +134,30 @@
     return null;
   }
 
+  // === Draft.js Editor Handler (Twitter/X, Facebook, etc.) ===
+  function tryDraftJS(el, text) {
+    if (!el || !el.closest) return null;
+    var draftRoot = el.closest(".DraftEditor-root");
+    if (!draftRoot) return null;
+
+    var editable = draftRoot.querySelector('[contenteditable="true"]');
+    if (!editable) return null;
+
+    // Assign ID for subsequent lookups
+    if (!editable.id) {
+      editable.id = "ovim-editor-" + Date.now();
+    }
+
+    editable.focus();
+    document.execCommand("selectAll", false, null);
+    var success = document.execCommand("insertText", false, text);
+    if (success) {
+      return "ok_draftjs:" + editable.id;
+    }
+    return null;
+  }
+
   // === Lexical Editor Handler ===
-  // Uses script injection to access page context
   function tryLexical(el, text) {
     if (!el.hasAttribute("data-lexical-editor")) return null;
 
@@ -167,9 +171,7 @@
     commDiv.setAttribute("data-text", text);
     commDiv.setAttribute("data-result", "");
 
-    // Inject script that runs in page context
     var script = document.createElement("script");
-    script.id = "__ovimLexicalScript";
     script.textContent =
       '(function() {' +
       'var commDiv = document.getElementById("__ovimComm");' +
@@ -180,46 +182,14 @@
       'var editor = el.__lexicalEditor;' +
       'if (!editor) { commDiv.setAttribute("data-result", "no_editor"); return; }' +
       'try {' +
-      // Build Lexical state JSON
       'var lines = textToSet.split(String.fromCharCode(10));' +
       'var paragraphs = lines.map(function(line) {' +
       'if (line.length === 0) {' +
-      'return {' +
-      'children: [],' +
-      'direction: null,' +
-      'format: "",' +
-      'indent: 0,' +
-      'type: "paragraph",' +
-      'version: 1' +
-      '};' +
+      'return { children: [], direction: null, format: "", indent: 0, type: "paragraph", version: 1 };' +
       '}' +
-      'return {' +
-      'children: [{' +
-      'detail: 0,' +
-      'format: 0,' +
-      'mode: "normal",' +
-      'style: "",' +
-      'text: line,' +
-      'type: "text",' +
-      'version: 1' +
-      '}],' +
-      'direction: null,' +
-      'format: "",' +
-      'indent: 0,' +
-      'type: "paragraph",' +
-      'version: 1' +
-      '};' +
+      'return { children: [{ detail: 0, format: 0, mode: "normal", style: "", text: line, type: "text", version: 1 }], direction: null, format: "", indent: 0, type: "paragraph", version: 1 };' +
       '});' +
-      'var stateJson = {' +
-      'root: {' +
-      'children: paragraphs,' +
-      'direction: null,' +
-      'format: "",' +
-      'indent: 0,' +
-      'type: "root",' +
-      'version: 1' +
-      '}' +
-      '};' +
+      'var stateJson = { root: { children: paragraphs, direction: null, format: "", indent: 0, type: "root", version: 1 } };' +
       'var newState = editor.parseEditorState(JSON.stringify(stateJson));' +
       'editor.setEditorState(newState);' +
       'commDiv.setAttribute("data-result", "ok_lexical");' +
@@ -240,7 +210,6 @@
   function tryContentEditable(el, text, editorInfo) {
     if (!el.isContentEditable) return null;
 
-    // Select all content first
     var selection = window.getSelection();
     var range = document.createRange();
     range.selectNodeContents(el);
@@ -253,7 +222,7 @@
 
     var prevText = el.innerText;
 
-    // Try insertFromPaste - code editors handle paste as literal text
+    // Try insertFromPaste
     var dataTransfer = new DataTransfer();
     dataTransfer.setData("text/plain", text);
     var inputEvent = new InputEvent("beforeinput", {
@@ -276,18 +245,6 @@
     el.dispatchEvent(inputEvent);
     if (el.innerText !== prevText) return "ok_replacement";
 
-    // Try character-by-character insertText
-    for (var i = 0; i < text.length; i++) {
-      var charEvent = new InputEvent("beforeinput", {
-        inputType: "insertText",
-        data: text[i],
-        bubbles: true,
-        cancelable: true,
-      });
-      el.dispatchEvent(charEvent);
-    }
-    if (el.innerText !== prevText) return "ok_inserttext";
-
     // Last resort: set innerText directly
     el.innerText = text;
     el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -298,7 +255,6 @@
   function tryInputTextarea(el, text, editorInfo) {
     if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return null;
 
-    // For React/Vue controlled inputs, use native setter
     var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
       el.tagName === "INPUT"
         ? window.HTMLInputElement.prototype
@@ -306,17 +262,44 @@
       "value"
     ).set;
     nativeInputValueSetter.call(el, text);
-
-    // Dispatch input event to notify frameworks
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return "ok_textarea_" + editorInfo;
   }
 
   // === Main Logic ===
 
+  var text = atob("{{BASE64_TEXT}}");
+
+  // If we have a cached element ID, try to use it (Draft.js support)
+  var targetId = "{{TARGET_ELEMENT_ID}}";
+  if (targetId && targetId !== "" && targetId !== "{{" + "TARGET_ELEMENT_ID}}") {
+    var targetEl = document.getElementById(targetId);
+    if (targetEl) {
+      targetEl.focus();
+      document.execCommand("selectAll", false, null);
+      if (document.execCommand("insertText", false, text)) {
+        return "ok_cached:" + targetId;
+      }
+    }
+    // Draft.js may have recreated the element - find it again
+    var draftRoot = document.querySelector(".DraftEditor-root");
+    if (draftRoot) {
+      var editable = draftRoot.querySelector('[contenteditable="true"]');
+      if (editable) {
+        editable.id = targetId;
+        editable.focus();
+        document.execCommand("selectAll", false, null);
+        if (document.execCommand("insertText", false, text)) {
+          return "ok_draftjs_refound:" + targetId;
+        }
+      }
+    }
+  }
+
   var el = document.activeElement;
-  if (!el || el === document.body || el === document.documentElement)
+  if (!el || el === document.body || el === document.documentElement) {
     return "no_element";
+  }
 
   // Handle iframe
   if (el.tagName === "IFRAME") {
@@ -333,17 +316,13 @@
   // Handle shadow DOM
   el = findDeepActiveElement(el);
 
-  // Check for Lexical editor within focused element's tree
+  // Check for Lexical editor
   var lexicalEl = findLexicalEditor(el);
   if (lexicalEl) {
     el = lexicalEl;
   }
 
-  // Decode base64-encoded text
-  var text = atob("{{BASE64_TEXT}}");
   var editorInfo = detectEditorType();
-
-  // Try each editor type in order
   var result;
 
   result = tryMonaco(text);
@@ -356,6 +335,9 @@
   if (result) return result;
 
   result = tryAce(text);
+  if (result) return result;
+
+  result = tryDraftJS(el, text);
   if (result) return result;
 
   result = tryContentEditable(el, text, editorInfo);

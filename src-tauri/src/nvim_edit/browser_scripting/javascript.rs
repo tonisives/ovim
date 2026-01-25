@@ -131,11 +131,14 @@ pub fn build_set_cursor_position_js(line: usize, column: usize) -> String {
 }
 
 /// JavaScript to set text on the focused element (for live sync in webviews)
-/// Returns "ok" on success, error message on failure
-pub fn build_set_element_text_js(text: &str) -> String {
+/// Returns "ok_*" on success (may include element ID after colon), error message on failure
+/// If target_element_id is provided, will target that specific element
+pub fn build_set_element_text_js(text: &str, target_element_id: Option<&str>) -> String {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     let encoded = STANDARD.encode(text.as_bytes());
-    let js = SET_ELEMENT_TEXT_JS_TEMPLATE.replace("{{BASE64_TEXT}}", &encoded);
+    let js = SET_ELEMENT_TEXT_JS_TEMPLATE
+        .replace("{{BASE64_TEXT}}", &encoded)
+        .replace("{{TARGET_ELEMENT_ID}}", target_element_id.unwrap_or(""));
     minify_js(&js)
 }
 
@@ -178,6 +181,7 @@ comment */ var y = 2;"#;
         let _ = &*GET_CURSOR_POSITION_JS;
         let _ = &*GET_TEXT_AND_CURSOR_JS;
         let _ = build_set_cursor_position_js(0, 0);
-        let _ = build_set_element_text_js("test");
+        let _ = build_set_element_text_js("test", None);
+        let _ = build_set_element_text_js("test", Some("my-element-id"));
     }
 }

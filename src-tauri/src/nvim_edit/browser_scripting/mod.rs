@@ -22,18 +22,24 @@ use parsing::{parse_cursor_position_json, parse_text_and_cursor_json, parse_view
 use types::viewport_to_element_frame;
 
 /// Set text on the focused element in a browser using AppleScript + JavaScript
-/// Returns Ok(()) on success, Err with message on failure
-pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result<(), String> {
-    let js = build_set_element_text_js(text);
+/// Returns Ok(Option<element_id>) on success, Err with message on failure
+/// The element_id can be passed to subsequent calls to target the same element
+pub fn set_browser_element_text(
+    browser_type: BrowserType,
+    text: &str,
+    target_element_id: Option<&str>,
+) -> Result<Option<String>, String> {
+    let js = build_set_element_text_js(text, target_element_id);
     let script = build_execute_script(browser_type, &js);
 
     // Debug: write script to file for inspection
     let _ = std::fs::write("/tmp/set_text_script.txt", &script);
     log::info!(
-        "set_browser_element_text: browser={:?}, text_len={}, script_len={}",
+        "set_browser_element_text: browser={:?}, text_len={}, script_len={}, target_id={:?}",
         browser_type,
         text.len(),
-        script.len()
+        script.len(),
+        target_element_id
     );
 
     let output = Command::new("osascript")
@@ -58,7 +64,13 @@ pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result
 
     if stdout.starts_with("ok") {
         log::info!("Browser text sync succeeded: {}", stdout);
-        Ok(())
+        // Extract element ID if present (format: "ok_draftjs:element-id")
+        let element_id = if let Some(colon_pos) = stdout.find(':') {
+            Some(stdout[colon_pos + 1..].to_string())
+        } else {
+            None
+        };
+        Ok(element_id)
     } else {
         Err(format!("JavaScript returned: {}", stdout))
     }
