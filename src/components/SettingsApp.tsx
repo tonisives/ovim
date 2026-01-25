@@ -14,6 +14,8 @@ export interface VimKeyModifiers {
   command: boolean;
 }
 
+export type DoubleTapModifier = "none" | "command" | "option" | "control" | "shift" | "escape";
+
 export interface NvimEditSettings {
   enabled: boolean;
   shortcut_key: string;
@@ -28,30 +30,14 @@ export interface NvimEditSettings {
   live_sync_enabled: boolean;
   use_custom_script: boolean;
   clipboard_mode: boolean;
+  double_tap_modifier: DoubleTapModifier;
 }
 
 export interface ClickModeSettings {
   enabled: boolean;
   shortcut_key: string;
   shortcut_modifiers: VimKeyModifiers;
-  hint_chars: string;
-  show_search_bar: boolean;
-  hint_opacity: number;
-  hint_font_size: number;
-  hint_bg_color: string;
-  hint_text_color: string;
-  // Advanced timing settings
-  ax_stabilization_delay_ms: number;
-  cache_ttl_ms: number;
-  // Advanced traversal settings
-  max_depth: number;
-  max_elements: number;
-}
-
-export interface ClickModeSettings {
-  enabled: boolean;
-  shortcut_key: string;
-  shortcut_modifiers: VimKeyModifiers;
+  double_tap_modifier: DoubleTapModifier;
   hint_chars: string;
   show_search_bar: boolean;
   hint_opacity: number;

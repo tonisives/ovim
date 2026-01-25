@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::click_mode::DoubleTapModifier;
 use super::VimKeyModifiers;
 
 /// Supported editor types for Edit Popup
@@ -94,18 +95,21 @@ pub struct NvimEditSettings {
     /// When false (default), uses JavaScript for browsers and accessibility API for native apps
     #[serde(default)]
     pub clipboard_mode: bool,
+    /// Double-tap modifier to activate edit mode (alternative to keyboard shortcut)
+    #[serde(default)]
+    pub double_tap_modifier: DoubleTapModifier,
 }
 
 impl Default for NvimEditSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            shortcut_key: "e".to_string(),
+            shortcut_key: "".to_string(), // Disabled by default
             shortcut_modifiers: VimKeyModifiers {
                 shift: false,
-                control: true,
+                control: false,
                 option: false,
-                command: true, // Ctrl+Cmd+E
+                command: false,
             },
             terminal: "alacritty".to_string(),
             terminal_path: "".to_string(), // Empty means auto-detect
@@ -117,6 +121,7 @@ impl Default for NvimEditSettings {
             live_sync_enabled: true, // BETA feature, enabled by default
             use_custom_script: false,
             clipboard_mode: false, // Use smart detection by default
+            double_tap_modifier: DoubleTapModifier::Command, // Cmd+Cmd by default
         }
     }
 }

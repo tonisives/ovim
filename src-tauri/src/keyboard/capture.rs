@@ -16,6 +16,10 @@ pub type MouseEventCallback = Box<dyn Fn(MouseClickEvent) -> bool + Send + 'stat
 /// Scroll event callback type - called for scroll wheel events
 pub type ScrollEventCallback = Box<dyn Fn() + Send + 'static>;
 
+/// Flags changed callback type - called when modifier keys are pressed/released
+/// Parameters are the current modifier state (command, option, shift, control)
+pub type FlagsChangedCallback = Box<dyn Fn(Modifiers) + Send + 'static>;
+
 /// Represents a mouse click event
 #[derive(Debug, Clone, Copy)]
 pub struct MouseClickEvent {
@@ -38,6 +42,7 @@ pub struct KeyboardCapture {
     callback: Arc<Mutex<Option<KeyEventCallback>>>,
     mouse_callback: Arc<Mutex<Option<MouseEventCallback>>>,
     scroll_callback: Arc<Mutex<Option<ScrollEventCallback>>>,
+    flags_changed_callback: Arc<Mutex<Option<FlagsChangedCallback>>>,
     running: Arc<Mutex<bool>>,
 }
 
@@ -47,6 +52,7 @@ impl KeyboardCapture {
             callback: Arc::new(Mutex::new(None)),
             mouse_callback: Arc::new(Mutex::new(None)),
             scroll_callback: Arc::new(Mutex::new(None)),
+            flags_changed_callback: Arc::new(Mutex::new(None)),
             running: Arc::new(Mutex::new(false)),
         }
     }
@@ -81,6 +87,15 @@ impl KeyboardCapture {
         *cb = Some(Box::new(callback));
     }
 
+    /// Set the callback for flags changed events (modifier key press/release)
+    pub fn set_flags_changed_callback<F>(&self, callback: F)
+    where
+        F: Fn(Modifiers) + Send + 'static,
+    {
+        let mut cb = self.flags_changed_callback.lock().unwrap();
+        *cb = Some(Box::new(callback));
+    }
+
     /// Start capturing keyboard events
     /// This spawns a new thread with its own run loop
     pub fn start(&self) -> Result<(), String> {
@@ -94,6 +109,7 @@ impl KeyboardCapture {
         let callback = Arc::clone(&self.callback);
         let mouse_callback = Arc::clone(&self.mouse_callback);
         let scroll_callback = Arc::clone(&self.scroll_callback);
+        let flags_changed_callback = Arc::clone(&self.flags_changed_callback);
         let running_flag = Arc::clone(&self.running);
 
         // Flag to signal that tap needs re-enabling
@@ -163,8 +179,15 @@ impl KeyboardCapture {
                         return CallbackResult::Keep;
                     }
 
-                    // Skip FlagsChanged events (modifier key changes) - pass through
+                    // Handle FlagsChanged events (modifier key changes)
                     if is_event_type(event_type, CGEventType::FlagsChanged) {
+                        let flags = event.get_flags();
+                        let modifiers = Modifiers::from_cg_flags(flags.bits());
+                        let cb_lock = flags_changed_callback.lock().unwrap();
+                        if let Some(ref cb) = *cb_lock {
+                            cb(modifiers);
+                        }
+                        // Always pass through modifier events
                         return CallbackResult::Keep;
                     }
 

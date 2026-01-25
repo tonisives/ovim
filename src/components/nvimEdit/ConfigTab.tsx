@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog"
 import { invoke } from "@tauri-apps/api/core"
-import type { NvimEditSettings } from "../SettingsApp"
+import type { NvimEditSettings, DoubleTapModifier } from "../SettingsApp"
 import {
   type PathValidation,
   TERMINAL_OPTIONS,
@@ -66,16 +66,86 @@ export function ConfigTab({
       </div>
 
       <div className="form-group">
-        <label>Keyboard shortcut</label>
-        <div className="key-display">
-          <button
-            type="button"
-            className={`current-key clickable${isRecording ? " recording" : ""}`}
-            onClick={isRecording ? onCancelRecord : onRecordKey}
-            disabled={!nvimEdit.enabled && !isRecording}
-          >
-            {isRecording ? "Press any key..." : displayName || nvimEdit.shortcut_key}
-          </button>
+        <label>Activation</label>
+        <div className="activation-row">
+          <div className="activation-item">
+            <span className="activation-label">Shortcut</span>
+            <div className="activation-input-group">
+              {nvimEdit.shortcut_key ? (
+                <>
+                  <button
+                    type="button"
+                    className={`current-key clickable${isRecording ? " recording" : ""}`}
+                    onClick={isRecording ? onCancelRecord : onRecordKey}
+                    disabled={!nvimEdit.enabled && !isRecording}
+                  >
+                    {isRecording ? "Press any key..." : displayName || nvimEdit.shortcut_key}
+                  </button>
+                  <button
+                    type="button"
+                    className="activation-clear-btn"
+                    onClick={() => onUpdate({ shortcut_key: "", shortcut_modifiers: { shift: false, control: false, option: false, command: false } })}
+                    disabled={!nvimEdit.enabled}
+                    title="Disable shortcut"
+                  >
+                    x
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className={`current-key clickable placeholder${isRecording ? " recording" : ""}`}
+                  onClick={isRecording ? onCancelRecord : onRecordKey}
+                  disabled={!nvimEdit.enabled && !isRecording}
+                >
+                  {isRecording ? "Press any key..." : "Set shortcut..."}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="activation-item">
+            <span className="activation-label">Double-tap</span>
+            <div className="activation-input-group">
+              {nvimEdit.double_tap_modifier && nvimEdit.double_tap_modifier !== "none" ? (
+                <>
+                  <select
+                    value={nvimEdit.double_tap_modifier}
+                    onChange={(e) => onUpdate({ double_tap_modifier: e.target.value as DoubleTapModifier })}
+                    disabled={!nvimEdit.enabled}
+                  >
+                    <option value="command">Cmd+Cmd</option>
+                    <option value="option">Opt+Opt</option>
+                    <option value="control">Ctrl+Ctrl</option>
+                    <option value="shift">Shift+Shift</option>
+                    <option value="escape">Esc+Esc</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="activation-clear-btn"
+                    onClick={() => onUpdate({ double_tap_modifier: "none" })}
+                    disabled={!nvimEdit.enabled}
+                    title="Disable double-tap"
+                  >
+                    x
+                  </button>
+                </>
+              ) : (
+                <select
+                  value="none"
+                  onChange={(e) => onUpdate({ double_tap_modifier: e.target.value as DoubleTapModifier })}
+                  disabled={!nvimEdit.enabled}
+                  className="placeholder"
+                >
+                  <option value="none">Set double-tap...</option>
+                  <option value="command">Cmd+Cmd</option>
+                  <option value="option">Opt+Opt</option>
+                  <option value="control">Ctrl+Ctrl</option>
+                  <option value="shift">Shift+Shift</option>
+                  <option value="escape">Esc+Esc</option>
+                </select>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
