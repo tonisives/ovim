@@ -1084,3 +1084,74 @@ body {
   border-radius: 6px;
   display: inline-block;
 }
+
+/* Activation row for shortcut + double-tap side by side */
+.activation-row {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.activation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.activation-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.activation-input-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.activation-item select {
+  width: auto;
+  min-width: 110px;
+  max-width: none;
+}
+
+.activation-item .current-key {
+  min-width: 110px;
+}
+
+.activation-item .current-key.placeholder,
+.activation-item select.placeholder {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.activation-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.activation-clear-btn:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger-color);
+}
+
+.activation-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

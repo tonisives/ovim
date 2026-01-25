@@ -6,6 +6,19 @@ use serde::{Deserialize, Serialize};
 
 use super::VimKeyModifiers;
 
+/// Double-tap key options for activating modes
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DoubleTapModifier {
+    #[default]
+    None,
+    Command,
+    Option,
+    Control,
+    Shift,
+    Escape,
+}
+
 /// Settings for Click Mode feature
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -16,6 +29,9 @@ pub struct ClickModeSettings {
     pub shortcut_key: String,
     /// Shortcut modifiers (default: Cmd+Shift)
     pub shortcut_modifiers: VimKeyModifiers,
+    /// Double-tap modifier to activate click mode (alternative to keyboard shortcut)
+    #[serde(default)]
+    pub double_tap_modifier: DoubleTapModifier,
     /// Characters to use for hint labels (home row first for speed)
     pub hint_chars: String,
     /// Show search bar when click mode is activated
@@ -69,13 +85,14 @@ impl Default for ClickModeSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            shortcut_key: "f".to_string(),
+            shortcut_key: "".to_string(), // Disabled by default
             shortcut_modifiers: VimKeyModifiers {
                 shift: false,
-                control: true,
+                control: false,
                 option: false,
-                command: true, // Ctrl+Cmd+F
+                command: false,
             },
+            double_tap_modifier: DoubleTapModifier::Option, // Opt+Opt by default
             hint_chars: "asfghjklqwetyuiopzxvbm".to_string(), // excludes r, c, d, n (action keys)
             show_search_bar: true,
             hint_opacity: 0.95,

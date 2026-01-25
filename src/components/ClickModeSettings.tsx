@@ -1,5 +1,5 @@
 import { useCallback } from "react"
-import type { Settings, ClickModeSettings } from "./SettingsApp"
+import type { Settings, ClickModeSettings, DoubleTapModifier } from "./SettingsApp"
 import { useKeyRecording } from "../hooks/useKeyRecording"
 import { Slider, ColorPicker } from "./common"
 
@@ -52,18 +52,88 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
         </label>
       </div>
 
-      {/* Keyboard Shortcut */}
+      {/* Activation Options */}
       <div className="form-group">
-        <label>Keyboard shortcut</label>
-        <div className="key-display">
-          <button
-            type="button"
-            className={`current-key clickable${isRecording ? " recording" : ""}`}
-            onClick={isRecording ? handleCancelRecord : handleRecordKey}
-            disabled={!clickMode.enabled && !isRecording}
-          >
-            {isRecording ? "Press any key..." : displayName || clickMode.shortcut_key}
-          </button>
+        <label>Activation</label>
+        <div className="activation-row">
+          <div className="activation-item">
+            <span className="activation-label">Shortcut</span>
+            <div className="activation-input-group">
+              {clickMode.shortcut_key ? (
+                <>
+                  <button
+                    type="button"
+                    className={`current-key clickable${isRecording ? " recording" : ""}`}
+                    onClick={isRecording ? handleCancelRecord : handleRecordKey}
+                    disabled={!clickMode.enabled && !isRecording}
+                  >
+                    {isRecording ? "Press any key..." : displayName || clickMode.shortcut_key}
+                  </button>
+                  <button
+                    type="button"
+                    className="activation-clear-btn"
+                    onClick={() => updateClickMode({ shortcut_key: "", shortcut_modifiers: { shift: false, control: false, option: false, command: false } })}
+                    disabled={!clickMode.enabled}
+                    title="Disable shortcut"
+                  >
+                    x
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className={`current-key clickable placeholder${isRecording ? " recording" : ""}`}
+                  onClick={isRecording ? handleCancelRecord : handleRecordKey}
+                  disabled={!clickMode.enabled && !isRecording}
+                >
+                  {isRecording ? "Press any key..." : "Set shortcut..."}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="activation-item">
+            <span className="activation-label">Double-tap</span>
+            <div className="activation-input-group">
+              {clickMode.double_tap_modifier && clickMode.double_tap_modifier !== "none" ? (
+                <>
+                  <select
+                    value={clickMode.double_tap_modifier}
+                    onChange={(e) => updateClickMode({ double_tap_modifier: e.target.value as DoubleTapModifier })}
+                    disabled={!clickMode.enabled}
+                  >
+                    <option value="command">Cmd+Cmd</option>
+                    <option value="option">Opt+Opt</option>
+                    <option value="control">Ctrl+Ctrl</option>
+                    <option value="shift">Shift+Shift</option>
+                    <option value="escape">Esc+Esc</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="activation-clear-btn"
+                    onClick={() => updateClickMode({ double_tap_modifier: "none" })}
+                    disabled={!clickMode.enabled}
+                    title="Disable double-tap"
+                  >
+                    x
+                  </button>
+                </>
+              ) : (
+                <select
+                  value="none"
+                  onChange={(e) => updateClickMode({ double_tap_modifier: e.target.value as DoubleTapModifier })}
+                  disabled={!clickMode.enabled}
+                  className="placeholder"
+                >
+                  <option value="none">Set double-tap...</option>
+                  <option value="command">Cmd+Cmd</option>
+                  <option value="option">Opt+Opt</option>
+                  <option value="control">Ctrl+Ctrl</option>
+                  <option value="shift">Shift+Shift</option>
+                  <option value="escape">Esc+Esc</option>
+                </select>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

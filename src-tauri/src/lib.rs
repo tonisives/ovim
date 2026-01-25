@@ -25,10 +25,12 @@ use tauri::{
 
 use click_mode::SharedClickModeManager;
 use commands::RecordedKey;
+use config::click_mode::DoubleTapModifier;
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
 use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture};
 use keyboard_handler::create_keyboard_callback;
+use keyboard_handler::double_tap::{DoubleTapKey, DoubleTapManager};
 use nvim_edit::terminals::install_scripts;
 use nvim_edit::EditSessionManager;
 use vim::{VimMode, VimState};
@@ -232,6 +234,95 @@ fn handle_set_mode(state: &mut VimState, app_handle: &AppHandle, mode_str: &str)
     }
 }
 
+/// Helper to check if a double-tap key matches a setting
+fn matches_double_tap_setting(setting: &DoubleTapModifier, key: &DoubleTapKey) -> bool {
+    match (setting, key) {
+        (DoubleTapModifier::Command, DoubleTapKey::Command) => true,
+        (DoubleTapModifier::Option, DoubleTapKey::Option) => true,
+        (DoubleTapModifier::Control, DoubleTapKey::Control) => true,
+        (DoubleTapModifier::Shift, DoubleTapKey::Shift) => true,
+        (DoubleTapModifier::Escape, DoubleTapKey::Escape) => true,
+        _ => false,
+    }
+}
+
+/// Handle double-tap activation for click mode or nvim edit
+fn handle_double_tap_activation(
+    double_tap_key: DoubleTapKey,
+    settings: &Arc<Mutex<Settings>>,
+    click_mode_manager: &SharedClickModeManager,
+    edit_session_manager: &Arc<EditSessionManager>,
+) {
+    let settings_guard = settings.lock().unwrap();
+
+    // Check if this double-tap should trigger click mode
+    let click_mode_trigger = matches_double_tap_setting(
+        &settings_guard.click_mode.double_tap_modifier,
+        &double_tap_key,
+    );
+
+    // Check if this double-tap should trigger nvim edit mode
+    let nvim_edit_trigger = matches_double_tap_setting(
+        &settings_guard.nvim_edit.double_tap_modifier,
+        &double_tap_key,
+    );
+
+    // Don't allow both to be triggered by the same key
+    // Click mode takes priority if both are set to the same key
+    if click_mode_trigger && settings_guard.click_mode.enabled {
+        log::info!("Double-tap {:?} detected - activating click mode", double_tap_key);
+        drop(settings_guard);
+
+        // Activate click mode
+        {
+            let mut mgr = click_mode_manager.lock().unwrap();
+            if !mgr.is_active() {
+                mgr.set_activating();
+            }
+        }
+
+        let manager = Arc::clone(click_mode_manager);
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut mgr = manager.lock().unwrap();
+                match mgr.activate() {
+                    Ok(elements) => {
+                        log::info!("Click mode activated via double-tap with {} elements", elements.len());
+                        let style = click_mode::native_hints::HintStyle::default();
+                        click_mode::native_hints::show_hints(&elements, &style);
+                        if let Some(app) = get_app_handle() {
+                            let _ = app.emit("click-mode-activated", ());
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to activate click mode via double-tap: {}", e);
+                        mgr.deactivate();
+                    }
+                }
+            }));
+
+            if let Err(e) = result {
+                log::error!("Panic in click mode activation via double-tap: {:?}", e);
+                if let Ok(mut mgr) = manager.lock() {
+                    mgr.deactivate();
+                }
+            }
+        });
+    } else if nvim_edit_trigger && settings_guard.nvim_edit.enabled {
+        log::info!("Double-tap {:?} detected - activating nvim edit", double_tap_key);
+        let nvim_settings = settings_guard.nvim_edit.clone();
+        drop(settings_guard);
+
+        // Trigger nvim edit
+        let manager = Arc::clone(edit_session_manager);
+        std::thread::spawn(move || {
+            if let Err(e) = nvim_edit::trigger_nvim_edit(manager, nvim_settings) {
+                log::error!("Failed to trigger nvim edit via double-tap: {}", e);
+            }
+        });
+    }
+}
+
 fn update_tray_icon(tray: &TrayIcon, mode: &str, show_mode: bool) {
     let icon_bytes: &[u8] = if show_mode {
         match mode {
@@ -287,6 +378,23 @@ pub fn run() {
         Arc::new(Mutex::new(None));
     let edit_session_manager = Arc::new(EditSessionManager::new());
     let click_mode_manager = click_mode::create_manager();
+    let double_tap_manager = Arc::new(Mutex::new(DoubleTapManager::new()));
+
+    // Create double-tap callback that handles mode activation
+    let double_tap_callback = {
+        let settings_for_dt = Arc::clone(&settings);
+        let click_manager_for_dt = Arc::clone(&click_mode_manager);
+        let edit_session_manager_for_dt = Arc::clone(&edit_session_manager);
+
+        Box::new(move |double_tap_key: DoubleTapKey| {
+            handle_double_tap_activation(
+                double_tap_key,
+                &settings_for_dt,
+                &click_manager_for_dt,
+                &edit_session_manager_for_dt,
+            );
+        }) as keyboard_handler::DoubleTapCallback
+    };
 
     let keyboard_capture = KeyboardCapture::new();
     keyboard_capture.set_callback(create_keyboard_callback(
@@ -295,6 +403,8 @@ pub fn run() {
         Arc::clone(&record_key_tx),
         Arc::clone(&edit_session_manager),
         Arc::clone(&click_mode_manager),
+        Arc::clone(&double_tap_manager),
+        double_tap_callback,
     ));
 
     // Set up mouse click callback to hide click mode on any mouse click
@@ -328,6 +438,34 @@ pub fn run() {
                         let _ = app.emit("click-mode-deactivated", ());
                     }
                 }
+            }
+        });
+    }
+
+    // Set up flags changed callback for double-tap modifier shortcuts
+    {
+        let settings_for_flags = Arc::clone(&settings);
+        let click_manager_for_flags = Arc::clone(&click_mode_manager);
+        let edit_session_manager_for_flags = Arc::clone(&edit_session_manager);
+        let double_tap_manager_for_flags = Arc::clone(&double_tap_manager);
+
+        keyboard_capture.set_flags_changed_callback(move |modifiers| {
+            let mut dt_manager = double_tap_manager_for_flags.lock().unwrap();
+
+            // Process the flags change and check for double-tap
+            if let Some(double_tap_key) = dt_manager.process_flags_changed(
+                modifiers.command,
+                modifiers.option,
+                modifiers.control,
+                modifiers.shift,
+            ) {
+                drop(dt_manager);
+                handle_double_tap_activation(
+                    double_tap_key,
+                    &settings_for_flags,
+                    &click_manager_for_flags,
+                    &edit_session_manager_for_flags,
+                );
             }
         });
     }
