@@ -18,7 +18,7 @@ pub fn build_safari_script() -> String {
         end try
     end tell
 end tell"#,
-        GET_ELEMENT_RECT_JS.replace('"', "\\\"")
+        (*GET_ELEMENT_RECT_JS).replace('"', "\\\"")
     )
 }
 
@@ -36,7 +36,7 @@ pub fn build_chrome_script(app_name: &str) -> String {
     end tell
 end tell"#,
         app_name,
-        GET_ELEMENT_RECT_JS.replace('"', "\\\"")
+        (*GET_ELEMENT_RECT_JS).replace('"', "\\\"")
     )
 }
 

@@ -66,7 +66,7 @@ pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result
 
 /// Get cursor position from the focused element in a browser
 pub fn get_browser_cursor_position(browser_type: BrowserType) -> Option<CursorPosition> {
-    let script = build_execute_script(browser_type, GET_CURSOR_POSITION_JS);
+    let script = build_execute_script(browser_type, &GET_CURSOR_POSITION_JS);
 
     // Debug: write script to file for inspection
     let _ = std::fs::write("/tmp/cursor_script.txt", &script);
@@ -123,7 +123,7 @@ pub fn set_browser_cursor_position(
 /// Get text AND cursor position in a single JS call
 /// This is more reliable than separate calls as cursor position won't be lost
 pub fn get_browser_text_and_cursor(browser_type: BrowserType) -> Option<TextAndCursor> {
-    let script = build_execute_script(browser_type, GET_TEXT_AND_CURSOR_JS);
+    let script = build_execute_script(browser_type, &GET_TEXT_AND_CURSOR_JS);
 
     let stdout = match execute_applescript(&script) {
         Ok(s) => s,
