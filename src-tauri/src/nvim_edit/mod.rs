@@ -58,17 +58,30 @@ pub fn trigger_nvim_edit(
     log::info!("Started edit session: {}", session_id);
 
     // 6. Start RPC connection and live sync in background
+    // If clipboard_mode is enabled, skip live sync entirely
     let session = manager.get_session(&session_id)
         .ok_or("Session not found immediately after creation")?;
 
     let live_sync_worked = Arc::new(AtomicBool::new(false));
-    let rpc_handle = spawn_rpc_handler(
-        &session,
-        &settings,
-        Arc::clone(&live_sync_worked),
-        browser_type,
-        initial_cursor,
-    );
+    let clipboard_mode = settings.clipboard_mode;
+
+    let rpc_handle = if clipboard_mode {
+        // In clipboard mode, don't do live sync - but still wait for editor to exit
+        log::info!("Clipboard mode enabled, skipping live sync");
+        let process_id = session.process_id;
+        thread::spawn(move || {
+            wait_for_editor_exit(process_id);
+            None
+        })
+    } else {
+        spawn_rpc_handler(
+            &session,
+            &settings,
+            Arc::clone(&live_sync_worked),
+            browser_type,
+            initial_cursor,
+        )
+    };
 
     // 7. Spawn main thread to wait for nvim to exit and restore text
     spawn_completion_handler(
@@ -77,6 +90,7 @@ pub fn trigger_nvim_edit(
         rpc_handle,
         live_sync_worked,
         browser_type,
+        clipboard_mode,
     );
 
     Ok(())
@@ -87,26 +101,21 @@ struct RpcResult {
     final_cursor: Option<browser_scripting::CursorPosition>,
 }
 
-/// Check if a terminal window still exists
-fn window_exists(terminal_type: &terminals::TerminalType, window_title: Option<&str>) -> bool {
-    match terminal_type {
-        terminals::TerminalType::Alacritty => {
-            if let Some(title) = window_title {
-                terminals::applescript_utils::find_alacritty_window_by_title(title).is_some()
-            } else {
-                true // Can't check without title, assume exists
-            }
-        }
-        // For other terminals, assume window exists (fall back to socket check)
-        _ => true,
+/// Check if the editor process is still running
+fn editor_process_exists(pid: Option<u32>) -> bool {
+    if let Some(pid) = pid {
+        // Check if process exists by sending signal 0
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    } else {
+        true // Can't check without PID, assume exists
     }
 }
 
-/// Wait for window to close (used when live sync is disabled)
-fn wait_for_window_close(terminal_type: &terminals::TerminalType, window_title: Option<&str>) {
+/// Wait for editor process to exit (used when live sync is disabled)
+fn wait_for_editor_exit(process_id: Option<u32>) {
     loop {
-        if !window_exists(terminal_type, window_title) {
-            log::info!("Window closed");
+        if !editor_process_exists(process_id) {
+            log::info!("Editor process exited");
             break;
         }
         thread::sleep(Duration::from_millis(100));
@@ -125,14 +134,13 @@ fn spawn_rpc_handler(
     let socket_path = session.socket_path.clone();
     let focus_element = session.focus_context.focused_element.clone();
     let live_sync_enabled = settings.live_sync_enabled;
-    let window_title = session.window_title.clone();
-    let terminal_type = session.terminal_type.clone();
+    let process_id = session.process_id;
 
     thread::spawn(move || {
         if !live_sync_enabled {
             log::info!("Live sync disabled, skipping RPC connection");
-            // Still need to wait for window to close
-            wait_for_window_close(&terminal_type, window_title.as_deref());
+            // Still need to wait for editor to exit
+            wait_for_editor_exit(process_id);
             return None;
         }
 
@@ -191,9 +199,9 @@ fn spawn_rpc_handler(
                             }
                         }
 
-                        // Check if window is gone (fast for Cmd+W close)
-                        if !window_exists(&terminal_type, window_title.as_deref()) {
-                            log::info!("Window closed, exiting immediately");
+                        // Check if editor process is gone (fast for Cmd+W close)
+                        if !editor_process_exists(process_id) {
+                            log::info!("Editor process exited");
                             break;
                         }
 
@@ -270,6 +278,7 @@ fn spawn_completion_handler(
     rpc_handle: thread::JoinHandle<Option<RpcResult>>,
     live_sync_worked: Arc<AtomicBool>,
     browser_type: Option<browser_scripting::BrowserType>,
+    clipboard_mode: bool,
 ) {
     thread::spawn(move || {
         let Some(session) = manager.get_session(&session_id) else {
@@ -303,9 +312,13 @@ fn spawn_completion_handler(
             }
         }
 
-        // Check if live sync was working
-        let did_live_sync = live_sync_worked.load(Ordering::SeqCst);
-        log::info!("Live sync status: {}", if did_live_sync { "worked" } else { "not used" });
+        // Check if live sync was working (but ignore if clipboard_mode is enabled)
+        let did_live_sync = if clipboard_mode {
+            false // Force clipboard paste in clipboard mode
+        } else {
+            live_sync_worked.load(Ordering::SeqCst)
+        };
+        log::info!("Live sync status: {}, clipboard_mode: {}", if did_live_sync { "worked" } else { "not used" }, clipboard_mode);
 
         // Complete the session - skip clipboard paste if live sync worked
         if let Err(e) = complete_edit_session(&manager, &session_id, did_live_sync) {

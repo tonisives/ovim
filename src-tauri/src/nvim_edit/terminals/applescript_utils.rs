@@ -2,8 +2,6 @@
 
 use std::process::Command;
 
-use super::WindowGeometry;
-
 /// Set window size using AppleScript
 pub fn set_window_size(app_name: &str, width: u32, height: u32) {
     let script = format!(
@@ -25,7 +23,6 @@ pub fn set_window_size(app_name: &str, width: u32, height: u32) {
 /// Move a window to a specific position using AppleScript
 #[allow(dead_code)]
 pub fn move_window_to_position(app_name: &str, x: i32, y: i32) {
-    // Small delay to let the window appear
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let script = format!(
@@ -44,14 +41,20 @@ pub fn move_window_to_position(app_name: &str, x: i32, y: i32) {
     let _ = Command::new("osascript").arg("-e").arg(&script).output();
 }
 
-/// Find Alacritty window index by title (returns 1-based index)
-/// Searches all processes named "alacritty" (case-insensitive)
-pub fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
-    // Search across all alacritty processes (spawned ones are lowercase)
+/// Find a window by title across all processes matching the given names (case-insensitive)
+/// Returns 1-based window index if found
+#[allow(dead_code)]
+pub fn find_window_by_title(process_names: &[&str], title: &str) -> Option<usize> {
+    let name_conditions: Vec<String> = process_names
+        .iter()
+        .map(|n| format!("name is \"{}\"", n))
+        .collect();
+    let condition = name_conditions.join(" or ");
+
     let script = format!(
         r#"
         tell application "System Events"
-            repeat with p in (every process whose name is "alacritty" or name is "Alacritty")
+            repeat with p in (every process whose {})
                 try
                     repeat with i from 1 to (count of windows of p)
                         set w to window i of p
@@ -64,7 +67,7 @@ pub fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
             return 0
         end tell
         "#,
-        title
+        condition, title
     );
 
     let output = Command::new("osascript").arg("-e").arg(&script).output();
@@ -81,20 +84,104 @@ pub fn find_alacritty_window_by_title(title: &str) -> Option<usize> {
     None
 }
 
-/// Set Alacritty window bounds by title (finds and positions the specific window)
+/// Get the current position of a window by title
 #[allow(dead_code)]
-pub fn set_alacritty_window_bounds_by_title(
-    title: &str,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-) {
-    // Search ALL foreground processes - name filter doesn't work reliably
+pub fn get_window_position_by_title(process_names: &[&str], title: &str) -> Option<(i32, i32)> {
+    let name_conditions: Vec<String> = process_names
+        .iter()
+        .map(|n| format!("name is \"{}\"", n))
+        .collect();
+    let condition = name_conditions.join(" or ");
+
     let script = format!(
         r#"
         tell application "System Events"
-            repeat with p in (every process whose background only is false)
+            repeat with p in (every process whose {})
+                try
+                    repeat with w in windows of p
+                        if name of w contains "{}" then
+                            set pos to position of w
+                            return (item 1 of pos as text) & "," & (item 2 of pos as text)
+                        end if
+                    end repeat
+                end try
+            end repeat
+        end tell
+        "#,
+        condition, title
+    );
+
+    let output = Command::new("osascript").arg("-e").arg(&script).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let pos_str = String::from_utf8_lossy(&output.stdout);
+    let pos_str = pos_str.trim();
+    if pos_str.is_empty() {
+        return None;
+    }
+    let (x_str, y_str) = pos_str.split_once(',')?;
+    let x = x_str.trim().parse::<i32>().ok()?;
+    let y = y_str.trim().parse::<i32>().ok()?;
+    Some((x, y))
+}
+
+/// Set window size by title (without changing position)
+#[allow(dead_code)]
+pub fn set_window_size_by_title(process_names: &[&str], title: &str, width: u32, height: u32) {
+    let name_conditions: Vec<String> = process_names
+        .iter()
+        .map(|n| format!("name is \"{}\"", n))
+        .collect();
+    let condition = name_conditions.join(" or ");
+
+    let script = format!(
+        r#"
+        tell application "System Events"
+            repeat with p in (every process whose {})
+                try
+                    repeat with w in windows of p
+                        if name of w contains "{}" then
+                            set size of w to {{{}, {}}}
+                            return "ok"
+                        end if
+                    end repeat
+                end try
+            end repeat
+            return "no_window_found"
+        end tell
+        "#,
+        condition, title, width, height
+    );
+
+    log::debug!("Setting window '{}' size to {}x{}", title, width, height);
+
+    let output = Command::new("osascript").arg("-e").arg(&script).output();
+
+    if let Ok(out) = output {
+        if !out.status.success() {
+            log::error!(
+                "AppleScript set size failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+}
+
+/// Set window bounds by title (position and size in one call)
+#[allow(dead_code)]
+pub fn set_window_bounds_by_title(process_names: &[&str], title: &str, x: i32, y: i32, width: u32, height: u32) {
+    let name_conditions: Vec<String> = process_names
+        .iter()
+        .map(|n| format!("name is \"{}\"", n))
+        .collect();
+    let condition = name_conditions.join(" or ");
+
+    let script = format!(
+        r#"
+        tell application "System Events"
+            repeat with p in (every process whose {})
                 try
                     repeat with w in windows of p
                         if name of w contains "{}" then
@@ -105,22 +192,20 @@ pub fn set_alacritty_window_bounds_by_title(
                     end repeat
                 end try
             end repeat
-            return "not found"
+            return "no_window_found"
         end tell
         "#,
-        title, x, y, width, height
+        condition, title, x, y, width, height
     );
 
-    log::info!(
-        "Setting Alacritty window '{}' bounds: {}x{} at ({}, {})",
+    log::debug!(
+        "Setting window '{}' to {}x{} at ({}, {})",
         title, width, height, x, y
     );
 
     let output = Command::new("osascript").arg("-e").arg(&script).output();
 
     if let Ok(out) = output {
-        let result = String::from_utf8_lossy(&out.stdout);
-        log::info!("Set bounds result: {}", result.trim());
         if !out.status.success() {
             log::error!(
                 "AppleScript set bounds failed: {}",
@@ -130,242 +215,44 @@ pub fn set_alacritty_window_bounds_by_title(
     }
 }
 
-/// Focus Alacritty window by title
+/// Focus a window by process names and title (without bringing all app windows to front)
 #[allow(dead_code)]
-pub fn focus_alacritty_window_by_title(title: &str) {
-    // Search ALL foreground processes - name filter doesn't work reliably
+pub fn focus_window_by_title(process_names: &[&str], title: &str) {
+    let name_conditions: Vec<String> = process_names
+        .iter()
+        .map(|n| format!("name is \"{}\"", n))
+        .collect();
+    let condition = name_conditions.join(" or ");
+
     let script = format!(
         r#"
         tell application "System Events"
-            repeat with p in (every process whose background only is false)
+            repeat with p in (every process whose {})
                 try
                     repeat with w in windows of p
                         if name of w contains "{}" then
+                            -- Raise just this window to the front
                             perform action "AXRaise" of w
-                            set winPos to position of w
-                            return (item 1 of winPos) & "," & (item 2 of winPos)
+                            -- Set frontmost to give keyboard focus
+                            set frontmost of p to true
+                            return "ok"
                         end if
                     end repeat
                 end try
             end repeat
         end tell
         "#,
-        title
+        condition, title
     );
 
-    log::info!("Focusing Alacritty window '{}'", title);
-
-    let output = Command::new("osascript").arg("-e").arg(&script).output();
-
-    if let Ok(out) = output {
-        if out.status.success() {
-            // Parse the position and click to give keyboard focus
-            let pos_str = String::from_utf8_lossy(&out.stdout);
-            let pos_str = pos_str.trim();
-            if let Some((x_str, y_str)) = pos_str.split_once(',') {
-                if let (Ok(x), Ok(y)) = (x_str.trim().parse::<i32>(), y_str.trim().parse::<i32>()) {
-                    click_at_position(x + 50, y + 50);
-                }
-            }
-        } else {
-            log::error!(
-                "Failed to focus window: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-    }
-}
-
-/// Set window bounds by window index (1-based)
-#[allow(dead_code)]
-pub fn set_window_bounds_by_index(
-    app_name: &str,
-    index: usize,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-) {
-    let script = format!(
-        r#"
-        tell application "System Events"
-            tell process "{}"
-                if (count of windows) >= {} then
-                    set w to window {}
-                    set position of w to {{{}, {}}}
-                    set size of w to {{{}, {}}}
-                end if
-            end tell
-        end tell
-        "#,
-        app_name, index, index, x, y, width, height
-    );
-
-    log::info!(
-        "Setting window {} index {} bounds: {}x{} at ({}, {})",
-        app_name,
-        index,
-        width,
-        height,
-        x,
-        y
-    );
+    log::info!("Focusing window with title '{}'", title);
 
     let output = Command::new("osascript").arg("-e").arg(&script).output();
 
     if let Ok(out) = output {
         if !out.status.success() {
             log::error!(
-                "AppleScript failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-    }
-}
-
-/// Focus an Alacritty window by index (without bringing all app windows to front)
-#[allow(dead_code)]
-pub fn focus_alacritty_window_by_index(index: usize) {
-    // Use AXRaise to bring the specific window to front and give it keyboard focus.
-    // Search across all alacritty processes (spawned ones are lowercase)
-    let script = format!(
-        r#"
-        tell application "System Events"
-            repeat with p in (every process whose name is "alacritty" or name is "Alacritty")
-                try
-                    if (count of windows of p) >= {} then
-                        set w to window {} of p
-                        -- Raise just this window to the front
-                        perform action "AXRaise" of w
-                        -- Return the window position for clicking
-                        set winPos to position of w
-                        return (item 1 of winPos) & "," & (item 2 of winPos)
-                    end if
-                end try
-            end repeat
-        end tell
-        "#,
-        index, index
-    );
-
-    log::info!("Focusing Alacritty window at index {}", index);
-
-    let output = Command::new("osascript").arg("-e").arg(&script).output();
-
-    if let Ok(out) = output {
-        if out.status.success() {
-            // Parse the position and click to give keyboard focus
-            let pos_str = String::from_utf8_lossy(&out.stdout);
-            let pos_str = pos_str.trim();
-            if let Some((x_str, y_str)) = pos_str.split_once(',') {
-                if let (Ok(x), Ok(y)) = (x_str.trim().parse::<i32>(), y_str.trim().parse::<i32>()) {
-                    // Click inside the window to give it keyboard focus
-                    click_at_position(x + 50, y + 50);
-                }
-            }
-        } else {
-            log::error!(
                 "Failed to focus window: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-    }
-}
-
-/// Click at a screen position using CGEvent (gives keyboard focus to the window)
-fn click_at_position(x: i32, y: i32) {
-    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
-    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-    use core_graphics::geometry::CGPoint;
-
-    let point = CGPoint::new(x as f64, y as f64);
-
-    if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
-        // Mouse down
-        if let Ok(event) = CGEvent::new_mouse_event(
-            source.clone(),
-            CGEventType::LeftMouseDown,
-            point,
-            CGMouseButton::Left,
-        ) {
-            event.post(CGEventTapLocation::HID);
-        }
-
-        // Mouse up
-        if let Ok(event) = CGEvent::new_mouse_event(
-            source,
-            CGEventType::LeftMouseUp,
-            point,
-            CGMouseButton::Left,
-        ) {
-            event.post(CGEventTapLocation::HID);
-        }
-    }
-}
-
-/// Set window bounds atomically (position and size in one call)
-#[allow(dead_code)]
-pub fn set_window_bounds_atomic(
-    app_name: &str,
-    index: usize,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-) {
-    // Set both position and size in a single script for speed
-    // For Alacritty, search across all processes (spawned ones are lowercase)
-    let script = if app_name.to_lowercase() == "alacritty" {
-        format!(
-            r#"
-            tell application "System Events"
-                repeat with p in (every process whose name is "alacritty" or name is "Alacritty")
-                    try
-                        if (count of windows of p) >= {} then
-                            set w to window {} of p
-                            set position of w to {{{}, {}}}
-                            set size of w to {{{}, {}}}
-                            return
-                        end if
-                    end try
-                end repeat
-            end tell
-            "#,
-            index, index, x, y, width, height
-        )
-    } else {
-        format!(
-            r#"
-            tell application "System Events"
-                tell process "{}"
-                    if (count of windows) >= {} then
-                        set w to window {}
-                        set position of w to {{{}, {}}}
-                        set size of w to {{{}, {}}}
-                    end if
-                end tell
-            end tell
-            "#,
-            app_name, index, index, x, y, width, height
-        )
-    };
-
-    log::info!(
-        "Setting window {} index {} to {}x{} at ({}, {})",
-        app_name,
-        index,
-        width,
-        height,
-        x,
-        y
-    );
-
-    let output = Command::new("osascript").arg("-e").arg(&script).output();
-
-    if let Ok(out) = output {
-        if !out.status.success() {
-            log::error!(
-                "AppleScript set bounds failed: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
         }
@@ -374,9 +261,9 @@ pub fn set_window_bounds_atomic(
 
 /// Convert pixel dimensions to approximate terminal cell dimensions
 #[allow(dead_code)]
-pub fn pixels_to_cells(geometry: &WindowGeometry) -> (u32, u32) {
+pub fn pixels_to_cells(width: u32, height: u32) -> (u32, u32) {
     // Approximate: 8px per column, 16px per row
-    let cols = (geometry.width / 8).max(10);
-    let rows = (geometry.height / 16).max(4);
+    let cols = (width / 8).max(10);
+    let rows = (height / 16).max(4);
     (cols, rows)
 }
