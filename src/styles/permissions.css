@@ -1,0 +1,70 @@
+/* Permission warning */
+
+.permission-warning {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-color);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+
+.permission-title {
+  font-weight: 600;
+  color: var(--danger-color);
+  margin-bottom: 10px;
+}
+
+.permission-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.permission-status {
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 120px;
+}
+
+.permission-status.missing {
+  color: var(--danger-color);
+}
+
+.permission-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.permission-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
+}
+
+.permission-btn.secondary {
+  background: transparent;
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.permission-btn.secondary:hover {
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.permission-hint {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}

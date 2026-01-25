@@ -1,0 +1,38 @@
+/* Position options (radio buttons) */
+
+.position-group {
+  flex: 1;
+  min-width: 150px;
+}
+
+.position-group > label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.position-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.radio-label:hover {
+  background: var(--bg-primary);
+}
+
+.radio-label input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}

@@ -1,5 +1,7 @@
 //! Edit Popup (NvimEdit) settings
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::click_mode::DoubleTapModifier;
@@ -108,6 +110,10 @@ pub struct NvimEditSettings {
     /// Double-tap modifier to activate edit mode (alternative to keyboard shortcut)
     #[serde(default)]
     pub double_tap_modifier: DoubleTapModifier,
+    /// Saved filetypes per domain (browser hostname) or app bundle ID
+    /// Stored in separate domain-filetypes.yaml file, not in main settings
+    #[serde(skip)]
+    pub domain_filetypes: HashMap<String, String>,
 }
 
 impl Default for NvimEditSettings {
@@ -132,6 +138,7 @@ impl Default for NvimEditSettings {
             use_custom_script: false,
             clipboard_mode: false, // Use smart detection by default
             double_tap_modifier: DoubleTapModifier::Command, // Cmd+Cmd by default
+            domain_filetypes: HashMap::new(),
         }
     }
 }
@@ -216,5 +223,54 @@ impl NvimEditSettings {
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
         }
+    }
+
+    /// Get the saved filetype for a domain/app
+    pub fn get_filetype_for_domain(&self, domain: &str) -> Option<&str> {
+        self.domain_filetypes.get(domain).map(|s| s.as_str())
+    }
+
+    /// Set the filetype for a domain/app and save to separate file for visibility
+    pub fn set_filetype_for_domain(&mut self, domain: String, filetype: String) {
+        self.domain_filetypes.insert(domain, filetype);
+        // Also write to separate file for visibility
+        self.save_domain_filetypes_file();
+    }
+
+    /// Remove the filetype for a domain/app
+    pub fn remove_filetype_for_domain(&mut self, domain: &str) {
+        self.domain_filetypes.remove(domain);
+        self.save_domain_filetypes_file();
+    }
+
+    /// Get path to the domain filetypes file
+    fn domain_filetypes_path() -> Option<std::path::PathBuf> {
+        dirs::config_dir().map(|p| p.join("ovim").join("domain-filetypes.yaml"))
+    }
+
+    /// Load domain filetypes from the separate file
+    pub fn load_domain_filetypes(&mut self) {
+        if let Some(path) = Self::domain_filetypes_path() {
+            if let Ok(contents) = std::fs::read_to_string(&path) {
+                if let Ok(filetypes) = serde_yml::from_str(&contents) {
+                    self.domain_filetypes = filetypes;
+                    log::info!("Loaded {} domain filetypes", self.domain_filetypes.len());
+                }
+            }
+        }
+    }
+
+    /// Save domain filetypes to the separate file
+    fn save_domain_filetypes_file(&self) {
+        if let Some(path) = Self::domain_filetypes_path() {
+            if let Ok(contents) = serde_yml::to_string(&self.domain_filetypes) {
+                let _ = std::fs::write(&path, contents);
+            }
+        }
+    }
+
+    /// Get all domain filetypes
+    pub fn get_all_domain_filetypes(&self) -> &HashMap<String, String> {
+        &self.domain_filetypes
     }
 }

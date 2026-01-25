@@ -134,6 +134,8 @@ impl Settings {
         let mut settings = Self::load_raw();
         // Sanitize settings to fix any invalid state
         settings.nvim_edit.sanitize();
+        // Load domain filetypes from separate file
+        settings.nvim_edit.load_domain_filetypes();
         settings
     }
 

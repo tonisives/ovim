@@ -25,7 +25,7 @@ struct SpawnConfig {
 }
 
 impl SpawnConfig {
-    fn new(settings: &NvimEditSettings, file_path: &str, socket_path: Option<&Path>, text_is_empty: bool) -> Self {
+    fn new(settings: &NvimEditSettings, file_path: &str, socket_path: Option<&Path>, text_is_empty: bool, filetype: Option<&str>) -> Self {
         let editor_path = settings.editor_path();
         let resolved_editor = resolve_command_path(&editor_path);
         log::info!("Resolved editor path: {} -> {}", editor_path, resolved_editor);
@@ -42,6 +42,14 @@ impl SpawnConfig {
             if editor_path.contains("nvim") || editor_path == "nvim" {
                 editor_cmd.push("--listen".to_string());
                 editor_cmd.push(socket.to_string_lossy().to_string());
+            }
+        }
+
+        // Add filetype command if provided (for nvim/vim)
+        if let Some(ft) = filetype {
+            if editor_path.contains("nvim") || editor_path.contains("vim") {
+                editor_cmd.push("-c".to_string());
+                editor_cmd.push(format!("set ft={}", ft));
             }
         }
 
@@ -92,8 +100,9 @@ impl TerminalSpawner for AlacrittySpawner {
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
         text_is_empty: bool,
+        filetype: Option<&str>,
     ) -> Result<SpawnInfo, String> {
-        let config = SpawnConfig::new(settings, file_path, socket_path, text_is_empty)
+        let config = SpawnConfig::new(settings, file_path, socket_path, text_is_empty, filetype)
             .with_geometry(geometry.as_ref());
 
         // Try msg create-window first (faster, reuses existing daemon)

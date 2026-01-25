@@ -1,0 +1,28 @@
+/* Widget settings */
+
+.widget-pickers {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.widget-pickers .form-group {
+  flex: 1;
+  max-width: 250px;
+}
+
+.help-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.help-text.warning {
+  color: #bf5af2;
+}
+
+.electron-apps-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}

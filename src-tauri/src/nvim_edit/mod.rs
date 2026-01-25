@@ -11,7 +11,7 @@ mod text_capture;
 
 pub use session::EditSessionManager;
 
-use crate::config::NvimEditSettings;
+use crate::config::{NvimEditSettings, Settings};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -49,15 +49,38 @@ pub fn trigger_nvim_edit(
         log::info!("Initial cursor position: line={}, col={}", cursor.line, cursor.column);
     }
 
-    // 4. Calculate window geometry if popup mode is enabled
+    // 4. Determine domain key for filetype persistence
+    // For browsers, use the hostname. For native apps, use bundle ID.
+    let domain_key = if let Some(bt) = browser_type {
+        browser_scripting::get_browser_hostname(bt)
+            .unwrap_or_else(|| focus_context.app_bundle_id.clone())
+    } else {
+        focus_context.app_bundle_id.clone()
+    };
+    log::info!("Domain key for filetype: {}", domain_key);
+
+    // 5. Look up saved filetype for this domain
+    let saved_filetype = settings.get_filetype_for_domain(&domain_key).map(|s| s.to_string());
+    if let Some(ref ft) = saved_filetype {
+        log::info!("Found saved filetype for domain '{}': {}", domain_key, ft);
+    }
+
+    // 6. Calculate window geometry if popup mode is enabled
     let geometry = geometry::calculate_popup_geometry(&settings, element_frame, window_frame);
     log::info!("Final geometry: {:?}", geometry);
 
-    // 5. Start edit session (writes temp file, spawns terminal)
-    let session_id = manager.start_session(focus_context, text.clone(), settings.clone(), geometry)?;
+    // 7. Start edit session (writes temp file, spawns terminal)
+    let session_id = manager.start_session(
+        focus_context,
+        text.clone(),
+        settings.clone(),
+        geometry,
+        domain_key,
+        saved_filetype.as_deref(),
+    )?;
     log::info!("Started edit session: {}", session_id);
 
-    // 6. Start RPC connection and live sync in background
+    // 8. Start RPC connection and live sync in background
     // If clipboard_mode is enabled, skip live sync entirely
     let session = manager.get_session(&session_id)
         .ok_or("Session not found immediately after creation")?;
@@ -83,7 +106,7 @@ pub fn trigger_nvim_edit(
         )
     };
 
-    // 7. Spawn main thread to wait for nvim to exit and restore text
+    // 9. Spawn main thread to wait for nvim to exit and restore text
     spawn_completion_handler(
         manager,
         session_id,
@@ -96,9 +119,10 @@ pub fn trigger_nvim_edit(
     Ok(())
 }
 
-/// Result from RPC handler including final cursor position
+/// Result from RPC handler including final cursor position and filetype
 struct RpcResult {
     final_cursor: Option<browser_scripting::CursorPosition>,
+    filetype: Option<String>,
 }
 
 /// Check if the editor process is still running
@@ -186,9 +210,10 @@ fn spawn_rpc_handler(
                         }
                     }
 
-                    // Poll cursor position periodically until window closes or socket removed
+                    // Poll cursor position and filetype periodically until window closes or socket removed
                     // Check window first (faster for Cmd+W), then socket (faster for :q)
                     let mut last_cursor: Option<browser_scripting::CursorPosition> = None;
+                    let mut last_filetype: Option<String> = None;
                     loop {
                         // Try to get current cursor position first
                         match rpc_session.get_cursor().await {
@@ -199,6 +224,13 @@ fn spawn_rpc_handler(
                                 // RPC failed, nvim is probably closing
                                 log::info!("RPC get_cursor failed, nvim closing");
                                 break;
+                            }
+                        }
+
+                        // Also get filetype during polling (so we capture it before nvim closes)
+                        if let Ok(ft) = rpc_session.get_filetype().await {
+                            if !ft.is_empty() && ft != "text" {
+                                last_filetype = Some(ft);
                             }
                         }
 
@@ -222,9 +254,15 @@ fn spawn_rpc_handler(
                         log::info!("Final nvim cursor: line={}, col={}", cursor.line, cursor.column);
                     }
 
+                    // Use the filetype we captured during polling
+                    let filetype = last_filetype;
+                    if let Some(ref ft) = filetype {
+                        log::info!("Final filetype: {}", ft);
+                    }
+
                     let _ = rpc_session.detach().await;
 
-                    Some(RpcResult { final_cursor: last_cursor })
+                    Some(RpcResult { final_cursor: last_cursor, filetype })
                 }
                 Err(e) => {
                     log::warn!("RPC connection failed, falling back to clipboard-only mode: {}", e);
@@ -312,7 +350,17 @@ fn spawn_completion_handler(
         // This is faster than waiting for process exit on Cmd+W window close
         log::info!("Waiting for nvim to exit (via RPC thread)");
         let rpc_result = rpc_handle.join().ok().flatten();
-        let final_cursor = rpc_result.and_then(|r| r.final_cursor);
+        let final_cursor = rpc_result.as_ref().and_then(|r| r.final_cursor);
+        let final_filetype = rpc_result.and_then(|r| r.filetype);
+
+        // Save the filetype for this domain if we got one
+        if let Some(ref ft) = final_filetype {
+            log::info!("Saving filetype '{}' for domain '{}'", ft, session.domain_key);
+            let mut settings = Settings::load();
+            settings.nvim_edit.set_filetype_for_domain(session.domain_key.clone(), ft.clone());
+            // Note: set_filetype_for_domain already saves to domain-filetypes.yaml
+            // No need to call settings.save() - domain_filetypes is not in main settings file
+        }
 
         log::info!("Nvim exited, restoring focus");
 

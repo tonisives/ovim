@@ -212,6 +212,21 @@ impl NvimRpcSession {
         // Convert from nvim's 1-based line to 0-based
         Ok(((line - 1) as usize, col as usize))
     }
+
+    /// Get the current filetype from nvim
+    pub async fn get_filetype(&self) -> Result<String, String> {
+        let opts = vec![(Value::from("scope"), Value::from("local"))];
+        let value = self
+            .neovim
+            .get_option_value("filetype", opts)
+            .await
+            .map_err(|e| format!("Failed to get filetype: {}", e))?;
+
+        value
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Filetype is not a string".to_string())
+    }
 }
 
 /// Connect to a running neovim instance via Unix socket

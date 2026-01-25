@@ -538,6 +538,8 @@ pub fn run() {
             commands::webview_log,
             commands::validate_nvim_edit_paths,
             commands::open_launcher_script,
+            commands::remove_domain_filetype,
+            commands::get_domain_filetypes,
             commands::set_indicator_ignores_mouse,
             commands::is_command_key_pressed,
             commands::is_mouse_over_indicator,

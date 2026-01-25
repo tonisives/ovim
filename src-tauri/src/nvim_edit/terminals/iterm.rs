@@ -28,6 +28,7 @@ impl TerminalSpawner for ITermSpawner {
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
         text_is_empty: bool,
+        filetype: Option<&str>,
     ) -> Result<SpawnInfo, String> {
         // Get editor path and args from settings (insert mode if text is empty)
         let editor_path = settings.editor_path();
@@ -45,9 +46,21 @@ impl TerminalSpawner for ITermSpawner {
             vec![]
         };
 
-        // Build the command string for AppleScript (socket args + editor args)
+        // Build filetype args if provided (for nvim/vim)
+        let filetype_args: Vec<String> = if let Some(ft) = filetype {
+            if editor_path.contains("nvim") || editor_path.contains("vim") {
+                vec!["-c".to_string(), format!("set ft={}", ft)]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        // Build the command string for AppleScript (socket args + filetype args + editor args)
         // Each argument must be shell-escaped to preserve integrity through AppleScript
         let mut all_args: Vec<String> = socket_args;
+        all_args.extend(filetype_args);
         all_args.extend(editor_args.iter().map(|s| s.to_string()));
         let args_str = if all_args.is_empty() {
             String::new()

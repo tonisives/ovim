@@ -23,6 +23,7 @@ impl TerminalSpawner for GhosttySpawner {
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
         text_is_empty: bool,
+        filetype: Option<&str>,
     ) -> Result<SpawnInfo, String> {
         // Generate a unique window title so we can find it
         let unique_title = format!("ovim-edit-{}", std::process::id());
@@ -36,6 +37,17 @@ impl TerminalSpawner for GhosttySpawner {
         let socket_args: Vec<String> = if let Some(socket) = socket_path {
             if editor_path.contains("nvim") || editor_path == "nvim" {
                 vec!["--listen".to_string(), socket.to_string_lossy().to_string()]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        // Build filetype args if provided (for nvim/vim)
+        let filetype_args: Vec<String> = if let Some(ft) = filetype {
+            if editor_path.contains("nvim") || editor_path.contains("vim") {
+                vec!["-c".to_string(), format!("set ft={}", ft)]
             } else {
                 vec![]
             }
@@ -87,6 +99,9 @@ impl TerminalSpawner for GhosttySpawner {
         cmd.arg("-e");
         cmd.arg(&resolved_editor);
         for arg in &socket_args {
+            cmd.arg(arg);
+        }
+        for arg in &filetype_args {
             cmd.arg(arg);
         }
         for arg in &editor_args {
