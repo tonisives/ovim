@@ -244,6 +244,7 @@ fn handle_live_sync_update(
     log::info!("Live sync: {} lines, {} chars, preview: {}", lines.len(), text.len(), preview);
 
     // For browsers, use browser scripting (JS) which works with code editors
+    let mut skip_ax_fallback = false;
     if let Some(bt) = browser_type {
         match browser_scripting::set_browser_element_text(bt, &text) {
             Ok(()) => {
@@ -253,19 +254,28 @@ fn handle_live_sync_update(
             }
             Err(e) => {
                 log::info!("Browser live sync failed: {}", e);
+                // Lexical editors don't respond to AX value changes either,
+                // so skip the AX fallback and rely on clipboard mode
+                if e.contains("unsupported_lexical") {
+                    log::info!("Lexical editor detected - will use clipboard mode on exit");
+                    skip_ax_fallback = true;
+                }
             }
         }
     }
 
-    // For non-browsers, use accessibility API
-    if let Some(element) = focus_element {
-        match accessibility::set_element_text(element, &text) {
-            Ok(()) => {
-                sync_flag.store(true, Ordering::SeqCst);
-                log::info!("Live sync (AX): updated text field ({} chars)", text.len());
-            }
-            Err(e) => {
-                log::debug!("Accessibility live sync failed: {}", e);
+    // For non-browsers (or browsers where JS didn't work), use accessibility API
+    // Skip for Lexical editors since they ignore AX value changes
+    if !skip_ax_fallback {
+        if let Some(element) = focus_element {
+            match accessibility::set_element_text(element, &text) {
+                Ok(()) => {
+                    sync_flag.store(true, Ordering::SeqCst);
+                    log::info!("Live sync (AX): updated text field ({} chars)", text.len());
+                }
+                Err(e) => {
+                    log::debug!("Accessibility live sync failed: {}", e);
+                }
             }
         }
     }

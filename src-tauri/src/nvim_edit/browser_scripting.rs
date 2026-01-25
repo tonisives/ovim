@@ -85,6 +85,35 @@ fn build_set_element_text_js(text: &str) -> String {
         return el;
     }}
 
+    // Check if element IS a Lexical editor or is INSIDE one (check ancestors, not descendants)
+    function findLexicalEditor(el) {{
+        // Check the element itself
+        if (el.hasAttribute && el.hasAttribute('data-lexical-editor')) {{
+            return el;
+        }}
+        // Check ancestors using closest (for regular DOM)
+        if (el.closest) {{
+            var lexicalEl = el.closest('[data-lexical-editor]');
+            if (lexicalEl) return lexicalEl;
+        }}
+        // For shadow DOM, we need to check the host chain
+        var current = el;
+        while (current) {{
+            if (current.hasAttribute && current.hasAttribute('data-lexical-editor')) {{
+                return current;
+            }}
+            // Move to parent or shadow host
+            if (current.parentElement) {{
+                current = current.parentElement;
+            }} else if (current.getRootNode && current.getRootNode().host) {{
+                current = current.getRootNode().host;
+            }} else {{
+                break;
+            }}
+        }}
+        return null;
+    }}
+
     var el = document.activeElement;
     if (!el || el === document.body || el === document.documentElement) return 'no_element';
 
@@ -101,35 +130,84 @@ fn build_set_element_text_js(text: &str) -> String {
     // Handle shadow DOM (recursively for nested shadow roots like Reddit uses)
     el = findDeepActiveElement(el);
 
+    // Only look for Lexical editor within the focused element's tree (not the whole DOM)
+    // This prevents updating a Lexical editor when user has moved focus to search bar
+    var lexicalEl = findLexicalEditor(el);
+    if (lexicalEl) {{
+        el = lexicalEl;
+    }}
+
     // Decode base64-encoded text
     var text = atob('{}');
 
     // Detect editor type for debugging
     var editorInfo = 'none';
     if (typeof monaco !== 'undefined') editorInfo = 'monaco';
+    else if (document.querySelector('.monaco-editor')) editorInfo = 'monaco_dom';
     else if (document.querySelector('.cm-editor')) editorInfo = 'cm6';
     else if (document.querySelector('.CodeMirror')) editorInfo = 'cm5';
     else if (typeof ace !== 'undefined') editorInfo = 'ace';
 
-    // Check for Monaco Editor first (used by boot.dev, VS Code web, etc.)
-    // Monaco stores its instance in a global or on DOM elements
-    if (typeof monaco !== 'undefined' && monaco.editor) {{
-        var editors = monaco.editor.getEditors();
-        if (editors && editors.length > 0) {{
-            var editor = editors[0];
-            var model = editor.getModel();
-            if (model) {{
-                // Get full range of document
-                var fullRange = model.getFullModelRange();
-                // Replace entire content
-                editor.executeEdits('ovim-live-sync', [{{
-                    range: fullRange,
-                    text: text,
-                    forceMoveMarkers: true
-                }}]);
-                return 'ok_monaco';
-            }}
+    // Check for Monaco Editor via script injection (works with coderpad.io, VS Code web, etc.)
+    // AppleScript's execute javascript runs in an isolated world, so we need to inject
+    // a script tag that runs in the page context to access global variables like 'editor'
+    if (document.querySelector('.monaco-editor')) {{
+        var commDiv = document.getElementById('__ovimMonacoComm');
+        if (!commDiv) {{
+            commDiv = document.createElement('div');
+            commDiv.id = '__ovimMonacoComm';
+            commDiv.style.display = 'none';
+            document.body.appendChild(commDiv);
         }}
+        // Pass the text via data attribute
+        commDiv.setAttribute('data-text', text);
+        commDiv.setAttribute('data-result', '');
+
+        // Inject script that runs in page context (can access window.editor and window.monaco)
+        var script = document.createElement('script');
+        script.textContent = '(function() {{' +
+            'var commDiv = document.getElementById("__ovimMonacoComm");' +
+            'if (!commDiv) {{ commDiv.setAttribute("data-result", "no_comm_div"); return; }}' +
+            'var textToSet = commDiv.getAttribute("data-text") || "";' +
+            'try {{' +
+                // Method 1: Global editor variable (coderpad.io)
+                'if (typeof editor !== "undefined" && typeof editor.executeEdits === "function" && typeof editor.getModel === "function") {{' +
+                    'var model = editor.getModel();' +
+                    'if (model) {{' +
+                        'var fullRange = model.getFullModelRange();' +
+                        'editor.executeEdits("ovim-live-sync", [{{ range: fullRange, text: textToSet, forceMoveMarkers: true }}]);' +
+                        'commDiv.setAttribute("data-result", "ok_monaco_global");' +
+                        'return;' +
+                    '}}' +
+                '}}' +
+                // Method 2: monaco.editor.getEditors() (boot.dev, standard Monaco)
+                'if (typeof monaco !== "undefined" && monaco.editor && monaco.editor.getEditors) {{' +
+                    'var editors = monaco.editor.getEditors();' +
+                    'if (editors && editors.length > 0) {{' +
+                        'var ed = editors[0];' +
+                        'var model = ed.getModel();' +
+                        'if (model) {{' +
+                            'var fullRange = model.getFullModelRange();' +
+                            'ed.executeEdits("ovim-live-sync", [{{ range: fullRange, text: textToSet, forceMoveMarkers: true }}]);' +
+                            'commDiv.setAttribute("data-result", "ok_monaco");' +
+                            'return;' +
+                        '}}' +
+                    '}}' +
+                '}}' +
+                'commDiv.setAttribute("data-result", "monaco_not_found");' +
+            '}} catch(e) {{' +
+                'commDiv.setAttribute("data-result", "monaco_error:" + e.message);' +
+            '}}' +
+        '}})();';
+        (document.head || document.documentElement).appendChild(script);
+        script.remove();
+
+        // Read result from DOM
+        var monacoResult = commDiv.getAttribute('data-result') || 'script_not_run';
+        if (monacoResult.indexOf('ok') === 0) {{
+            return monacoResult;
+        }}
+        // If Monaco injection didn't work, continue to other methods
     }}
 
     // Check for CodeMirror 6 (used by some modern editors)
@@ -173,6 +251,97 @@ fn build_set_element_text_js(text: &str) -> String {
         selection.removeAllRanges();
         selection.addRange(range);
 
+        // Check for Lexical editor - use script injection to access page context
+        // AppleScript JS runs in isolated world, but injected <script> runs in page context
+        // We use DOM (shared between contexts) to pass data and results
+        var isLexical = el.hasAttribute('data-lexical-editor');
+        if (isLexical) {{
+            // Use a hidden div in the DOM to communicate between isolated and page contexts
+            var commDiv = document.getElementById('__ovimComm');
+            if (!commDiv) {{
+                commDiv = document.createElement('div');
+                commDiv.id = '__ovimComm';
+                commDiv.style.display = 'none';
+                document.body.appendChild(commDiv);
+            }}
+            // Pass the text to page context via DOM
+            commDiv.setAttribute('data-text', text);
+            commDiv.setAttribute('data-result', '');
+
+            // Inject script that runs in page context (can access __lexicalEditor)
+            // Use parseEditorState + setEditorState since $getRoot etc aren't globally exposed
+            var script = document.createElement('script');
+            script.id = '__ovimLexicalScript';
+            script.textContent = '(function() {{' +
+                'var commDiv = document.getElementById("__ovimComm");' +
+                'if (!commDiv) {{ return; }}' +
+                'var textToSet = commDiv.getAttribute("data-text") || "";' +
+                'var el = document.activeElement;' +
+                'if (!el) {{ commDiv.setAttribute("data-result", "no_element"); return; }}' +
+                'var editor = el.__lexicalEditor;' +
+                'if (!editor) {{ commDiv.setAttribute("data-result", "no_editor"); return; }}' +
+                'try {{' +
+                    // Build Lexical state JSON
+                    'var lines = textToSet.split(String.fromCharCode(10));' +
+                    'var paragraphs = lines.map(function(line) {{' +
+                        'if (line.length === 0) {{' +
+                            'return {{' +
+                                'children: [],' +
+                                'direction: null,' +
+                                'format: "",' +
+                                'indent: 0,' +
+                                'type: "paragraph",' +
+                                'version: 1' +
+                            '}};' +
+                        '}}' +
+                        'return {{' +
+                            'children: [{{' +
+                                'detail: 0,' +
+                                'format: 0,' +
+                                'mode: "normal",' +
+                                'style: "",' +
+                                'text: line,' +
+                                'type: "text",' +
+                                'version: 1' +
+                            '}}],' +
+                            'direction: null,' +
+                            'format: "",' +
+                            'indent: 0,' +
+                            'type: "paragraph",' +
+                            'version: 1' +
+                        '}};' +
+                    '}});' +
+                    'var stateJson = {{' +
+                        'root: {{' +
+                            'children: paragraphs,' +
+                            'direction: null,' +
+                            'format: "",' +
+                            'indent: 0,' +
+                            'type: "root",' +
+                            'version: 1' +
+                        '}}' +
+                    '}};' +
+                    'var newState = editor.parseEditorState(JSON.stringify(stateJson));' +
+                    'editor.setEditorState(newState);' +
+                    'commDiv.setAttribute("data-result", "ok_lexical");' +
+                '}} catch(e) {{' +
+                    'commDiv.setAttribute("data-result", "lexical_error:" + e.message);' +
+                '}}' +
+            '}})();';
+            (document.head || document.documentElement).appendChild(script);
+            script.remove();
+
+            // Read result from DOM (shared between contexts)
+            var result = commDiv.getAttribute('data-result') || 'script_not_run';
+            if (result.indexOf('ok') === 0) {{
+                return result;
+            }}
+            // If script injection failed, fall through to other methods
+            if (result !== 'script_not_run') {{
+                return result;
+            }}
+        }}
+
         // Try insertFromPaste first - code editors handle paste as literal text
         // without triggering auto-indent or formatting
         var dataTransfer = new DataTransfer();
@@ -184,8 +353,10 @@ fn build_set_element_text_js(text: &str) -> String {
             bubbles: true,
             cancelable: true
         }});
-        var handled = !el.dispatchEvent(inputEvent);
-        if (handled) return 'ok';
+        var prevText = el.innerText;
+        el.dispatchEvent(inputEvent);
+        // Verify text actually changed (some editors handle the event but do nothing)
+        if (el.innerText !== prevText) return 'ok_paste';
 
         // Fallback: try insertReplacementText
         inputEvent = new InputEvent('beforeinput', {{
@@ -194,18 +365,20 @@ fn build_set_element_text_js(text: &str) -> String {
             bubbles: true,
             cancelable: true
         }});
-        handled = !el.dispatchEvent(inputEvent);
-        if (handled) return 'ok';
+        el.dispatchEvent(inputEvent);
+        if (el.innerText !== prevText) return 'ok_replacement';
 
-        // Fallback: try insertText
-        inputEvent = new InputEvent('beforeinput', {{
-            inputType: 'insertText',
-            data: text,
-            bubbles: true,
-            cancelable: true
-        }});
-        handled = !el.dispatchEvent(inputEvent);
-        if (handled) return 'ok';
+        // Fallback: try character-by-character insertText (works for most editors)
+        for (var i = 0; i < text.length; i++) {{
+            var charEvent = new InputEvent('beforeinput', {{
+                inputType: 'insertText',
+                data: text[i],
+                bubbles: true,
+                cancelable: true
+            }});
+            el.dispatchEvent(charEvent);
+        }}
+        if (el.innerText !== prevText) return 'ok_inserttext';
 
         // Last resort: set innerText directly (loses rich formatting but preserves whitespace)
         el.innerText = text;
@@ -245,8 +418,9 @@ pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result
         }
     };
 
-    // Debug: log script length and first/last parts
-    log::debug!("AppleScript length: {}, first 200: {}", script.len(), &script[..script.len().min(200)]);
+    // Debug: write script to file for inspection
+    let _ = std::fs::write("/tmp/set_text_script.txt", &script);
+    log::info!("set_browser_element_text: browser={:?}, text_len={}, script_len={}", browser_type, text.len(), script.len());
 
     let output = Command::new("osascript")
         .arg("-e")
@@ -254,15 +428,17 @@ pub fn set_browser_element_text(browser_type: BrowserType, text: &str) -> Result
         .output()
         .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
 
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    log::info!("set_browser_element_text: exit_code={}, stdout='{}', stderr='{}'", output.status, stdout, stderr);
+
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("AppleScript failed: {}", stderr));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
     if stdout.starts_with("ok") {
-        log::debug!("Browser text sync succeeded: {}", stdout);
+        log::info!("Browser text sync succeeded: {}", stdout);
         Ok(())
     } else {
         Err(format!("JavaScript returned: {}", stdout))
@@ -516,9 +692,8 @@ end tell"#,
 
 /// Build AppleScript to execute arbitrary JavaScript in Safari
 fn build_safari_execute_script(js: &str) -> String {
-    // Remove newlines and escape quotes for AppleScript string
+    // Escape quotes for AppleScript string - keep newlines as they work fine
     let js_escaped = js
-        .replace('\n', " ")
         .replace('\r', "")
         .replace('"', "\\\"");
     format!(
@@ -539,9 +714,8 @@ end tell"#,
 
 /// Build AppleScript to execute arbitrary JavaScript in Chrome-based browsers
 fn build_chrome_execute_script(app_name: &str, js: &str) -> String {
-    // Remove newlines and escape quotes for AppleScript string
+    // Escape quotes for AppleScript string - keep newlines as they work fine
     let js_escaped = js
-        .replace('\n', " ")
         .replace('\r', "")
         .replace('"', "\\\"");
     format!(
