@@ -70,40 +70,40 @@
     // Inject script that runs in page context
     var script = document.createElement("script");
     script.textContent =
-      "(function() {" +
+      '(function() {' +
       'var commDiv = document.getElementById("__ovimMonacoComm");' +
-      "if (!commDiv) { commDiv.setAttribute(\"data-result\", \"no_comm_div\"); return; }" +
+      'if (!commDiv) { commDiv.setAttribute("data-result", "no_comm_div"); return; }' +
       'var textToSet = commDiv.getAttribute("data-text") || "";' +
-      "try {" +
+      'try {' +
       // Method 1: Global editor variable (coderpad.io)
       'if (typeof editor !== "undefined" && typeof editor.executeEdits === "function" && typeof editor.getModel === "function") {' +
-      "var model = editor.getModel();" +
-      "if (model) {" +
-      "var fullRange = model.getFullModelRange();" +
+      'var model = editor.getModel();' +
+      'if (model) {' +
+      'var fullRange = model.getFullModelRange();' +
       'editor.executeEdits("ovim-live-sync", [{ range: fullRange, text: textToSet, forceMoveMarkers: true }]);' +
       'commDiv.setAttribute("data-result", "ok_monaco_global");' +
-      "return;" +
-      "}" +
-      "}" +
+      'return;' +
+      '}' +
+      '}' +
       // Method 2: monaco.editor.getEditors() (boot.dev, standard Monaco)
       'if (typeof monaco !== "undefined" && monaco.editor && monaco.editor.getEditors) {' +
-      "var editors = monaco.editor.getEditors();" +
-      "if (editors && editors.length > 0) {" +
-      "var ed = editors[0];" +
-      "var model = ed.getModel();" +
-      "if (model) {" +
-      "var fullRange = model.getFullModelRange();" +
+      'var editors = monaco.editor.getEditors();' +
+      'if (editors && editors.length > 0) {' +
+      'var ed = editors[0];' +
+      'var model = ed.getModel();' +
+      'if (model) {' +
+      'var fullRange = model.getFullModelRange();' +
       'ed.executeEdits("ovim-live-sync", [{ range: fullRange, text: textToSet, forceMoveMarkers: true }]);' +
       'commDiv.setAttribute("data-result", "ok_monaco");' +
-      "return;" +
-      "}" +
-      "}" +
-      "}" +
+      'return;' +
+      '}' +
+      '}' +
+      '}' +
       'commDiv.setAttribute("data-result", "monaco_not_found");' +
-      "} catch(e) {" +
+      '} catch(e) {' +
       'commDiv.setAttribute("data-result", "monaco_error:" + e.message);' +
-      "}" +
-      "})();";
+      '}' +
+      '})();';
     (document.head || document.documentElement).appendChild(script);
     script.remove();
 
@@ -171,62 +171,62 @@
     var script = document.createElement("script");
     script.id = "__ovimLexicalScript";
     script.textContent =
-      "(function() {" +
+      '(function() {' +
       'var commDiv = document.getElementById("__ovimComm");' +
-      "if (!commDiv) { return; }" +
+      'if (!commDiv) { return; }' +
       'var textToSet = commDiv.getAttribute("data-text") || "";' +
-      "var el = document.activeElement;" +
+      'var el = document.activeElement;' +
       'if (!el) { commDiv.setAttribute("data-result", "no_element"); return; }' +
-      "var editor = el.__lexicalEditor;" +
+      'var editor = el.__lexicalEditor;' +
       'if (!editor) { commDiv.setAttribute("data-result", "no_editor"); return; }' +
-      "try {" +
+      'try {' +
       // Build Lexical state JSON
-      "var lines = textToSet.split(String.fromCharCode(10));" +
-      "var paragraphs = lines.map(function(line) {" +
-      "if (line.length === 0) {" +
-      "return {" +
-      "children: []," +
-      "direction: null," +
+      'var lines = textToSet.split(String.fromCharCode(10));' +
+      'var paragraphs = lines.map(function(line) {' +
+      'if (line.length === 0) {' +
+      'return {' +
+      'children: [],' +
+      'direction: null,' +
       'format: "",' +
-      "indent: 0," +
+      'indent: 0,' +
       'type: "paragraph",' +
-      "version: 1" +
-      "};" +
-      "}" +
-      "return {" +
-      "children: [{" +
-      "detail: 0," +
-      "format: 0," +
+      'version: 1' +
+      '};' +
+      '}' +
+      'return {' +
+      'children: [{' +
+      'detail: 0,' +
+      'format: 0,' +
       'mode: "normal",' +
       'style: "",' +
-      "text: line," +
+      'text: line,' +
       'type: "text",' +
-      "version: 1" +
-      "}]," +
-      "direction: null," +
+      'version: 1' +
+      '}],' +
+      'direction: null,' +
       'format: "",' +
-      "indent: 0," +
+      'indent: 0,' +
       'type: "paragraph",' +
-      "version: 1" +
-      "};" +
-      "});" +
-      "var stateJson = {" +
-      "root: {" +
-      "children: paragraphs," +
-      "direction: null," +
+      'version: 1' +
+      '};' +
+      '});' +
+      'var stateJson = {' +
+      'root: {' +
+      'children: paragraphs,' +
+      'direction: null,' +
       'format: "",' +
-      "indent: 0," +
+      'indent: 0,' +
       'type: "root",' +
-      "version: 1" +
-      "}" +
-      "};" +
-      "var newState = editor.parseEditorState(JSON.stringify(stateJson));" +
-      "editor.setEditorState(newState);" +
+      'version: 1' +
+      '}' +
+      '};' +
+      'var newState = editor.parseEditorState(JSON.stringify(stateJson));' +
+      'editor.setEditorState(newState);' +
       'commDiv.setAttribute("data-result", "ok_lexical");' +
-      "} catch(e) {" +
+      '} catch(e) {' +
       'commDiv.setAttribute("data-result", "lexical_error:" + e.message);' +
-      "}" +
-      "})();";
+      '}' +
+      '})();';
     (document.head || document.documentElement).appendChild(script);
     script.remove();
 
@@ -295,7 +295,7 @@
   }
 
   // === Input/Textarea Handler ===
-  function tryInputTextarea(el, editorInfo) {
+  function tryInputTextarea(el, text, editorInfo) {
     if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return null;
 
     // For React/Vue controlled inputs, use native setter
@@ -361,7 +361,7 @@
   result = tryContentEditable(el, text, editorInfo);
   if (result) return result;
 
-  result = tryInputTextarea(el, editorInfo);
+  result = tryInputTextarea(el, text, editorInfo);
   if (result) return result;
 
   return "unsupported_" + el.tagName + "_" + editorInfo;
