@@ -395,6 +395,24 @@ pub fn get_focused_element_text() -> Option<String> {
     value.into_string()
 }
 
+/// Get the AXRole of the currently focused UI element
+pub fn get_focused_element_role() -> Option<String> {
+    let system_wide = CFHandle::new(unsafe { AXUIElementCreateSystemWide() })?;
+    let focused_app = system_wide.get_attribute("AXFocusedApplication")?;
+    let focused_element = focused_app.get_attribute("AXFocusedUIElement")?;
+    let role = focused_element.get_attribute("AXRole")?;
+    role.into_string()
+}
+
+/// Get the AXSubrole of the currently focused UI element (if any)
+pub fn get_focused_element_subrole() -> Option<String> {
+    let system_wide = CFHandle::new(unsafe { AXUIElementCreateSystemWide() })?;
+    let focused_app = system_wide.get_attribute("AXFocusedApplication")?;
+    let focused_element = focused_app.get_attribute("AXFocusedUIElement")?;
+    let subrole = focused_element.get_attribute("AXSubrole")?;
+    subrole.into_string()
+}
+
 /// Get the bounds of the screen containing a given point
 /// Returns the screen frame (x, y, width, height) in screen coordinates
 pub fn get_screen_bounds_for_point(x: f64, y: f64) -> Option<ElementFrame> {

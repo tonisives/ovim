@@ -85,6 +85,35 @@ fn build_set_element_text_js(text: &str) -> String {
         return el;
     }}
 
+    // Check if element IS a Lexical editor or is INSIDE one (check ancestors, not descendants)
+    function findLexicalEditor(el) {{
+        // Check the element itself
+        if (el.hasAttribute && el.hasAttribute('data-lexical-editor')) {{
+            return el;
+        }}
+        // Check ancestors using closest (for regular DOM)
+        if (el.closest) {{
+            var lexicalEl = el.closest('[data-lexical-editor]');
+            if (lexicalEl) return lexicalEl;
+        }}
+        // For shadow DOM, we need to check the host chain
+        var current = el;
+        while (current) {{
+            if (current.hasAttribute && current.hasAttribute('data-lexical-editor')) {{
+                return current;
+            }}
+            // Move to parent or shadow host
+            if (current.parentElement) {{
+                current = current.parentElement;
+            }} else if (current.getRootNode && current.getRootNode().host) {{
+                current = current.getRootNode().host;
+            }} else {{
+                break;
+            }}
+        }}
+        return null;
+    }}
+
     var el = document.activeElement;
     if (!el || el === document.body || el === document.documentElement) return 'no_element';
 
@@ -100,6 +129,13 @@ fn build_set_element_text_js(text: &str) -> String {
 
     // Handle shadow DOM (recursively for nested shadow roots like Reddit uses)
     el = findDeepActiveElement(el);
+
+    // Only look for Lexical editor within the focused element's tree (not the whole DOM)
+    // This prevents updating a Lexical editor when user has moved focus to search bar
+    var lexicalEl = findLexicalEditor(el);
+    if (lexicalEl) {{
+        el = lexicalEl;
+    }}
 
     // Decode base64-encoded text
     var text = atob('{}');
@@ -173,12 +209,95 @@ fn build_set_element_text_js(text: &str) -> String {
         selection.removeAllRanges();
         selection.addRange(range);
 
-        // Check for Lexical editor - these only respond to trusted events
-        // so synthetic JS events won't work. Return a specific error so we
-        // can fall back to clipboard mode.
-        var isLexical = el.hasAttribute('data-lexical-editor') || el.__lexicalEditor;
+        // Check for Lexical editor - use script injection to access page context
+        // AppleScript JS runs in isolated world, but injected <script> runs in page context
+        // We use DOM (shared between contexts) to pass data and results
+        var isLexical = el.hasAttribute('data-lexical-editor');
         if (isLexical) {{
-            return 'unsupported_lexical';
+            // Use a hidden div in the DOM to communicate between isolated and page contexts
+            var commDiv = document.getElementById('__ovimComm');
+            if (!commDiv) {{
+                commDiv = document.createElement('div');
+                commDiv.id = '__ovimComm';
+                commDiv.style.display = 'none';
+                document.body.appendChild(commDiv);
+            }}
+            // Pass the text to page context via DOM
+            commDiv.setAttribute('data-text', text);
+            commDiv.setAttribute('data-result', '');
+
+            // Inject script that runs in page context (can access __lexicalEditor)
+            // Use parseEditorState + setEditorState since $getRoot etc aren't globally exposed
+            var script = document.createElement('script');
+            script.id = '__ovimLexicalScript';
+            script.textContent = '(function() {{' +
+                'var commDiv = document.getElementById("__ovimComm");' +
+                'if (!commDiv) {{ return; }}' +
+                'var textToSet = commDiv.getAttribute("data-text") || "";' +
+                'var el = document.activeElement;' +
+                'if (!el) {{ commDiv.setAttribute("data-result", "no_element"); return; }}' +
+                'var editor = el.__lexicalEditor;' +
+                'if (!editor) {{ commDiv.setAttribute("data-result", "no_editor"); return; }}' +
+                'try {{' +
+                    // Build Lexical state JSON
+                    'var lines = textToSet.split(String.fromCharCode(10));' +
+                    'var paragraphs = lines.map(function(line) {{' +
+                        'if (line.length === 0) {{' +
+                            'return {{' +
+                                'children: [],' +
+                                'direction: null,' +
+                                'format: "",' +
+                                'indent: 0,' +
+                                'type: "paragraph",' +
+                                'version: 1' +
+                            '}};' +
+                        '}}' +
+                        'return {{' +
+                            'children: [{{' +
+                                'detail: 0,' +
+                                'format: 0,' +
+                                'mode: "normal",' +
+                                'style: "",' +
+                                'text: line,' +
+                                'type: "text",' +
+                                'version: 1' +
+                            '}}],' +
+                            'direction: null,' +
+                            'format: "",' +
+                            'indent: 0,' +
+                            'type: "paragraph",' +
+                            'version: 1' +
+                        '}};' +
+                    '}});' +
+                    'var stateJson = {{' +
+                        'root: {{' +
+                            'children: paragraphs,' +
+                            'direction: null,' +
+                            'format: "",' +
+                            'indent: 0,' +
+                            'type: "root",' +
+                            'version: 1' +
+                        '}}' +
+                    '}};' +
+                    'var newState = editor.parseEditorState(JSON.stringify(stateJson));' +
+                    'editor.setEditorState(newState);' +
+                    'commDiv.setAttribute("data-result", "ok_lexical");' +
+                '}} catch(e) {{' +
+                    'commDiv.setAttribute("data-result", "lexical_error:" + e.message);' +
+                '}}' +
+            '}})();';
+            (document.head || document.documentElement).appendChild(script);
+            script.remove();
+
+            // Read result from DOM (shared between contexts)
+            var result = commDiv.getAttribute('data-result') || 'script_not_run';
+            if (result.indexOf('ok') === 0) {{
+                return result;
+            }}
+            // If script injection failed, fall through to other methods
+            if (result !== 'script_not_run') {{
+                return result;
+            }}
         }}
 
         // Try insertFromPaste first - code editors handle paste as literal text

@@ -95,16 +95,55 @@ pub fn capture_text_and_frame(
         initial_element_frame
     };
 
-    // Get text from the focused element
-    let text = capture_text_content(browser_type);
+    // Get text from the focused element, tracking whether we used clipboard
+    let (text, _used_clipboard, is_address_bar) = capture_text_content_with_source();
+
+    // If we're in a browser's address bar, disable browser live sync
+    // to avoid updating web page elements when editing the URL
+    let browser_type = if browser_type.is_some() && is_address_bar {
+        log::info!("Browser address bar detected - disabling live sync to avoid updating web content");
+        None
+    } else {
+        browser_type
+    };
 
     CaptureResult { text, element_frame, cursor_position, browser_type }
 }
 
+/// Check if the focused element is the browser's address bar (URL field)
+/// Returns true if it's the address bar, false otherwise
+fn is_browser_address_bar() -> bool {
+    let role = accessibility::get_focused_element_role();
+    let subrole = accessibility::get_focused_element_subrole();
+    log::info!("Focused element role: {:?}, subrole: {:?}", role, subrole);
+
+    // Browser address bar: AXTextField with no subrole
+    // Web content text fields: AXTextArea (multiline) or AXTextField with specific subroles
+    //
+    // Reddit comment field: AXTextArea
+    // Chrome/Brave address bar: AXTextField (no subrole)
+    if let Some(r) = &role {
+        if r == "AXTextField" {
+            // AXTextField could be address bar or a web form input
+            // Address bar has no subrole, web inputs often have subroles
+            // For safety, treat AXTextField without subrole as address bar in browsers
+            if subrole.is_none() {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 /// Capture text content from the focused element
-fn capture_text_content(_browser_type: Option<BrowserType>) -> String {
+/// Returns (text, used_clipboard, is_address_bar)
+fn capture_text_content_with_source() -> (String, bool, bool) {
+    // Check if we're in the browser address bar before capturing
+    let is_address_bar = is_browser_address_bar();
+
     // First try accessibility API (doesn't cause beeps)
-    let mut text = accessibility::get_focused_element_text().unwrap_or_default();
+    let text = accessibility::get_focused_element_text().unwrap_or_default();
 
     let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
     log::info!("Got text: {} chars, preview: {}", text.len(), preview);
@@ -113,10 +152,10 @@ fn capture_text_content(_browser_type: Option<BrowserType>) -> String {
     if text.is_empty() {
         log::info!("Accessibility text capture returned empty, trying clipboard-based capture");
         if let Some(captured) = capture_text_via_clipboard() {
-            text = captured;
-            log::info!("Captured {} chars via clipboard", text.len());
+            log::info!("Captured {} chars via clipboard", captured.len());
+            return (captured, true, is_address_bar);
         }
     }
 
-    text
+    (text, false, is_address_bar)
 }
