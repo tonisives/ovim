@@ -71,12 +71,14 @@ impl EditSessionManager {
             .map_err(|e| format!("Failed to get file mtime: {}", e))?;
 
         // Spawn terminal with RPC socket for live buffer sync
+        // Consider whitespace-only text as empty (start in insert mode)
+        let text_is_empty = text.trim().is_empty();
         let SpawnInfo {
             terminal_type,
             process_id,
             child: _,
             window_title,
-        } = spawn_terminal(&settings, &temp_file, geometry, Some(&socket_path))?;
+        } = spawn_terminal(&settings, &temp_file, geometry, Some(&socket_path), text_is_empty)?;
 
         // Create session
         let session = EditSession {

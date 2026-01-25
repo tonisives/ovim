@@ -25,7 +25,7 @@ struct SpawnConfig {
 }
 
 impl SpawnConfig {
-    fn new(settings: &NvimEditSettings, file_path: &str, socket_path: Option<&Path>) -> Self {
+    fn new(settings: &NvimEditSettings, file_path: &str, socket_path: Option<&Path>, text_is_empty: bool) -> Self {
         let editor_path = settings.editor_path();
         let resolved_editor = resolve_command_path(&editor_path);
         log::info!("Resolved editor path: {} -> {}", editor_path, resolved_editor);
@@ -45,8 +45,8 @@ impl SpawnConfig {
             }
         }
 
-        // Add editor args from settings
-        for arg in settings.editor_args() {
+        // Add editor args from settings (insert mode if text is empty)
+        for arg in settings.editor_args(text_is_empty) {
             editor_cmd.push(arg.to_string());
         }
 
@@ -91,8 +91,9 @@ impl TerminalSpawner for AlacrittySpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
+        text_is_empty: bool,
     ) -> Result<SpawnInfo, String> {
-        let config = SpawnConfig::new(settings, file_path, socket_path)
+        let config = SpawnConfig::new(settings, file_path, socket_path, text_is_empty)
             .with_geometry(geometry.as_ref());
 
         // Try msg create-window first (faster, reuses existing daemon)

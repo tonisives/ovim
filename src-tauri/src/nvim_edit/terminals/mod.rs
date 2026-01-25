@@ -97,6 +97,8 @@ pub trait TerminalSpawner {
     ///
     /// If `custom_env` is provided, these environment variables will be applied
     /// to the spawned process (from the launcher script).
+    ///
+    /// If `text_is_empty` is true, the editor should start in insert mode.
     fn spawn(
         &self,
         settings: &NvimEditSettings,
@@ -104,6 +106,7 @@ pub trait TerminalSpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
+        text_is_empty: bool,
     ) -> Result<SpawnInfo, String>;
 }
 
@@ -118,11 +121,14 @@ pub trait TerminalSpawner {
 /// - If the script fails (non-zero exit), return error
 ///
 /// The terminal selection is passed via OVIM_TERMINAL env var for the script to use if needed.
+///
+/// If `text_is_empty` is true, the editor should start in insert mode.
 pub fn spawn_terminal(
     settings: &NvimEditSettings,
     temp_file: &Path,
     geometry: Option<WindowGeometry>,
     socket_path: Option<&Path>,
+    text_is_empty: bool,
 ) -> Result<SpawnInfo, String> {
     let terminal_type = TerminalType::from_string(&settings.terminal);
     let file_path = temp_file.to_string_lossy();
@@ -140,13 +146,13 @@ pub fn spawn_terminal(
     }
 
     match terminal_type {
-        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path, None),
-        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path, None),
-        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path, None),
-        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path, None),
-        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, None),
-        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None),
-        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, None),
+        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty),
+        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty),
+        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty),
+        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty),
+        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty),
+        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty),
+        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty),
     }
 }
 

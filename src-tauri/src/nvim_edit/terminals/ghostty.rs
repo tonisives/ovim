@@ -22,13 +22,14 @@ impl TerminalSpawner for GhosttySpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
+        text_is_empty: bool,
     ) -> Result<SpawnInfo, String> {
         // Generate a unique window title so we can find it
         let unique_title = format!("ovim-edit-{}", std::process::id());
 
-        // Get editor path and args from settings
+        // Get editor path and args from settings (insert mode if text is empty)
         let editor_path = settings.editor_path();
-        let editor_args = settings.editor_args();
+        let editor_args = settings.editor_args(text_is_empty);
         let process_name = settings.editor_process_name();
 
         // Build socket args for nvim RPC if socket_path provided and using nvim

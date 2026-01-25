@@ -23,10 +23,11 @@ impl TerminalSpawner for WezTermSpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
+        text_is_empty: bool,
     ) -> Result<SpawnInfo, String> {
-        // Get editor path and args from settings
+        // Get editor path and args from settings (insert mode if text is empty)
         let editor_path = settings.editor_path();
-        let editor_args = settings.editor_args();
+        let editor_args = settings.editor_args(text_is_empty);
 
         // Build socket args for nvim RPC if socket_path provided and using nvim
         let socket_args: Vec<String> = if let Some(socket) = socket_path {
