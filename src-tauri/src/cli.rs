@@ -12,6 +12,8 @@ pub enum IpcCommand {
     Insert,
     Normal,
     Visual,
+    EditPopup,
+    ClickMode,
     LauncherHandled {
         session_id: String,
         editor_pid: Option<u32>,
@@ -75,6 +77,8 @@ fn print_usage() {
     eprintln!("  normal, n         Switch to normal mode");
     eprintln!("  visual, v         Switch to visual mode");
     eprintln!("  set <mode>        Set mode to insert/normal/visual");
+    eprintln!("  edit, e           Activate Edit Popup (edit text field in nvim)");
+    eprintln!("  click, c          Activate Click Mode (keyboard-driven clicking)");
     eprintln!();
     eprintln!("Launcher script commands:");
     eprintln!("  launcher-handled --session <id> [--pid <pid>]");
@@ -86,6 +90,8 @@ fn print_usage() {
     eprintln!("  ovim toggle       # Toggle mode (useful for Karabiner)");
     eprintln!("  ovim normal       # Enter normal mode");
     eprintln!("  ovim insert       # Enter insert mode");
+    eprintln!("  ovim edit         # Edit current text field in nvim");
+    eprintln!("  ovim click        # Show click mode hints");
 }
 
 fn get_arg_value(args: &[String], flag: &str) -> Option<String> {
@@ -112,6 +118,8 @@ async fn main() {
         "insert" | "i" => IpcCommand::Insert,
         "normal" | "n" => IpcCommand::Normal,
         "visual" | "v" => IpcCommand::Visual,
+        "edit" | "e" => IpcCommand::EditPopup,
+        "click" | "c" => IpcCommand::ClickMode,
         "set" => {
             if args.len() < 3 {
                 eprintln!("Error: 'set' requires a mode argument (insert/normal/visual)");

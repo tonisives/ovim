@@ -40,6 +40,19 @@ export function useKeyRecording({
       .catch(() => setDisplayName(null))
   }, [key, modifiers])
 
+  // Cancel recording when window loses focus
+  useEffect(() => {
+    if (!isRecording) return
+
+    const handleBlur = () => {
+      cancelRecordKey().catch(() => {})
+      setIsRecording(false)
+    }
+
+    window.addEventListener("blur", handleBlur)
+    return () => window.removeEventListener("blur", handleBlur)
+  }, [isRecording])
+
   const handleRecordKey = useCallback(async () => {
     setIsRecording(true)
     try {

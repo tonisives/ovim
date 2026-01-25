@@ -46,7 +46,7 @@ pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn pick_app() -> Result<Option<String>, String> {
+pub fn pick_app(app: AppHandle) -> Result<Option<String>, String> {
     use std::process::Command;
 
     let script = r#"
@@ -60,6 +60,11 @@ pub fn pick_app() -> Result<Option<String>, String> {
         .arg(script)
         .output()
         .map_err(|e| format!("Failed to run osascript: {}", e))?;
+
+    // Refocus settings window after picker closes
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.set_focus();
+    }
 
     if !output.status.success() {
         return Ok(None);

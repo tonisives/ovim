@@ -56,23 +56,14 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
       <div className="form-group">
         <label>Keyboard shortcut</label>
         <div className="key-display">
-          {isRecording ? (
-            <button type="button" className="record-key-btn recording" onClick={handleCancelRecord}>
-              Press any key...
-            </button>
-          ) : (
-            <>
-              <span className="current-key">{displayName || clickMode.shortcut_key}</span>
-              <button
-                type="button"
-                className="record-key-btn"
-                onClick={handleRecordKey}
-                disabled={!clickMode.enabled}
-              >
-                Record Key
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            className={`current-key clickable${isRecording ? " recording" : ""}`}
+            onClick={isRecording ? handleCancelRecord : handleRecordKey}
+            disabled={!clickMode.enabled && !isRecording}
+          >
+            {isRecording ? "Press any key..." : displayName || clickMode.shortcut_key}
+          </button>
         </div>
       </div>
 

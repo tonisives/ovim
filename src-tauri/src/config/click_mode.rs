@@ -71,10 +71,10 @@ impl Default for ClickModeSettings {
             enabled: true,
             shortcut_key: "f".to_string(),
             shortcut_modifiers: VimKeyModifiers {
-                shift: true,
-                control: false,
+                shift: false,
+                control: true,
                 option: false,
-                command: true, // Cmd+Shift+F
+                command: true, // Ctrl+Cmd+F
             },
             hint_chars: "asfghjklqwetyuiopzxvbm".to_string(), // excludes r, c, d, n (action keys)
             show_search_bar: true,

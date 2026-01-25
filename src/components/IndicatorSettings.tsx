@@ -105,23 +105,13 @@ export function IndicatorSettings({ settings, onUpdate }: Props) {
                 </option>
               )}
             </select>
-            {isRecording ? (
-              <button
-                type="button"
-                className="record-key-btn recording"
-                onClick={handleCancelRecord}
-              >
-                Press any key...
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="record-key-btn"
-                onClick={handleRecordKey}
-              >
-                Record Key
-              </button>
-            )}
+            <button
+              type="button"
+              className={`current-key clickable${isRecording ? " recording" : ""}`}
+              onClick={isRecording ? handleCancelRecord : handleRecordKey}
+            >
+              {isRecording ? "Press any key..." : "Custom..."}
+            </button>
           </div>
         </div>
 

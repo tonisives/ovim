@@ -510,10 +510,10 @@ body {
 @keyframes pulse {
   0%,
   100% {
-    opacity: 1;
+    box-shadow: 0 0 0 2px var(--accent-color);
   }
   50% {
-    opacity: 0.7;
+    box-shadow: 0 0 0 4px var(--accent-hover);
   }
 }
 
@@ -535,6 +535,33 @@ body {
   font-size: 12px;
   color: var(--text-primary);
   min-width: 100px;
+}
+
+.current-key.clickable {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.current-key.clickable:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
+}
+
+.current-key.clickable:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.current-key.clickable:disabled:hover {
+  background: var(--bg-primary);
+  border-color: var(--border-color);
+}
+
+.current-key.clickable.recording {
+  background: var(--bg-secondary);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  animation: pulse 1.5s infinite;
 }
 
 /* Text input */
