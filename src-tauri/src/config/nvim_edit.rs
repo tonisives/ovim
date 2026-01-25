@@ -54,6 +54,16 @@ impl EditorType {
             EditorType::Custom => vec![],
         }
     }
+
+    /// Get the arguments to position cursor at end of file and start in insert mode
+    /// Used when the text field is empty
+    pub fn cursor_end_args_insert(&self) -> Vec<&'static str> {
+        match self {
+            EditorType::Neovim | EditorType::Vim => vec!["+startinsert"],
+            EditorType::Helix => vec![], // Helix doesn't have equivalent startup command
+            EditorType::Custom => vec![],
+        }
+    }
 }
 
 /// Settings for Edit Popup feature
@@ -186,8 +196,13 @@ impl NvimEditSettings {
     }
 
     /// Get the editor arguments for cursor positioning
-    pub fn editor_args(&self) -> Vec<&str> {
-        self.editor.cursor_end_args()
+    /// If text is empty, also start in insert mode
+    pub fn editor_args(&self, text_is_empty: bool) -> Vec<&'static str> {
+        if text_is_empty {
+            self.editor.cursor_end_args_insert()
+        } else {
+            self.editor.cursor_end_args()
+        }
     }
 
     /// Get the process name to search for when waiting for editor to exit

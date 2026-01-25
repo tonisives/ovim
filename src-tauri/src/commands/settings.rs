@@ -116,8 +116,9 @@ pub fn open_launcher_script(state: State<AppState>) -> Result<(), String> {
     match crate::nvim_edit::terminals::spawn_terminal(
         &nvim_edit_clone,
         &script_path,
-        None, // No popup geometry - open fullscreen
-        None, // No RPC socket needed
+        None,  // No popup geometry - open fullscreen
+        None,  // No RPC socket needed
+        false, // Script file is not empty
     ) {
         Ok(spawn_info) => {
             log::info!("Launched terminal with PID: {:?}", spawn_info.process_id);
