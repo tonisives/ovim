@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { invoke } from "@tauri-apps/api/core"
 import type { NvimEditSettings, DoubleTapModifier } from "../SettingsApp"
@@ -20,6 +21,64 @@ interface Props {
   onShowErrorDialog: (type: "terminal" | "editor") => void
 }
 
+function DomainFiletypesModal({
+  filetypes,
+  onClose,
+  onRemove,
+}: {
+  filetypes: Record<string, string>
+  onClose: () => void
+  onRemove: (domain: string) => void
+}) {
+  const entries = Object.entries(filetypes)
+
+  return (
+    <div className="error-dialog-overlay" onClick={onClose}>
+      <div className="error-dialog domain-filetypes-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Saved Filetypes</h3>
+        <p className="hint">
+          Filetypes are automatically saved when you set them in nvim (e.g., <code>:set ft=markdown</code>).
+          They will be restored the next time you edit text on that domain.
+        </p>
+        {entries.length === 0 ? (
+          <p className="empty-state">No saved filetypes yet.</p>
+        ) : (
+          <table className="domain-filetypes-table">
+            <thead>
+              <tr>
+                <th>Domain/App</th>
+                <th>Filetype</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(([domain, filetype]) => (
+                <tr key={domain}>
+                  <td className="domain-cell" title={domain}>{domain}</td>
+                  <td className="filetype-cell">{filetype}</td>
+                  <td className="action-cell">
+                    <button
+                      type="button"
+                      className="remove-btn"
+                      onClick={() => onRemove(domain)}
+                      title="Remove"
+                    >
+                      x
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="error-dialog-buttons">
+          <button onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ConfigTab({
   nvimEdit,
   validation,
@@ -30,6 +89,20 @@ export function ConfigTab({
   onCancelRecord,
   onShowErrorDialog,
 }: Props) {
+  const [showFiletypesModal, setShowFiletypesModal] = useState(false)
+
+  const handleRemoveFiletype = async (domain: string) => {
+    try {
+      await invoke("remove_domain_filetype", { domain })
+      // Update local state
+      const newFiletypes = { ...nvimEdit.domain_filetypes }
+      delete newFiletypes[domain]
+      onUpdate({ domain_filetypes: newFiletypes })
+    } catch (e) {
+      console.error("Failed to remove filetype:", e)
+    }
+  }
+
   const handleEditorChange = (newEditor: string) => {
     const currentPath = nvimEdit.nvim_path
     const isDefaultPath =
@@ -402,6 +475,31 @@ export function ConfigTab({
           tracking. Use this if you experience issues with specific apps.
         </span>
       </div>
+
+      <div className="form-group">
+        <label>Saved Filetypes</label>
+        <div className="path-input-row">
+          <button
+            type="button"
+            className="edit-script-btn"
+            onClick={() => setShowFiletypesModal(true)}
+            disabled={!nvimEdit.enabled}
+          >
+            Manage Filetypes ({Object.keys(nvimEdit.domain_filetypes || {}).length})
+          </button>
+        </div>
+        <span className="hint">
+          Filetypes are remembered per domain/app and restored automatically.
+        </span>
+      </div>
+
+      {showFiletypesModal && (
+        <DomainFiletypesModal
+          filetypes={nvimEdit.domain_filetypes || {}}
+          onClose={() => setShowFiletypesModal(false)}
+          onRemove={handleRemoveFiletype}
+        />
+      )}
     </>
   )
 }

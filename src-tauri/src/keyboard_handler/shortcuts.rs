@@ -82,6 +82,7 @@ pub fn check_nvim_edit_shortcut(
     event: &KeyEvent,
     settings: &Settings,
     edit_session_manager: Arc<EditSessionManager>,
+    shared_settings: Arc<Mutex<Settings>>,
 ) -> Option<Option<KeyEvent>> {
     let nvim_settings = &settings.nvim_edit;
 
@@ -100,7 +101,7 @@ pub fn check_nvim_edit_shortcut(
 
     let nvim_settings_clone = nvim_settings.clone();
     thread::spawn(move || {
-        if let Err(e) = nvim_edit::trigger_nvim_edit(edit_session_manager, nvim_settings_clone) {
+        if let Err(e) = nvim_edit::trigger_nvim_edit(edit_session_manager, nvim_settings_clone, Some(shared_settings)) {
             log::error!("Failed to trigger nvim edit: {}", e);
         }
     });

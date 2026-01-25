@@ -31,6 +31,7 @@ export interface NvimEditSettings {
   use_custom_script: boolean;
   clipboard_mode: boolean;
   double_tap_modifier: DoubleTapModifier;
+  domain_filetypes: Record<string, string>;
 }
 
 export interface ClickModeSettings {
@@ -95,8 +96,22 @@ export function SettingsApp() {
   const [activeTab, setActiveTab] = useState<TabId>("general");
 
   useEffect(() => {
-    invoke<Settings>("get_settings")
-      .then(setSettings)
+    // Load settings and domain filetypes separately
+    // (domain_filetypes are stored in a separate file)
+    Promise.all([
+      invoke<Settings>("get_settings"),
+      invoke<Record<string, string>>("get_domain_filetypes"),
+    ])
+      .then(([loadedSettings, domainFiletypes]) => {
+        // Merge domain_filetypes into nvim_edit settings
+        setSettings({
+          ...loadedSettings,
+          nvim_edit: {
+            ...loadedSettings.nvim_edit,
+            domain_filetypes: domainFiletypes,
+          },
+        });
+      })
       .catch((e) => console.error("Failed to load settings:", e));
   }, []);
 

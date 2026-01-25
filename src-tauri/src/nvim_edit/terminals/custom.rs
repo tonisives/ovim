@@ -236,6 +236,7 @@ impl TerminalSpawner for CustomSpawner {
         socket_path: Option<&Path>,
         _custom_env: Option<&HashMap<String, String>>,
         _text_is_empty: bool,
+        _filetype: Option<&str>,
     ) -> Result<SpawnInfo, String> {
         // When terminal=custom, use run_launcher_script which handles IPC callbacks
         match run_launcher_script(settings, file_path, geometry.as_ref(), socket_path) {

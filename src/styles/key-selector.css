@@ -1,0 +1,93 @@
+/* Key selector with record button */
+
+.key-selector {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.key-selector select {
+  flex: 1;
+  min-width: 220px;
+}
+
+.record-key-btn {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.record-key-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
+}
+
+.record-key-btn.recording {
+  background: var(--accent-bg);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--accent-color);
+  }
+  50% {
+    box-shadow: 0 0 0 4px var(--accent-hover);
+  }
+}
+
+/* Key display for nvim edit settings */
+.key-display {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.current-key {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: "SF Mono", Monaco, monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  min-width: 100px;
+}
+
+.current-key.clickable {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.current-key.clickable:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
+}
+
+.current-key.clickable:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.current-key.clickable:disabled:hover {
+  background: var(--bg-primary);
+  border-color: var(--border-color);
+}
+
+.current-key.clickable.recording {
+  background: var(--bg-secondary);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  animation: pulse 1.5s infinite;
+}

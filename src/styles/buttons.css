@@ -1,0 +1,23 @@
+/* Buttons */
+
+.edit-script-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--accent-color);
+  border-radius: 6px;
+  background: var(--accent-color);
+  color: white;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.edit-script-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.edit-script-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

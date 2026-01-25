@@ -1,0 +1,32 @@
+/* Settings sections */
+
+.settings-section h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+}
+
+.settings-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 20px 0 12px;
+  color: var(--text-primary);
+}
+
+.section-description {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+/* Section header with badges */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.section-header h2 {
+  margin-bottom: 0;
+}

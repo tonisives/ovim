@@ -1,0 +1,27 @@
+/* Font settings */
+
+.font-settings {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.font-settings h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.font-preview {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.font-preview-text {
+  font-size: 24px;
+  font-weight: bold;
+}

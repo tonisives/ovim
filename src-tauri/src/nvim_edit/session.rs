@@ -22,6 +22,8 @@ pub struct EditSession {
     pub window_title: Option<String>,
     /// Socket path for RPC communication with nvim
     pub socket_path: PathBuf,
+    /// Domain key for filetype persistence (browser hostname or app bundle ID)
+    pub domain_key: String,
 }
 
 /// Manager for edit sessions
@@ -43,6 +45,8 @@ impl EditSessionManager {
         text: String,
         settings: NvimEditSettings,
         geometry: Option<WindowGeometry>,
+        domain_key: String,
+        saved_filetype: Option<&str>,
     ) -> Result<Uuid, String> {
         // Create temp directory if needed
         let cache_dir = dirs::cache_dir()
@@ -78,7 +82,7 @@ impl EditSessionManager {
             process_id,
             child: _,
             window_title,
-        } = spawn_terminal(&settings, &temp_file, geometry, Some(&socket_path), text_is_empty)?;
+        } = spawn_terminal(&settings, &temp_file, geometry, Some(&socket_path), text_is_empty, saved_filetype)?;
 
         // Create session
         let session = EditSession {
@@ -91,6 +95,7 @@ impl EditSessionManager {
             process_id,
             window_title,
             socket_path,
+            domain_key,
         };
 
         // Store session
@@ -113,6 +118,7 @@ impl EditSessionManager {
             process_id: s.process_id,
             window_title: s.window_title.clone(),
             socket_path: s.socket_path.clone(),
+            domain_key: s.domain_key.clone(),
         })
     }
 

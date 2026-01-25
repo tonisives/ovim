@@ -119,6 +119,7 @@ pub fn open_launcher_script(state: State<AppState>) -> Result<(), String> {
         None,  // No popup geometry - open fullscreen
         None,  // No RPC socket needed
         false, // Script file is not empty
+        None,  // No filetype override
     ) {
         Ok(spawn_info) => {
             log::info!("Launched terminal with PID: {:?}", spawn_info.process_id);
@@ -135,4 +136,23 @@ pub fn open_launcher_script(state: State<AppState>) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+#[tauri::command]
+pub fn remove_domain_filetype(
+    state: State<AppState>,
+    domain: String,
+) -> Result<(), String> {
+    let mut settings = state.settings.lock().unwrap();
+    settings.nvim_edit.remove_filetype_for_domain(&domain);
+    // Note: settings.save() doesn't save domain_filetypes (they're in separate file)
+    // remove_filetype_for_domain already saves to domain-filetypes.yaml
+    Ok(())
+}
+
+/// Get all domain filetypes (stored in separate file from main settings)
+#[tauri::command]
+pub fn get_domain_filetypes(state: State<AppState>) -> std::collections::HashMap<String, String> {
+    let settings = state.settings.lock().unwrap();
+    settings.nvim_edit.get_all_domain_filetypes().clone()
 }

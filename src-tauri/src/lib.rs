@@ -131,8 +131,9 @@ fn handle_ipc_command(
                 s.nvim_edit.clone()
             };
             let manager = Arc::clone(edit_session_manager);
+            let shared_settings = Arc::clone(settings);
             std::thread::spawn(move || {
-                if let Err(e) = nvim_edit::trigger_nvim_edit(manager, nvim_settings) {
+                if let Err(e) = nvim_edit::trigger_nvim_edit(manager, nvim_settings, Some(shared_settings)) {
                     log::error!("Failed to trigger nvim edit via IPC: {}", e);
                 }
             });
@@ -311,12 +312,13 @@ fn handle_double_tap_activation(
     } else if nvim_edit_trigger && settings_guard.nvim_edit.enabled {
         log::info!("Double-tap {:?} detected - activating nvim edit", double_tap_key);
         let nvim_settings = settings_guard.nvim_edit.clone();
+        let shared_settings = Arc::clone(settings);
         drop(settings_guard);
 
         // Trigger nvim edit
         let manager = Arc::clone(edit_session_manager);
         std::thread::spawn(move || {
-            if let Err(e) = nvim_edit::trigger_nvim_edit(manager, nvim_settings) {
+            if let Err(e) = nvim_edit::trigger_nvim_edit(manager, nvim_settings, Some(shared_settings)) {
                 log::error!("Failed to trigger nvim edit via double-tap: {}", e);
             }
         });
@@ -538,6 +540,8 @@ pub fn run() {
             commands::webview_log,
             commands::validate_nvim_edit_paths,
             commands::open_launcher_script,
+            commands::remove_domain_filetype,
+            commands::get_domain_filetypes,
             commands::set_indicator_ignores_mouse,
             commands::is_command_key_pressed,
             commands::is_mouse_over_indicator,

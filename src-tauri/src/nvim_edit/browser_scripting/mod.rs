@@ -159,6 +159,28 @@ pub fn get_browser_text_and_cursor(browser_type: BrowserType) -> Option<TextAndC
     Some(result)
 }
 
+/// Get the hostname from the current browser tab
+pub fn get_browser_hostname(browser_type: BrowserType) -> Option<String> {
+    let js = "window.location.hostname";
+    let script = build_execute_script(browser_type, js);
+
+    let stdout = match execute_applescript(&script) {
+        Ok(s) => s,
+        Err(e) => {
+            log::debug!("get_browser_hostname AppleScript failed: {}", e);
+            return None;
+        }
+    };
+
+    // Filter out error responses
+    if stdout.is_empty() || stdout.starts_with("error") || stdout == "no_window" || stdout == "no_tab" {
+        return None;
+    }
+
+    log::info!("Got browser hostname: {}", stdout);
+    Some(stdout)
+}
+
 /// Get the focused element frame from a browser using AppleScript
 pub fn get_browser_element_frame(browser_type: BrowserType) -> Option<ElementFrame> {
     log::info!(

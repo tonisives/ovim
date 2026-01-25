@@ -1,0 +1,29 @@
+/* Base styles - reset and body */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: var(--text-secondary);
+}
+
+.settings-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}

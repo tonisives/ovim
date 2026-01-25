@@ -1,0 +1,140 @@
+/* Dialog overlays and modals */
+
+/* Error dialog overlay */
+.error-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Error dialog box */
+.error-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px 24px;
+  max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.error-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--danger-color);
+}
+
+.error-dialog p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.error-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.error-dialog-buttons button {
+  padding: 6px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.error-dialog-buttons button:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
+}
+
+/* Domain filetypes modal */
+.domain-filetypes-modal {
+  max-width: 500px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.domain-filetypes-modal .hint {
+  margin-bottom: 12px;
+  display: block;
+}
+
+.domain-filetypes-modal code {
+  background: var(--bg-primary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.domain-filetypes-modal .empty-state {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 20px;
+}
+
+.domain-filetypes-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+
+.domain-filetypes-table th,
+.domain-filetypes-table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.domain-filetypes-table th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.domain-filetypes-table .domain-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domain-filetypes-table .filetype-cell {
+  font-family: monospace;
+  color: var(--accent-color);
+}
+
+.domain-filetypes-table .action-cell {
+  width: 30px;
+  text-align: center;
+}
+
+.domain-filetypes-table .remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.domain-filetypes-table .remove-btn:hover {
+  background: var(--error-bg);
+  color: var(--error-color);
+}
