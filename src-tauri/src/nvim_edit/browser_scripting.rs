@@ -143,29 +143,71 @@ fn build_set_element_text_js(text: &str) -> String {
     // Detect editor type for debugging
     var editorInfo = 'none';
     if (typeof monaco !== 'undefined') editorInfo = 'monaco';
+    else if (document.querySelector('.monaco-editor')) editorInfo = 'monaco_dom';
     else if (document.querySelector('.cm-editor')) editorInfo = 'cm6';
     else if (document.querySelector('.CodeMirror')) editorInfo = 'cm5';
     else if (typeof ace !== 'undefined') editorInfo = 'ace';
 
-    // Check for Monaco Editor first (used by boot.dev, VS Code web, etc.)
-    // Monaco stores its instance in a global or on DOM elements
-    if (typeof monaco !== 'undefined' && monaco.editor) {{
-        var editors = monaco.editor.getEditors();
-        if (editors && editors.length > 0) {{
-            var editor = editors[0];
-            var model = editor.getModel();
-            if (model) {{
-                // Get full range of document
-                var fullRange = model.getFullModelRange();
-                // Replace entire content
-                editor.executeEdits('ovim-live-sync', [{{
-                    range: fullRange,
-                    text: text,
-                    forceMoveMarkers: true
-                }}]);
-                return 'ok_monaco';
-            }}
+    // Check for Monaco Editor via script injection (works with coderpad.io, VS Code web, etc.)
+    // AppleScript's execute javascript runs in an isolated world, so we need to inject
+    // a script tag that runs in the page context to access global variables like 'editor'
+    if (document.querySelector('.monaco-editor')) {{
+        var commDiv = document.getElementById('__ovimMonacoComm');
+        if (!commDiv) {{
+            commDiv = document.createElement('div');
+            commDiv.id = '__ovimMonacoComm';
+            commDiv.style.display = 'none';
+            document.body.appendChild(commDiv);
         }}
+        // Pass the text via data attribute
+        commDiv.setAttribute('data-text', text);
+        commDiv.setAttribute('data-result', '');
+
+        // Inject script that runs in page context (can access window.editor and window.monaco)
+        var script = document.createElement('script');
+        script.textContent = '(function() {{' +
+            'var commDiv = document.getElementById("__ovimMonacoComm");' +
+            'if (!commDiv) {{ commDiv.setAttribute("data-result", "no_comm_div"); return; }}' +
+            'var textToSet = commDiv.getAttribute("data-text") || "";' +
+            'try {{' +
+                // Method 1: Global editor variable (coderpad.io)
+                'if (typeof editor !== "undefined" && typeof editor.executeEdits === "function" && typeof editor.getModel === "function") {{' +
+                    'var model = editor.getModel();' +
+                    'if (model) {{' +
+                        'var fullRange = model.getFullModelRange();' +
+                        'editor.executeEdits("ovim-live-sync", [{{ range: fullRange, text: textToSet, forceMoveMarkers: true }}]);' +
+                        'commDiv.setAttribute("data-result", "ok_monaco_global");' +
+                        'return;' +
+                    '}}' +
+                '}}' +
+                // Method 2: monaco.editor.getEditors() (boot.dev, standard Monaco)
+                'if (typeof monaco !== "undefined" && monaco.editor && monaco.editor.getEditors) {{' +
+                    'var editors = monaco.editor.getEditors();' +
+                    'if (editors && editors.length > 0) {{' +
+                        'var ed = editors[0];' +
+                        'var model = ed.getModel();' +
+                        'if (model) {{' +
+                            'var fullRange = model.getFullModelRange();' +
+                            'ed.executeEdits("ovim-live-sync", [{{ range: fullRange, text: textToSet, forceMoveMarkers: true }}]);' +
+                            'commDiv.setAttribute("data-result", "ok_monaco");' +
+                            'return;' +
+                        '}}' +
+                    '}}' +
+                '}}' +
+                'commDiv.setAttribute("data-result", "monaco_not_found");' +
+            '}} catch(e) {{' +
+                'commDiv.setAttribute("data-result", "monaco_error:" + e.message);' +
+            '}}' +
+        '}})();';
+        (document.head || document.documentElement).appendChild(script);
+        script.remove();
+
+        // Read result from DOM
+        var monacoResult = commDiv.getAttribute('data-result') || 'script_not_run';
+        if (monacoResult.indexOf('ok') === 0) {{
+            return monacoResult;
+        }}
+        // If Monaco injection didn't work, continue to other methods
     }}
 
     // Check for CodeMirror 6 (used by some modern editors)
