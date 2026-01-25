@@ -13,14 +13,16 @@ pub use session::EditSessionManager;
 
 use crate::config::{NvimEditSettings, Settings};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 /// Trigger the "Edit with Neovim" flow
+/// `shared_settings` is optional - if provided, filetype changes will update the in-memory state
 pub fn trigger_nvim_edit(
     manager: Arc<EditSessionManager>,
     settings: NvimEditSettings,
+    shared_settings: Option<Arc<Mutex<Settings>>>,
 ) -> Result<(), String> {
     // 1. Capture focus context (which app we're in)
     let focus_context = accessibility::capture_focus_context()
@@ -114,6 +116,7 @@ pub fn trigger_nvim_edit(
         live_sync_worked,
         browser_type,
         clipboard_mode,
+        shared_settings,
     );
 
     Ok(())
@@ -339,6 +342,7 @@ fn spawn_completion_handler(
     live_sync_worked: Arc<AtomicBool>,
     browser_type: Option<browser_scripting::BrowserType>,
     clipboard_mode: bool,
+    shared_settings: Option<Arc<Mutex<Settings>>>,
 ) {
     thread::spawn(move || {
         let Some(session) = manager.get_session(&session_id) else {
@@ -356,10 +360,17 @@ fn spawn_completion_handler(
         // Save the filetype for this domain if we got one
         if let Some(ref ft) = final_filetype {
             log::info!("Saving filetype '{}' for domain '{}'", ft, session.domain_key);
-            let mut settings = Settings::load();
-            settings.nvim_edit.set_filetype_for_domain(session.domain_key.clone(), ft.clone());
-            // Note: set_filetype_for_domain already saves to domain-filetypes.yaml
-            // No need to call settings.save() - domain_filetypes is not in main settings file
+
+            // Update in-memory settings if we have shared state
+            if let Some(ref shared) = shared_settings {
+                let mut settings = shared.lock().unwrap();
+                settings.nvim_edit.set_filetype_for_domain(session.domain_key.clone(), ft.clone());
+                log::info!("Updated in-memory settings with filetype");
+            } else {
+                // Fallback: just save to file (will be loaded on next restart)
+                let mut settings = Settings::load();
+                settings.nvim_edit.set_filetype_for_domain(session.domain_key.clone(), ft.clone());
+            }
         }
 
         log::info!("Nvim exited, restoring focus");

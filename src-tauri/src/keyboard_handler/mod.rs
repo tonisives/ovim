@@ -79,6 +79,7 @@ pub fn create_keyboard_callback(
                 &event,
                 &settings_guard,
                 Arc::clone(&edit_session_manager),
+                Arc::clone(&settings),
             ) {
                 return result;
             }
