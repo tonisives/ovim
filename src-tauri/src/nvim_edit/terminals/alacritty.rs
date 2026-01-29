@@ -263,6 +263,107 @@ impl AlacrittySpawner {
 
 }
 
+/// Result of spawning a pre-warmed Alacritty window
+pub struct PrewarmSpawnResult {
+    pub process_id: Option<u32>,
+    pub child: Option<std::process::Child>,
+    pub window_title: String,
+}
+
+impl AlacrittySpawner {
+    /// Spawn a hidden, off-screen Alacritty window with nvim listening on a socket.
+    /// No file is loaded yet - nvim starts with an empty buffer.
+    pub fn spawn_prewarm_window(
+        settings: &NvimEditSettings,
+        socket_path: &std::path::Path,
+    ) -> Result<PrewarmSpawnResult, String> {
+        let editor_path = settings.editor_path();
+        let resolved_editor = resolve_command_path(&editor_path);
+        let terminal_cmd = settings.get_terminal_path();
+        let terminal_path = resolve_terminal_path(&terminal_cmd);
+
+        let title = format!("ovim-prewarm-{}", std::process::id());
+
+        // Build editor command: nvim --listen <socket> (no file)
+        let editor_cmd = vec![
+            resolved_editor,
+            "--listen".to_string(),
+            socket_path.to_string_lossy().to_string(),
+        ];
+
+        // Position off-screen so the window is invisible
+        let scale = 2; // Retina
+        let offscreen_x = -10000 * scale;
+        let offscreen_y = -10000 * scale;
+
+        let mut args = vec![
+            "-o".to_string(),
+            format!("window.title=\"{}\"", title),
+            "-o".to_string(),
+            "window.dynamic_title=false".to_string(),
+            "-o".to_string(),
+            "window.startup_mode=\"Windowed\"".to_string(),
+            "-o".to_string(),
+            "window.dimensions.columns=80".to_string(),
+            "-o".to_string(),
+            "window.dimensions.lines=24".to_string(),
+            "-o".to_string(),
+            format!("window.position={{x={},y={}}}", offscreen_x, offscreen_y),
+            "-e".to_string(),
+        ];
+        args.extend(editor_cmd);
+
+        log::info!("Spawning prewarm Alacritty: {} {:?}", terminal_path, args);
+
+        let child = Command::new(&terminal_path)
+            .args(&args)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn prewarm alacritty: {}", e))?;
+
+        let child_pid = child.id();
+
+        // Wait for nvim to start and create the socket
+        let mut waited = 0;
+        while waited < 5000 {
+            if socket_path.exists() {
+                log::info!("Prewarm nvim socket ready after {}ms", waited);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            waited += 50;
+        }
+
+        if !socket_path.exists() {
+            log::warn!("Prewarm nvim socket not found after 5s, continuing anyway");
+        }
+
+        // Find the nvim PID inside the terminal
+        let nvim_pid = find_nvim_pid_for_socket(socket_path);
+
+        Ok(PrewarmSpawnResult {
+            process_id: nvim_pid.or(Some(child_pid)),
+            child: Some(child),
+            window_title: title,
+        })
+    }
+}
+
+/// Find the nvim process listening on a given socket
+fn find_nvim_pid_for_socket(socket_path: &std::path::Path) -> Option<u32> {
+    let socket_str = socket_path.to_string_lossy();
+    let output = Command::new("pgrep")
+        .args(["-f", &format!("nvim.*--listen.*{}", socket_str)])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let pid_str = String::from_utf8_lossy(&output.stdout);
+        // Take first matching PID
+        pid_str.lines().next()?.trim().parse().ok()
+    } else {
+        None
+    }
+}
+
 /// Escape a string for use in shell
 fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))

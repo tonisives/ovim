@@ -31,6 +31,7 @@ use ipc::{IpcCommand, IpcResponse};
 use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture};
 use keyboard_handler::create_keyboard_callback;
 use keyboard_handler::double_tap::{DoubleTapKey, DoubleTapManager};
+use nvim_edit::prewarm::PrewarmManager;
 use nvim_edit::terminals::install_scripts;
 use nvim_edit::EditSessionManager;
 use vim::{VimMode, VimState};
@@ -378,7 +379,24 @@ pub fn run() {
 
     let record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>> =
         Arc::new(Mutex::new(None));
-    let edit_session_manager = Arc::new(EditSessionManager::new());
+    let mut edit_session_manager = EditSessionManager::new();
+
+    // Initialize prewarm manager if enabled and using alacritty
+    {
+        let s = settings.lock().unwrap();
+        if s.nvim_edit.prewarm_terminal && s.nvim_edit.terminal == "alacritty" {
+            log::info!("Pre-warming terminal enabled, spawning hidden Alacritty");
+            let prewarm = Arc::new(PrewarmManager::new());
+            let settings_clone = s.nvim_edit.clone();
+            let prewarm_clone = Arc::clone(&prewarm);
+            std::thread::spawn(move || {
+                prewarm_clone.spawn_prewarm(&settings_clone);
+            });
+            edit_session_manager.set_prewarm_manager(prewarm);
+        }
+    }
+
+    let edit_session_manager = Arc::new(edit_session_manager);
     let click_mode_manager = click_mode::create_manager();
     let double_tap_manager = Arc::new(Mutex::new(DoubleTapManager::new()));
 

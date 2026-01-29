@@ -4,6 +4,7 @@ pub mod accessibility;
 mod browser_scripting;
 mod clipboard;
 mod geometry;
+pub mod prewarm;
 mod rpc;
 mod session;
 pub mod terminals;
@@ -307,10 +308,10 @@ fn handle_live_sync_update(
             }
             Err(e) => {
                 log::info!("Browser live sync failed: {}", e);
-                // Lexical editors don't respond to AX value changes either,
+                // Lexical and Monaco editors don't respond to AX value changes,
                 // so skip the AX fallback and rely on clipboard mode
-                if e.contains("unsupported_lexical") {
-                    log::info!("Lexical editor detected - will use clipboard mode on exit");
+                if e.contains("unsupported_lexical") || e.contains("monaco_dom") {
+                    log::info!("Lexical/Monaco editor detected - will use clipboard mode on exit");
                     skip_ax_fallback = true;
                 }
             }

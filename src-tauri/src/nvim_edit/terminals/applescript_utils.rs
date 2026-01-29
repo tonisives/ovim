@@ -259,6 +259,71 @@ pub fn focus_window_by_title(process_names: &[&str], title: &str) {
     }
 }
 
+/// Show a hidden/off-screen window by moving it to position and raising it.
+/// Used for pre-warmed terminal windows that are spawned off-screen.
+pub fn show_and_position_window_by_title(
+    process_names: &[&str],
+    title: &str,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) {
+    let name_conditions: Vec<String> = process_names
+        .iter()
+        .map(|n| format!("name is \"{}\"", n))
+        .collect();
+    let condition = name_conditions.join(" or ");
+
+    let script = format!(
+        r#"
+        tell application "System Events"
+            repeat with p in (every process whose {})
+                try
+                    repeat with w in windows of p
+                        if name of w contains "{}" then
+                            set position of w to {{{}, {}}}
+                            set size of w to {{{}, {}}}
+                            perform action "AXRaise" of w
+                            set frontmost of p to true
+                            return "ok"
+                        end if
+                    end repeat
+                end try
+            end repeat
+            return "no_window_found"
+        end tell
+        "#,
+        condition, title, x, y, width, height
+    );
+
+    log::info!(
+        "Showing prewarm window '{}' at ({}, {}) size {}x{}",
+        title, x, y, width, height
+    );
+
+    let output = Command::new("osascript").arg("-e").arg(&script).output();
+
+    match output {
+        Ok(out) => {
+            let result = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if result == "no_window_found" {
+                log::warn!("Could not find prewarm window '{}' to reposition", title);
+            } else if !out.status.success() {
+                log::error!(
+                    "AppleScript show_and_position failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            } else {
+                log::info!("Prewarm window repositioned successfully");
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to run AppleScript: {}", e);
+        }
+    }
+}
+
 /// Convert pixel dimensions to approximate terminal cell dimensions
 #[allow(dead_code)]
 pub fn pixels_to_cells(width: u32, height: u32) -> (u32, u32) {

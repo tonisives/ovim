@@ -110,6 +110,9 @@ pub struct NvimEditSettings {
     /// Double-tap modifier to activate edit mode (alternative to keyboard shortcut)
     #[serde(default)]
     pub double_tap_modifier: DoubleTapModifier,
+    /// Pre-warm a hidden terminal at startup for faster edit popup (Alacritty only)
+    #[serde(default)]
+    pub prewarm_terminal: bool,
     /// Saved filetypes per domain (browser hostname) or app bundle ID
     /// Stored in separate domain-filetypes.yaml file, not in main settings
     #[serde(skip)]
@@ -138,6 +141,7 @@ impl Default for NvimEditSettings {
             use_custom_script: false,
             clipboard_mode: false, // Use smart detection by default
             double_tap_modifier: DoubleTapModifier::Command, // Cmd+Cmd by default
+            prewarm_terminal: false,
             domain_filetypes: HashMap::new(),
         }
     }
