@@ -46,6 +46,7 @@ pub fn parse_viewport_frame_json(json: &str) -> Option<ViewportFrame> {
 }
 
 /// Parse cursor position JSON response
+#[allow(dead_code)]
 pub fn parse_cursor_position_json(json: &str) -> Option<CursorPosition> {
     if json.is_empty() || json == "null" || json == "missing value" {
         return None;

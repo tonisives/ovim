@@ -286,8 +286,9 @@ fn handle_live_sync_update(
     cached_element_id: &std::sync::Mutex<Option<String>>,
 ) {
     let text = lines.join("\n");
-    let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
-    log::info!("Live sync: {} lines, {} chars, preview: {}", lines.len(), text.len(), preview);
+    let preview: String = text.lines().take(3).collect::<Vec<_>>().join("\\n");
+    log::info!("Live sync update: {} lines, {} chars, browser={:?}, preview: {}",
+        lines.len(), text.len(), browser_type, preview);
 
     // For browsers, use browser scripting (JS) which works with code editors
     let mut skip_ax_fallback = false;
@@ -400,7 +401,7 @@ fn spawn_completion_handler(
         } else {
             live_sync_worked.load(Ordering::SeqCst)
         };
-        log::info!("Live sync status: {}, clipboard_mode: {}", if did_live_sync { "worked" } else { "not used" }, clipboard_mode);
+        log::info!("Live sync status: {}, clipboard_mode: {}, browser_type: {:?}", if did_live_sync { "worked" } else { "not used" }, clipboard_mode, browser_type);
 
         // Complete the session - skip clipboard paste if live sync worked
         if let Err(e) = complete_edit_session(&manager, &session_id, did_live_sync) {
@@ -435,13 +436,24 @@ fn complete_edit_session(
 
     log::info!("Reading temp file: {:?}", session.temp_file);
 
+    // Debug: write to temp file for troubleshooting
+    let debug_log = |msg: &str| {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/ovim_debug.log") {
+            let _ = writeln!(f, "{}: {}", chrono::Local::now().format("%H:%M:%S%.3f"), msg);
+        }
+        log::info!("{}", msg);
+    };
+
+    debug_log(&format!("complete_edit_session: live_sync_worked={}", live_sync_worked));
+
     // Check if file was modified by comparing modification times
     let current_mtime = std::fs::metadata(&session.temp_file)
         .and_then(|m| m.modified())
         .map_err(|e| format!("Failed to get current file mtime: {}", e))?;
 
     if current_mtime == session.file_mtime {
-        log::info!("File not modified (nvim quit without saving), skipping restoration");
+        debug_log("File not modified (nvim quit without saving), skipping restoration");
         let _ = std::fs::remove_file(&session.temp_file);
         return Ok(());
     }
@@ -452,23 +464,24 @@ fn complete_edit_session(
     // Strip trailing newline that nvim adds (fixeol option)
     let edited_text = edited_text.strip_suffix('\n').unwrap_or(&edited_text).to_string();
 
-    log::info!("Read {} chars from temp file", edited_text.len());
+    debug_log(&format!("Read {} chars from temp file", edited_text.len()));
 
     // Clean up temp file
     let _ = std::fs::remove_file(&session.temp_file);
 
     // If live sync worked, text is already in the field - no need for clipboard paste
     if live_sync_worked {
-        log::info!("Live sync worked, skipping clipboard paste");
+        debug_log("Live sync worked, skipping clipboard paste");
         return Ok(());
     }
 
-    // Small delay for focus to settle
-    thread::sleep(Duration::from_millis(100));
+    // Longer delay for focus to settle - browsers like Chrome need more time
+    debug_log("Waiting 300ms for focus to settle...");
+    thread::sleep(Duration::from_millis(300));
 
-    log::info!("Replacing text via clipboard (live sync was not available)");
+    debug_log(&format!("Replacing text via clipboard, {} chars", edited_text.len()));
     clipboard::replace_text_via_clipboard(&edited_text)?;
 
-    log::info!("Successfully restored edited text");
+    debug_log("Successfully restored edited text");
     Ok(())
 }

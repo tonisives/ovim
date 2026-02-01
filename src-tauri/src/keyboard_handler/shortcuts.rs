@@ -69,6 +69,17 @@ fn is_frontmost_app_ignored(ignored_apps: &[String]) -> bool {
     false
 }
 
+/// Check if scroll mode is enabled for the frontmost app
+pub fn is_scroll_mode_enabled_for_app(enabled_apps: &[String]) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(bundle_id) = get_frontmost_app_bundle_id() {
+            return enabled_apps.iter().any(|id| id == &bundle_id);
+        }
+    }
+    false
+}
+
 /// Check if event modifiers match the configured modifiers
 fn modifiers_match(event: &KeyEvent, mods: &crate::config::VimKeyModifiers) -> bool {
     event.modifiers.shift == mods.shift

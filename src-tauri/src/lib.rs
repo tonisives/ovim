@@ -8,7 +8,9 @@ pub mod ipc;
 mod keyboard;
 mod keyboard_handler;
 pub mod launcher_callback;
+mod list_mode;
 mod nvim_edit;
+mod scroll_mode;
 mod updater;
 mod vim;
 mod widgets;
@@ -34,6 +36,7 @@ use keyboard_handler::double_tap::{DoubleTapKey, DoubleTapManager};
 use nvim_edit::prewarm::PrewarmManager;
 use nvim_edit::terminals::install_scripts;
 use nvim_edit::EditSessionManager;
+use scroll_mode::SharedScrollModeState;
 use vim::{VimMode, VimState};
 use window::{setup_click_overlay_window, setup_indicator_window};
 
@@ -90,6 +93,8 @@ pub struct AppState {
     #[allow(dead_code)]
     edit_session_manager: Arc<EditSessionManager>,
     pub click_mode_manager: SharedClickModeManager,
+    #[allow(dead_code)]
+    pub scroll_state: SharedScrollModeState,
 }
 
 fn handle_ipc_command(
@@ -399,6 +404,8 @@ pub fn run() {
     let edit_session_manager = Arc::new(edit_session_manager);
     let click_mode_manager = click_mode::create_manager();
     let double_tap_manager = Arc::new(Mutex::new(DoubleTapManager::new()));
+    let scroll_state = scroll_mode::create_scroll_state();
+    let list_state = list_mode::create_list_state();
 
     // Create double-tap callback that handles mode activation
     let double_tap_callback = {
@@ -425,6 +432,8 @@ pub fn run() {
         Arc::clone(&click_mode_manager),
         Arc::clone(&double_tap_manager),
         double_tap_callback,
+        Arc::clone(&scroll_state),
+        Arc::clone(&list_state),
     ));
 
     // Set up mouse click callback to hide click mode on any mouse click
@@ -525,6 +534,7 @@ pub fn run() {
         record_key_tx,
         edit_session_manager,
         click_mode_manager,
+        scroll_state,
     };
 
     let mode_rx = Arc::new(Mutex::new(mode_rx));

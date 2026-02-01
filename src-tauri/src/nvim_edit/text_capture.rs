@@ -40,12 +40,12 @@ pub fn capture_text_and_frame(
     // For browsers, try to get text AND cursor in one JS call
     // This is more reliable as cursor position won't be affected by text capture
     if let Some(bt) = browser_type {
-        log::info!("Attempting combined text+cursor capture via JS");
+        log::info!("Text capture: attempting JS capture for browser {:?}", bt);
         if let Some(result) = browser_scripting::get_browser_text_and_cursor(bt) {
             // Only use JS result if we actually got text
             // Otherwise fall back to clipboard-based capture (for non-CodeMirror editors like GitHub)
             if !result.text.is_empty() {
-                log::info!("JS capture succeeded: {} chars, cursor={:?}", result.text.len(), result.cursor);
+                log::info!("Text capture: JS succeeded, {} chars, cursor={:?}", result.text.len(), result.cursor);
 
                 // Get element frame if needed
                 let element_frame = if initial_element_frame.is_none() {
@@ -62,29 +62,21 @@ pub fn capture_text_and_frame(
                     browser_type: Some(bt),
                 };
             }
-            log::info!("JS capture returned empty text, falling back to clipboard method");
+            log::info!("Text capture: JS returned empty text, falling back to clipboard");
         } else {
-            log::info!("JS capture failed, falling back to clipboard method");
+            log::info!("Text capture: JS failed, falling back to clipboard");
         }
     }
 
-    // Fallback: capture cursor position BEFORE text capture (which may move cursor via Cmd+A)
-    let cursor_position = if let Some(bt) = browser_type {
-        log::info!("Attempting to capture browser cursor position");
-        let pos = browser_scripting::get_browser_cursor_position(bt);
-        match &pos {
-            Some(p) => log::info!("Captured cursor position: line={}, col={}", p.line, p.column),
-            None => log::info!("Failed to capture cursor position"),
-        }
-        pos
-    } else {
-        None
-    };
+    // JS capture failed - fall back to clipboard mode
+    // IMPORTANT: Set browser_type to None since JS-based live sync won't work
+    // This ensures we use clipboard-based restoration instead of failing JS calls
+    log::info!("JS capture failed, disabling browser_type for this session (will use clipboard mode)");
 
-    // If accessibility API didn't return element frame, try browser scripting for web text fields
+    // Get element frame from browser scripting (this can still work for positioning)
     let element_frame = if initial_element_frame.is_none() {
         if let Some(bt) = browser_type {
-            log::info!("Detected browser type {:?}, attempting browser scripting", bt);
+            log::info!("Getting element frame via browser scripting");
             let browser_frame = browser_scripting::get_browser_element_frame(bt);
             log::info!("Browser scripting element frame: {:?}", browser_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
             browser_frame
@@ -100,14 +92,15 @@ pub fn capture_text_and_frame(
 
     // If we're in a browser's address bar, disable browser live sync
     // to avoid updating web page elements when editing the URL
-    let browser_type = if browser_type.is_some() && is_address_bar {
+    let effective_browser_type = if browser_type.is_some() && is_address_bar {
         log::info!("Browser address bar detected - disabling live sync to avoid updating web content");
         None
     } else {
-        browser_type
+        // Return with browser_type = None since JS-based features won't work
+        None
     };
 
-    CaptureResult { text, element_frame, cursor_position, browser_type }
+    CaptureResult { text, element_frame, cursor_position: None, browser_type: effective_browser_type }
 }
 
 /// Check if the focused element is the browser's address bar (URL field)

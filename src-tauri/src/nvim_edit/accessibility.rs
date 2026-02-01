@@ -265,7 +265,7 @@ fn capture_focused_element() -> Option<AXElementHandle> {
     }
 }
 
-/// Restore focus to a previously captured application
+/// Restore focus to a previously captured application and element
 pub fn restore_focus(context: &FocusContext) -> Result<(), String> {
     log::info!("Attempting to restore focus to PID {}", context.app_pid);
 
@@ -293,13 +293,35 @@ pub fn restore_focus(context: &FocusContext) -> Result<(), String> {
         let options: u64 = 2;
         let success: bool = msg_send![app, activateWithOptions: options];
 
-        if success {
-            log::info!("Successfully activated application");
-            Ok(())
-        } else {
+        if !success {
             log::error!("Failed to activate application");
-            Err("Failed to activate application".to_string())
+            return Err("Failed to activate application".to_string());
         }
+
+        log::info!("Successfully activated application");
+
+        // Try to restore focus to the specific element if we have it
+        if let Some(ref element) = context.focused_element {
+            // Small delay for app activation to complete
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Try to set focus on the element using AXFocused attribute
+            let focused_attr = CFString::new("AXFocused");
+            let cf_true = core_foundation::boolean::CFBoolean::true_value();
+            let result = AXUIElementSetAttributeValue(
+                element.as_ptr(),
+                focused_attr.as_CFTypeRef(),
+                cf_true.as_CFTypeRef(),
+            );
+
+            if result == 0 {
+                log::info!("Successfully set focus on element");
+            } else {
+                log::info!("Could not set focus on element (error {}), app is active though", result);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -411,6 +433,217 @@ pub fn get_focused_element_subrole() -> Option<String> {
     let focused_element = focused_app.get_attribute("AXFocusedUIElement")?;
     let subrole = focused_element.get_attribute("AXSubrole")?;
     subrole.into_string()
+}
+
+/// Check if the currently focused element is a text input field or editable area
+/// Returns true if a text field is focused, false otherwise
+pub fn is_text_field_focused() -> bool {
+    let system_wide = match CFHandle::new(unsafe { AXUIElementCreateSystemWide() }) {
+        Some(sw) => sw,
+        None => return false,
+    };
+    let focused_app = match system_wide.get_attribute("AXFocusedApplication") {
+        Some(app) => app,
+        None => return false,
+    };
+    let focused_element = match focused_app.get_attribute("AXFocusedUIElement") {
+        Some(el) => el,
+        None => return false,
+    };
+    let role = match focused_element.get_attribute("AXRole") {
+        Some(r) => r,
+        None => return false,
+    };
+    let role_str = match role.into_string() {
+        Some(s) => s,
+        None => return false,
+    };
+
+    // Check for known text input roles
+    // - AXTextField: standard single-line text input
+    // - AXTextArea: multi-line text input (e.g., notes, code editors)
+    // - AXComboBox: dropdown with text input
+    // - AXSearchField: search input field
+    let is_known_text_role = matches!(
+        role_str.as_str(),
+        "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField"
+    );
+
+    if is_known_text_role {
+        return true;
+    }
+
+    // Check for autocomplete/suggestion list elements
+    // When these are focused, the user is still in a text editing context
+    // (e.g., Monaco Editor's IntelliSense popup, VS Code suggestions)
+    // - AXList: list of suggestions
+    // - AXRow: individual suggestion row
+    // - AXCell: table cell in suggestions
+    // - AXMenuItem/AXMenu: context menus that appear during typing
+    let is_autocomplete_element = matches!(
+        role_str.as_str(),
+        "AXList" | "AXRow" | "AXCell" | "AXMenuItem" | "AXMenu" | "AXPopover"
+    );
+
+    if is_autocomplete_element {
+        return true;
+    }
+
+    // For web content and other elements, check if the element is editable
+    // This handles contenteditable elements in browsers (email composers, etc.)
+    // Note: We need to get focused_element again since it was consumed by into_string
+    if let Some(focused_app) = system_wide.get_attribute("AXFocusedApplication") {
+        if let Some(focused_element) = focused_app.get_attribute("AXFocusedUIElement") {
+            if let Some(editable_attr) = focused_element.get_attribute("AXEditable") {
+                // AXEditable is a boolean attribute
+                // The value is a CFBoolean - check if it's true
+                if is_cf_boolean_true(&editable_attr) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    log::trace!("is_text_field_focused: role={} (not editable)", role_str);
+    false
+}
+
+/// Check if a CFHandle wraps a CFBoolean with value true
+fn is_cf_boolean_true(handle: &CFHandle) -> bool {
+    // Check if this is kCFBooleanTrue
+    // CFBoolean values are singletons, so we can compare pointers
+    unsafe {
+        let cf_true = core_foundation::boolean::kCFBooleanTrue;
+        handle.0 == cf_true as CFTypeRef
+    }
+}
+
+/// Check if any app in the blocklist has visible windows
+/// Returns true if an overlay from a blocklisted app is visible
+pub fn has_visible_overlay_window(blocklist: &[String]) -> bool {
+    if blocklist.is_empty() {
+        return false;
+    }
+
+    unsafe {
+        use objc::{class, msg_send, sel, sel_impl};
+
+        let workspace: *mut objc::runtime::Object =
+            msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return false;
+        }
+
+        let running_apps: *mut objc::runtime::Object = msg_send![workspace, runningApplications];
+        if running_apps.is_null() {
+            return false;
+        }
+
+        let count: usize = msg_send![running_apps, count];
+
+        for i in 0..count {
+            let app: *mut objc::runtime::Object = msg_send![running_apps, objectAtIndex: i];
+            if app.is_null() {
+                continue;
+            }
+
+            let bundle_id: *mut objc::runtime::Object = msg_send![app, bundleIdentifier];
+            if bundle_id.is_null() {
+                continue;
+            }
+
+            let utf8: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
+            if utf8.is_null() {
+                continue;
+            }
+
+            let bundle_str = std::ffi::CStr::from_ptr(utf8)
+                .to_string_lossy()
+                .into_owned();
+
+            if blocklist.contains(&bundle_str) {
+                // Check if this app has any visible windows using CGWindowList
+                let pid: i32 = msg_send![app, processIdentifier];
+                if has_visible_windows_for_pid(pid) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if a process has any visible windows using CGWindowListCopyWindowInfo
+fn has_visible_windows_for_pid(pid: i32) -> bool {
+    use core_graphics::window::{
+        kCGNullWindowID, kCGWindowListOptionOnScreenOnly, CGWindowListCopyWindowInfo,
+    };
+
+    unsafe {
+        let window_list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+        if window_list.is_null() {
+            return false;
+        }
+
+        let count = core_foundation::array::CFArrayGetCount(window_list as _);
+
+        for i in 0..count {
+            let window_info = core_foundation::array::CFArrayGetValueAtIndex(window_list as _, i)
+                as core_foundation::dictionary::CFDictionaryRef;
+            if window_info.is_null() {
+                continue;
+            }
+
+            // Get the owner PID
+            let pid_key = core_foundation::string::CFString::new("kCGWindowOwnerPID");
+            let mut pid_value: *const std::ffi::c_void = std::ptr::null();
+
+            if core_foundation::dictionary::CFDictionaryGetValueIfPresent(
+                window_info,
+                pid_key.as_CFTypeRef() as _,
+                &mut pid_value,
+            ) != 0 && !pid_value.is_null()
+            {
+                let mut owner_pid: i32 = 0;
+                if core_foundation::number::CFNumberGetValue(
+                    pid_value as core_foundation::number::CFNumberRef,
+                    core_foundation::number::kCFNumberSInt32Type,
+                    &mut owner_pid as *mut i32 as *mut std::ffi::c_void,
+                ) && owner_pid == pid
+                {
+                    // Check window layer - layer 0 is normal windows
+                    let layer_key = core_foundation::string::CFString::new("kCGWindowLayer");
+                    let mut layer_value: *const std::ffi::c_void = std::ptr::null();
+
+                    if core_foundation::dictionary::CFDictionaryGetValueIfPresent(
+                        window_info,
+                        layer_key.as_CFTypeRef() as _,
+                        &mut layer_value,
+                    ) != 0 && !layer_value.is_null()
+                    {
+                        let mut layer: i32 = -1;
+                        core_foundation::number::CFNumberGetValue(
+                            layer_value as core_foundation::number::CFNumberRef,
+                            core_foundation::number::kCFNumberSInt32Type,
+                            &mut layer as *mut i32 as *mut std::ffi::c_void,
+                        );
+
+                        // Normal windows are at layer 0, some overlays might be higher
+                        // Accept layer 0 and above as visible windows
+                        if layer >= 0 {
+                            core_foundation::base::CFRelease(window_list as _);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        core_foundation::base::CFRelease(window_list as _);
+    }
+
+    false
 }
 
 /// Get the bounds of the screen containing a given point

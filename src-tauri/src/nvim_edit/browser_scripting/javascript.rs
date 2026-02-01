@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 
 // Load JS files at compile time
 const GET_ELEMENT_RECT_JS_SRC: &str = include_str!("js/get_element_rect.js");
+#[allow(dead_code)]
 const GET_CURSOR_POSITION_JS_SRC: &str = include_str!("js/get_cursor_position.js");
 const GET_TEXT_AND_CURSOR_JS_SRC: &str = include_str!("js/get_text_and_cursor.js");
 const SET_CURSOR_POSITION_JS_TEMPLATE: &str = include_str!("js/set_cursor_position.js");
@@ -117,6 +118,7 @@ fn is_identifier_char(c: char) -> bool {
 // Pre-minified JS constants (computed once at startup)
 pub static GET_ELEMENT_RECT_JS: LazyLock<String> =
     LazyLock::new(|| minify_js(GET_ELEMENT_RECT_JS_SRC));
+#[allow(dead_code)]
 pub static GET_CURSOR_POSITION_JS: LazyLock<String> =
     LazyLock::new(|| minify_js(GET_CURSOR_POSITION_JS_SRC));
 pub static GET_TEXT_AND_CURSOR_JS: LazyLock<String> =

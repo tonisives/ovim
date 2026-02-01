@@ -77,6 +77,7 @@ pub fn set_browser_element_text(
 }
 
 /// Get cursor position from the focused element in a browser
+#[allow(dead_code)]
 pub fn get_browser_cursor_position(browser_type: BrowserType) -> Option<CursorPosition> {
     let script = build_execute_script(browser_type, &GET_CURSOR_POSITION_JS);
 
