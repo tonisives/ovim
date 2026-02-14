@@ -5,7 +5,7 @@ use std::thread;
 use tauri::Emitter;
 
 use crate::click_mode::native_hints;
-use crate::click_mode::{ClickAction, HintInputResult, SharedClickModeManager};
+use crate::click_mode::{self, ClickAction, HintInputResult, SharedClickModeManager};
 use crate::get_app_handle;
 use crate::keyboard::{KeyCode, KeyEvent};
 
@@ -75,13 +75,8 @@ fn handle_special_keys(
 
 /// Deactivate click mode and hide hints
 fn deactivate_click_mode(manager: &SharedClickModeManager) {
-    let mut mgr = manager.lock().unwrap();
-    mgr.deactivate();
+    click_mode::deactivate_and_notify(manager);
     log::info!("Click mode cancelled via Escape");
-    native_hints::hide_hints();
-    if let Some(app) = get_app_handle() {
-        let _ = app.emit("click-mode-deactivated", ());
-    }
 }
 
 /// Handle backspace to clear last input
@@ -165,16 +160,8 @@ fn handle_hint_match(
     let element_id = element.id;
     let position = mgr.get_element_position(element_id);
 
-    // Hide hints FIRST so they don't block the click target
-    native_hints::hide_hints();
-
-    // Deactivate click mode state
-    mgr.deactivate();
-
-    // Emit deactivation event
-    if let Some(app) = get_app_handle() {
-        let _ = app.emit("click-mode-deactivated", ());
-    }
+    // Deactivate click mode state, hide hints, and notify frontend
+    click_mode::deactivate_with_guard(mgr);
 
     // Perform click on a separate thread with delay
     if let Some((x, y)) = position {
@@ -229,9 +216,5 @@ fn handle_wrong_key() {
 /// Handle no match
 fn handle_no_match(mgr: &mut std::sync::MutexGuard<crate::click_mode::ClickModeManager>) {
     log::debug!("Click mode: no match, deactivating");
-    native_hints::hide_hints();
-    mgr.deactivate();
-    if let Some(app) = get_app_handle() {
-        let _ = app.emit("click-mode-deactivated", ());
-    }
+    click_mode::deactivate_with_guard(mgr);
 }

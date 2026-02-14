@@ -440,16 +440,8 @@ pub fn run() {
     {
         let click_manager_for_mouse = Arc::clone(&click_mode_manager);
         keyboard_capture.set_mouse_callback(move |_event| {
-            // Check if click mode is active and deactivate it
-            if let Ok(mut mgr) = click_manager_for_mouse.try_lock() {
-                if mgr.is_active() {
-                    log::info!("Mouse click detected - deactivating click mode");
-                    mgr.deactivate();
-                    click_mode::native_hints::hide_hints();
-                    if let Some(app) = get_app_handle() {
-                        let _ = app.emit("click-mode-deactivated", ());
-                    }
-                }
+            if click_mode::deactivate_and_notify(&click_manager_for_mouse) {
+                log::info!("Mouse click detected - deactivating click mode");
             }
             true // Always pass through mouse events
         });
@@ -459,17 +451,8 @@ pub fn run() {
     {
         let click_manager_for_scroll = Arc::clone(&click_mode_manager);
         keyboard_capture.set_scroll_callback(move || {
-            // Check if click mode is active and deactivate it
-            if let Ok(mut mgr) = click_manager_for_scroll.try_lock() {
-                if mgr.is_active() {
-                    log::info!("Scroll detected - deactivating click mode");
-                    mgr.deactivate();
-                    click_mode::native_hints::hide_hints();
-                    // Notify frontend to update indicator
-                    if let Some(app) = get_app_handle() {
-                        let _ = app.emit("click-mode-deactivated", ());
-                    }
-                }
+            if click_mode::deactivate_and_notify(&click_manager_for_scroll) {
+                log::info!("Scroll detected - deactivating click mode");
             }
         });
     }
@@ -507,33 +490,12 @@ pub fn run() {
     {
         let click_manager_for_focus = Arc::clone(&click_mode_manager);
         click_mode::start_focus_observer(move || {
-            // Invalidate cache since we're now on a different app
             click_mode::accessibility::invalidate_cache();
 
-            // Deactivate click mode if active.
-            // Always hide hints and emit the event even if we can't get the lock,
-            // so the indicator doesn't get stuck showing "click".
-            let was_active = click_manager_for_focus
-                .lock()
-                .map(|mut mgr| {
-                    let active = mgr.is_active();
-                    if active {
-                        mgr.deactivate();
-                    }
-                    active
-                })
-                .unwrap_or(false);
-
-            if was_active {
+            if click_mode::deactivate_and_notify(&click_manager_for_focus) {
                 log::info!("App focus changed - deactivating click mode");
-                click_mode::native_hints::hide_hints();
-                if let Some(app) = get_app_handle() {
-                    let _ = app.emit("click-mode-deactivated", ());
-                }
             }
 
-            // Prefetch elements for the new app in background
-            // This warms the cache so click mode activation is faster
             click_mode::accessibility::prefetch_elements();
         });
     }
@@ -677,22 +639,8 @@ pub fn run() {
                 click_overlay.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(false) = event {
                         let state: State<AppState> = app_handle_for_overlay.state();
-                        let was_active = state
-                            .click_mode_manager
-                            .lock()
-                            .map(|mut mgr| {
-                                let active = mgr.is_active();
-                                if active {
-                                    mgr.deactivate();
-                                }
-                                active
-                            })
-                            .unwrap_or(false);
-
-                        if was_active {
+                        if click_mode::deactivate_and_notify(&state.click_mode_manager) {
                             log::info!("Click overlay lost focus - deactivating click mode");
-                            click_mode::native_hints::hide_hints();
-                            let _ = app_handle_for_overlay.emit("click-mode-deactivated", ());
                         }
                     }
                 });
