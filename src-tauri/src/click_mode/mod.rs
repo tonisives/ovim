@@ -469,6 +469,42 @@ pub fn create_manager() -> SharedClickModeManager {
     Arc::new(Mutex::new(ClickModeManager::new()))
 }
 
+/// Deactivate click mode if active: update state, hide native hints, and notify frontend.
+/// Use this from any callsite that doesn't already hold the manager lock.
+/// Returns true if click mode was active and got deactivated.
+pub fn deactivate_and_notify(manager: &SharedClickModeManager) -> bool {
+    let was_active = manager
+        .lock()
+        .map(|mut mgr| {
+            let active = mgr.is_active();
+            if active {
+                mgr.deactivate();
+            }
+            active
+        })
+        .unwrap_or(false);
+
+    if was_active {
+        native_hints::hide_hints();
+        if let Some(app) = crate::get_app_handle() {
+            use tauri::Emitter;
+            let _ = app.emit("click-mode-deactivated", ());
+        }
+    }
+    was_active
+}
+
+/// Deactivate click mode when already holding the lock: hide native hints and notify frontend.
+/// Use this from callsites that already have a MutexGuard on the manager.
+pub fn deactivate_with_guard(mgr: &mut ClickModeManager) {
+    mgr.deactivate();
+    native_hints::hide_hints();
+    if let Some(app) = crate::get_app_handle() {
+        use tauri::Emitter;
+        let _ = app.emit("click-mode-deactivated", ());
+    }
+}
+
 /// Start observing app focus changes
 /// When the frontmost app changes, the callback will be called
 pub fn start_focus_observer<F>(callback: F)
