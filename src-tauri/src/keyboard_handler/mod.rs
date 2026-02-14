@@ -43,6 +43,24 @@ pub fn create_keyboard_callback(
     list_state: SharedListModeState,
 ) -> impl Fn(KeyEvent) -> Option<KeyEvent> + Send + 'static {
     move |event| {
+        // Reset modifier double-tap trackers when any non-modifier key is pressed.
+        // This prevents false double-tap detection when using shortcuts like CMD+C
+        // followed quickly by CMD+V (which would otherwise look like two CMD taps).
+        if event.is_key_down {
+            if let Some(keycode) = event.keycode() {
+                match keycode {
+                    KeyCode::Escape => {}
+                    _ => {
+                        let mut dt_manager = double_tap_manager.lock().unwrap();
+                        dt_manager.command_tracker.reset();
+                        dt_manager.option_tracker.reset();
+                        dt_manager.control_tracker.reset();
+                        dt_manager.shift_tracker.reset();
+                    }
+                }
+            }
+        }
+
         // Check for Escape key double-tap (for non-modifier double-tap shortcuts)
         if let Some(keycode) = event.keycode() {
             if keycode == KeyCode::Escape {
