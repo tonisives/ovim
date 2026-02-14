@@ -81,5 +81,19 @@ jobs:
           workspaces: src-tauri
           shared-key: aarch64-apple-darwin
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build frontend
+        run: pnpm build
+
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --bins
