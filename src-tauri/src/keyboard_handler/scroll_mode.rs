@@ -13,13 +13,14 @@ pub fn handle_scroll_mode_key(
     event: KeyEvent,
     scroll_state: &SharedScrollModeState,
     scroll_step: u32,
+    disabled_shortcuts: &[String],
 ) -> Option<KeyEvent> {
     // Only process key down events
     if !event.is_key_down {
         // Suppress key up for keys we handled on key down
         // For simplicity, we'll check if it's a scroll key and suppress
         if let Some(keycode) = KeyCode::from_raw(event.code) {
-            if is_scroll_key(keycode, event.modifiers.shift) {
+            if is_scroll_key(keycode, event.modifiers.shift, disabled_shortcuts) {
                 return None;
             }
         }
@@ -47,6 +48,7 @@ pub fn handle_scroll_mode_key(
         option,
         command,
         scroll_step,
+        disabled_shortcuts,
     );
     drop(scroll_state_guard);
 
@@ -58,7 +60,9 @@ pub fn handle_scroll_mode_key(
 
 /// Check if a key is a potential scroll mode key
 /// Used to determine if we should suppress key up events
-fn is_scroll_key(keycode: KeyCode, shift: bool) -> bool {
+fn is_scroll_key(keycode: KeyCode, shift: bool, disabled_shortcuts: &[String]) -> bool {
+    let is_disabled = |group: &str| disabled_shortcuts.iter().any(|s| s == group);
+
     matches!(
         (keycode, shift),
         (KeyCode::H, false)
@@ -72,5 +76,14 @@ fn is_scroll_key(keycode: KeyCode, shift: bool) -> bool {
             | (KeyCode::H, true)
             | (KeyCode::L, true)
             | (KeyCode::R, _)
-    )
+    ) && !match (keycode, shift) {
+        (KeyCode::H | KeyCode::J | KeyCode::K | KeyCode::L, false) => is_disabled("hjkl"),
+        (KeyCode::G, false) => is_disabled("gg"),
+        (KeyCode::G, true) => is_disabled("G"),
+        (KeyCode::D, false) | (KeyCode::U, false) => is_disabled("du"),
+        (KeyCode::Slash, false) => is_disabled("slash"),
+        (KeyCode::H, true) | (KeyCode::L, true) => is_disabled("HL"),
+        (KeyCode::R, _) => is_disabled("rR"),
+        _ => false,
+    }
 }

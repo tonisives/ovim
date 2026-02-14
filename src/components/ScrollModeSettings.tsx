@@ -134,13 +134,35 @@ export function ScrollModeSettingsComponent({ settings, onUpdate }: Props) {
         <div className="shortcuts-table">
           <table>
             <tbody>
-              <tr><td className="shortcut-key">h / j / k / l</td><td>Scroll left / down / up / right</td></tr>
-              <tr><td className="shortcut-key">gg</td><td>Scroll to top</td></tr>
-              <tr><td className="shortcut-key">G</td><td>Scroll to bottom</td></tr>
-              <tr><td className="shortcut-key">d / u</td><td>Half page down / up</td></tr>
-              <tr><td className="shortcut-key">/</td><td>Open find (Cmd+F)</td></tr>
-              <tr><td className="shortcut-key">H / L</td><td>History back / forward</td></tr>
-              <tr><td className="shortcut-key">r / R</td><td>Reload / Hard reload</td></tr>
+              {[
+                { id: "hjkl", key: "h / j / k / l", desc: "Scroll left / down / up / right" },
+                { id: "gg", key: "gg", desc: "Scroll to top" },
+                { id: "G", key: "G", desc: "Scroll to bottom" },
+                { id: "du", key: "d / u", desc: "Half page down / up" },
+                { id: "slash", key: "/", desc: "Open find (Cmd+F)" },
+                { id: "HL", key: "H / L", desc: "History back / forward" },
+                { id: "rR", key: "r / R", desc: "Reload / Hard reload" },
+              ].map(({ id, key, desc }) => (
+                <tr key={id}>
+                  <td className="shortcut-key">{key}</td>
+                  <td>{desc}</td>
+                  <td className="shortcut-toggle">
+                    <input
+                      type="checkbox"
+                      checked={!scrollMode.disabled_shortcuts?.includes(id)}
+                      disabled={!scrollMode.enabled}
+                      onChange={(e) => {
+                        const disabled = scrollMode.disabled_shortcuts ?? []
+                        updateScrollMode({
+                          disabled_shortcuts: e.target.checked
+                            ? disabled.filter((s) => s !== id)
+                            : [...disabled, id],
+                        })
+                      }}
+                    />
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

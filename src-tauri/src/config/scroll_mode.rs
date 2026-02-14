@@ -19,6 +19,8 @@ pub struct ScrollModeSettings {
     /// Bundle identifiers of apps that disable scroll mode when they have visible windows
     /// (e.g., overlay apps like Keyboard Maestro palettes)
     pub overlay_blocklist: Vec<String>,
+    /// Shortcut groups that are disabled (e.g., "hjkl", "gg", "G", "du", "slash", "HL", "rR")
+    pub disabled_shortcuts: Vec<String>,
 }
 
 impl Default for ScrollModeSettings {
@@ -40,7 +42,15 @@ impl Default for ScrollModeSettings {
                 "com.apple.systempreferences".to_string(),
                 "com.apple.SystemPreferences".to_string(),
             ],
-            overlay_blocklist: vec![],
+            overlay_blocklist: vec![
+                "com.stairways.keyboardmaestro.engine".to_string(), // KM palettes
+                "com.raycast.macos".to_string(),                    // Raycast
+                "com.alfredapp.Alfred".to_string(),                 // Alfred
+                "com.runningwithcrayons.Alfred".to_string(),        // Alfred (alt bundle)
+                "com.1password.1password".to_string(),              // 1Password
+                "com.bitwarden.desktop".to_string(),                // Bitwarden
+            ],
+            disabled_shortcuts: vec![],
         }
     }
 }

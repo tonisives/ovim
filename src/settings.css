@@ -53,3 +53,16 @@
 .shortcuts-table td:last-child {
   color: var(--text-secondary);
 }
+
+.shortcuts-table .shortcut-toggle {
+  width: 24px;
+  padding-left: 0;
+  text-align: right;
+}
+
+.shortcuts-table .shortcut-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  margin: 0;
+}

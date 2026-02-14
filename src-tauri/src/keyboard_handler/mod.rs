@@ -204,6 +204,7 @@ pub fn create_keyboard_callback(
                         if vim_mode == VimMode::Insert || vim_disabled_for_app || !settings_guard.enabled
                         {
                             let scroll_step = scroll_settings.scroll_step;
+                            let disabled_shortcuts = scroll_settings.disabled_shortcuts.clone();
                             drop(settings_guard);
 
                             // Process scroll mode key
@@ -211,6 +212,7 @@ pub fn create_keyboard_callback(
                                 event,
                                 &scroll_state,
                                 scroll_step,
+                                &disabled_shortcuts,
                             );
 
                             // If scroll mode handled the key, return the result
