@@ -90,8 +90,7 @@ Opens your actual Neovim installation in a terminal window. Your full config (`~
 - Custom launch script - use your own editor. [docs/launcher-script.md](docs/launcher-script.md)
 - CLI - toggle modes via CLI. [docs/cli.md](docs/cli.md)
 
-Check out [full docs](docs/README.md)
-Also check out the [official website](https://vim.tonis.dev/)
+Check out [full docs](docs/README.md) and the [official website](https://vim.tonis.dev/)
 
 ## Issues
 
