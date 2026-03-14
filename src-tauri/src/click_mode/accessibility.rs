@@ -21,8 +21,21 @@ struct ElementCache {
     is_modal: bool,
 }
 
+/// Cache for browser JS clickable elements (separate from AX cache)
+struct BrowserJsCache {
+    /// Cached web clickables already converted to RawElementData
+    elements: Vec<RawElementData>,
+    /// PID of the browser these elements belong to
+    pid: i32,
+    /// When the cache was populated
+    timestamp: Instant,
+}
+
 /// Global element cache with short TTL
 static ELEMENT_CACHE: OnceLock<Mutex<Option<ElementCache>>> = OnceLock::new();
+
+/// Global browser JS element cache with short TTL
+static BROWSER_JS_CACHE: OnceLock<Mutex<Option<BrowserJsCache>>> = OnceLock::new();
 
 /// Configurable timing settings (updated from user settings)
 static TIMING_SETTINGS: OnceLock<Mutex<TimingSettings>> = OnceLock::new();
@@ -65,6 +78,10 @@ fn get_cache() -> &'static Mutex<Option<ElementCache>> {
     ELEMENT_CACHE.get_or_init(|| Mutex::new(None))
 }
 
+fn get_browser_js_cache() -> &'static Mutex<Option<BrowserJsCache>> {
+    BROWSER_JS_CACHE.get_or_init(|| Mutex::new(None))
+}
+
 /// Check if we have valid cached elements for the given PID
 fn get_cached_elements(pid: i32) -> Option<(Vec<RawElementData>, bool)> {
     let cache_ttl = get_timing_settings()
@@ -96,12 +113,44 @@ fn cache_elements(pid: i32, elements: Vec<RawElementData>, is_modal: bool) {
     }
 }
 
+/// Check if we have valid cached browser JS elements for the given PID
+fn get_cached_browser_js_elements(pid: i32) -> Option<Vec<RawElementData>> {
+    let cache_ttl = get_timing_settings()
+        .lock()
+        .map(|s| s.cache_ttl_ms)
+        .unwrap_or(500);
+
+    let cache = get_browser_js_cache().lock().ok()?;
+    let cached = cache.as_ref()?;
+
+    if cached.pid == pid && cached.timestamp.elapsed().as_millis() < cache_ttl {
+        log::info!("Using cached browser JS elements (age: {}ms)", cached.timestamp.elapsed().as_millis());
+        Some(cached.elements.clone())
+    } else {
+        None
+    }
+}
+
+/// Store browser JS elements in cache
+fn cache_browser_js_elements(pid: i32, elements: Vec<RawElementData>) {
+    if let Ok(mut cache) = get_browser_js_cache().lock() {
+        *cache = Some(BrowserJsCache {
+            elements,
+            pid,
+            timestamp: Instant::now(),
+        });
+    }
+}
+
 /// Invalidate the cache (call when app focus changes)
 pub fn invalidate_cache() {
     if let Ok(mut cache) = get_cache().lock() {
         *cache = None;
-        log::debug!("Element cache invalidated");
     }
+    if let Ok(mut cache) = get_browser_js_cache().lock() {
+        *cache = None;
+    }
+    log::debug!("Element caches invalidated");
 }
 
 /// Prefetch elements in background for faster click mode activation
@@ -353,77 +402,98 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
         .as_ref()
         .and_then(|id| super::browser_clickables::detect_browser_type(id));
 
-    // Check cache first
-    let cached = get_cached_elements(pid);
+    // Check caches
+    let cached_ax = get_cached_elements(pid);
+    let cached_js = get_cached_browser_js_elements(pid);
 
-    // If cache miss and this is a browser, run AX query and JS query in parallel
-    // NOTE: Browser JS query must ALWAYS run (even on cache hit) because the cache
-    // only stores AX elements, not browser elements. Otherwise we get single-char hints
-    // that conflict with multi-char hints when browser elements are added.
-    let (mut all_elements, is_modal, web_clickables) = if let Some((cached_els, cached_modal)) = cached {
-        log::info!("[TIMING] Cache hit! Using {} cached elements ({}ms)", cached_els.len(), start.elapsed().as_millis());
-        // Even on cache hit, we need to fetch browser elements if this is a browser app
-        let browser_els = if let Some(bt) = browser_type {
-            if bt.needs_js_injection() && !cached_modal {
-                log::info!("[TIMING] Cache hit but fetching browser elements for browser app");
-                super::browser_clickables::get_browser_clickables(bt).ok()
+    // Browser-fast path: for Chromium browsers, skip AX subprocess entirely
+    // and rely only on JS injection for web content. Much faster (~30-60ms vs ~130-200ms).
+    let all_elements: Vec<RawElementData> = if let Some(bt) = browser_type {
+        if bt.needs_js_injection() {
+            // Chromium browser fast path
+            if let (Some((cached_ax_els, _)), Some(cached_js_els)) = (&cached_ax, &cached_js) {
+                // Both caches hit - near instant
+                log::info!("[TIMING] Both caches hit! AX={} JS={} ({}ms)",
+                    cached_ax_els.len(), cached_js_els.len(), start.elapsed().as_millis());
+                let mut els = cached_ax_els.clone();
+                els.extend(cached_js_els.clone());
+                els
+            } else if let Some(cached_js_els) = &cached_js {
+                // JS cache hit, AX cache miss - use cached JS, skip AX
+                log::info!("[TIMING] JS cache hit ({}), skipping AX ({}ms)",
+                    cached_js_els.len(), start.elapsed().as_millis());
+                cached_js_els.clone()
             } else {
-                None
+                // JS cache miss - run fast JS-only query
+                log::info!("[TIMING] Browser fast path: JS-only query (no AX subprocess)");
+                let js_start = Instant::now();
+                let js_result = super::browser_clickables::get_browser_clickables_fast(bt);
+                log::info!("[TIMING] Fast JS query took {}ms", js_start.elapsed().as_millis());
+
+                match js_result {
+                    Ok(web_els) => {
+                        log::info!("Found {} web clickables via fast JS path", web_els.len());
+                        let raw_els: Vec<RawElementData> = web_els.into_iter().map(|wc| RawElementData {
+                            x: wc.x,
+                            y: wc.y,
+                            width: wc.width,
+                            height: wc.height,
+                            role: wc.tag,
+                            title: wc.text,
+                        }).collect();
+
+                        // Cache the JS results
+                        cache_browser_js_elements(pid, raw_els.clone());
+                        raw_els
+                    }
+                    Err(e) => {
+                        // Fast path failed, fall back to parallel AX+JS approach
+                        log::warn!("Fast JS path failed ({}), falling back to AX+JS parallel", e);
+                        let bt_clone = bt;
+                        let js_handle = std::thread::spawn(move || {
+                            super::browser_clickables::get_browser_clickables(bt_clone)
+                        });
+
+                        let (ax_elements, _is_modal) = query_elements_subprocess(pid)?;
+                        let js_result = js_handle.join().ok().and_then(|r| r.ok());
+
+                        let mut els = ax_elements;
+                        if let Some(web_els) = js_result {
+                            for wc in web_els {
+                                els.push(RawElementData {
+                                    x: wc.x, y: wc.y, width: wc.width, height: wc.height,
+                                    role: wc.tag, title: wc.text,
+                                });
+                            }
+                        }
+                        els
+                    }
+                }
             }
         } else {
-            None
-        };
-        (cached_els, cached_modal, browser_els)
-    } else if let Some(bt) = browser_type {
-        if bt.needs_js_injection() {
-            log::info!("[TIMING] Cache miss, running AX + browser JS in parallel");
-
-            // Run both queries in parallel using threads
-            let bt_clone = bt;
-            let js_handle = std::thread::spawn(move || {
-                super::browser_clickables::get_browser_clickables(bt_clone)
-            });
-
-            // Run subprocess query on current thread
-            let (ax_elements, is_modal) = query_elements_subprocess(pid)?;
-            log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
-
-            // Wait for JS results
-            let js_result = js_handle.join().ok().and_then(|r| r.ok());
-            log::info!("[TIMING] Parallel queries complete at {}ms", start.elapsed().as_millis());
-
-            (ax_elements, is_modal, js_result)
-        } else {
-            // Safari - no JS injection needed
-            log::info!("[TIMING] Cache miss, querying via subprocess (Safari)");
-            let result = query_elements_subprocess(pid)?;
-            log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
-            (result.0, result.1, None)
+            // Safari - use AX, no JS injection needed
+            if let Some((cached_els, _)) = cached_ax {
+                log::info!("[TIMING] Cache hit! Using {} cached elements ({}ms)", cached_els.len(), start.elapsed().as_millis());
+                cached_els
+            } else {
+                log::info!("[TIMING] Cache miss, querying via subprocess (Safari)");
+                let result = query_elements_subprocess(pid)?;
+                log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
+                result.0
+            }
         }
     } else {
-        // Non-browser app
-        log::info!("[TIMING] Cache miss, querying via subprocess (non-browser)");
-        let result = query_elements_subprocess(pid)?;
-        log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
-        (result.0, result.1, None)
-    };
-
-    // Append web clickables if we got any
-    if let Some(web_els) = web_clickables {
-        log::info!("Found {} web clickables via JavaScript", web_els.len());
-        for wc in web_els {
-            all_elements.push(RawElementData {
-                x: wc.x,
-                y: wc.y,
-                width: wc.width,
-                height: wc.height,
-                role: wc.tag.clone(),
-                title: wc.text.clone(),
-            });
+        // Non-browser app - standard AX path
+        if let Some((cached_els, _)) = cached_ax {
+            log::info!("[TIMING] Cache hit! Using {} cached elements ({}ms)", cached_els.len(), start.elapsed().as_millis());
+            cached_els
+        } else {
+            log::info!("[TIMING] Cache miss, querying via subprocess (non-browser)");
+            let result = query_elements_subprocess(pid)?;
+            log::info!("[TIMING] Subprocess query took {}ms", start.elapsed().as_millis());
+            result.0
         }
-    } else if is_modal {
-        log::info!("Modal dialog detected, skipped browser JS injection");
-    }
+    };
 
     log::info!("Total clickable elements: {}", all_elements.len());
 

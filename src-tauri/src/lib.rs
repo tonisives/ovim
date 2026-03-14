@@ -289,16 +289,21 @@ fn handle_double_tap_activation(
         }
 
         let manager = Arc::clone(click_mode_manager);
+        let dt_start = std::time::Instant::now();
         std::thread::spawn(move || {
+            log::info!("[TIMING] double-tap thread spawned at {}ms", dt_start.elapsed().as_millis());
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut mgr = manager.lock().unwrap();
+                log::info!("[TIMING] lock acquired at {}ms", dt_start.elapsed().as_millis());
                 match mgr.activate() {
                     Ok(elements) => {
-                        log::info!("Click mode activated via double-tap with {} elements", elements.len());
+                        log::info!("[TIMING] activate() done at {}ms with {} elements", dt_start.elapsed().as_millis(), elements.len());
                         let style = click_mode::native_hints::HintStyle::default();
                         click_mode::native_hints::show_hints(&elements, &style);
+                        log::info!("[TIMING] show_hints() returned at {}ms", dt_start.elapsed().as_millis());
                         if let Some(app) = get_app_handle() {
                             let _ = app.emit("click-mode-activated", ());
+                            log::info!("[TIMING] emit done at {}ms", dt_start.elapsed().as_millis());
                         }
                     }
                     Err(e) => {
@@ -365,6 +370,9 @@ pub fn run() {
 
     // Initialize the accessibility helper binary
     click_mode::accessibility::init_helper();
+
+    // Pre-create hint window pool for fast click mode activation
+    click_mode::native_hints::init_pool();
 
     let (vim_state, mode_rx) = VimState::new();
     let vim_state = Arc::new(Mutex::new(vim_state));

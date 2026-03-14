@@ -5,6 +5,7 @@
 //! to query clickable elements directly from the DOM.
 
 use std::process::Command;
+use std::time::Instant;
 
 /// Browser types we support for JavaScript injection
 #[derive(Debug, Clone, Copy)]
@@ -64,13 +65,29 @@ pub struct WebClickable {
 
 /// Combined JavaScript that gets both viewport info and clickable elements in one call
 /// Returns JSON: {"vh": viewportHeight, "els": [...clickables]}
-const GET_ALL_JS: &str = r#"(function(){var r=[];var seen=new Set();var s="a[href],button,input,textarea,select,[role=button],[role=link],[onclick],[tabindex]";var els=document.querySelectorAll(s);for(var i=0;i<els.length&&r.length<200;i++){var el=els[i];var rect=el.getBoundingClientRect();if(rect.width<=0||rect.height<=0)continue;if(rect.top>window.innerHeight||rect.bottom<0)continue;if(rect.left>window.innerWidth||rect.right<0)continue;var k=Math.round(rect.left)+","+Math.round(rect.top);if(seen.has(k))continue;seen.add(k);var t=el.textContent||el.value||el.placeholder||"";t=t.trim().substring(0,50);r.push({x:rect.left,y:rect.top,width:rect.width,height:rect.height,tag:el.tagName.toLowerCase(),text:t});}return JSON.stringify({vh:window.innerHeight,els:r});})()"#;
+const GET_ALL_JS: &str = r#"(function(){var r=[];var seen=new Set();var s="a[href],button,input,textarea,select,[role=button],[role=link],[onclick],[tabindex]";var els=document.querySelectorAll(s);for(var i=0;i<els.length&&r.length<200;i++){var el=els[i];var rect=el.getBoundingClientRect();if(rect.width<=0||rect.height<=0)continue;if(rect.top>window.innerHeight||rect.bottom<0)continue;if(rect.left>window.innerWidth||rect.right<0)continue;var k=Math.round(rect.left)+","+Math.round(rect.top);if(seen.has(k))continue;seen.add(k);var t=el.textContent||el.value||el.placeholder||"";t=t.trim().substring(0,50);r.push({x:rect.left,y:rect.top,width:rect.width,height:rect.height,tag:el.tagName.toLowerCase(),text:t});}return JSON.stringify({vh:window.innerHeight,els:r});})()
+"#;
 
-/// Combined result from browser query
+/// JavaScript that returns screen coordinates alongside elements, eliminating the need
+/// for System Events window position queries. Returns JSON with screen position info.
+/// Expanded selector matches Vimium-style coverage.
+/// Expanded selector matching Vimium-style coverage for the fast path.
+/// Returns viewport height + elements. Window position comes from AppleScript bounds.
+const GET_ALL_JS_EXPANDED: &str = r#"(function(){var r=[];var seen=new Set();var s="a[href],button,input,textarea,select,[role=button],[role=link],[role=tab],[role=checkbox],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=radio],[role=textbox],[onclick],[tabindex],[contenteditable],label,summary,details";var els=document.querySelectorAll(s);for(var i=0;i<els.length&&r.length<200;i++){var el=els[i];var rect=el.getBoundingClientRect();if(rect.width<=0||rect.height<=0)continue;if(rect.top>window.innerHeight||rect.bottom<0)continue;if(rect.left>window.innerWidth||rect.right<0)continue;var k=Math.round(rect.left)+","+Math.round(rect.top);if(seen.has(k))continue;seen.add(k);var t=el.textContent||el.value||el.placeholder||"";t=t.trim().substring(0,50);r.push({x:rect.left,y:rect.top,width:rect.width,height:rect.height,tag:el.tagName.toLowerCase(),text:t});}return JSON.stringify({vh:window.innerHeight,els:r});})()"#;
+
+/// Combined result from browser query (used with System Events window position)
 #[derive(Debug, serde::Deserialize)]
 struct BrowserQueryResult {
     vh: f64,
     els: Vec<WebClickable>,
+}
+
+/// Result from the fast browser query with expanded selectors.
+/// Window position comes from AppleScript bounds, not JS.
+#[derive(Debug, serde::Deserialize)]
+pub struct BrowserQueryResultFull {
+    pub vh: f64,
+    pub els: Vec<WebClickable>,
 }
 
 /// Build a combined AppleScript that gets window info AND runs JS in one osascript call
@@ -126,6 +143,153 @@ end tell
 return winInfo & "|" & jsResult"#,
         js = js.replace('"', "\\\"").replace('\n', "")
     )
+}
+
+/// Build a fast AppleScript for Chromium browsers that gets window bounds + JS in one call,
+/// without going through System Events (which adds latency).
+fn build_fast_chrome_script(app_name: &str, js: &str) -> String {
+    format!(
+        r#"set winInfo to ""
+set jsResult to "null"
+tell application "{app}"
+    if (count of windows) > 0 then
+        set b to bounds of front window
+        set winInfo to (item 1 of b as text) & "," & (item 2 of b as text) & "," & (item 3 of b as text) & "," & (item 4 of b as text)
+        tell active tab of front window
+            try
+                set jsResult to execute javascript "{js}"
+            end try
+        end tell
+    end if
+end tell
+return winInfo & "|" & jsResult"#,
+        app = app_name,
+        js = js.replace('"', "\\\"").replace('\n', "")
+    )
+}
+
+/// Execute AppleScript in-process using NSAppleScript (avoids ~240ms osascript subprocess overhead)
+fn execute_applescript_inline(source: &str) -> Result<String, String> {
+    unsafe {
+        use objc::{class, msg_send, sel, sel_impl};
+
+        let ns_string_class = class!(NSString);
+        let c_source = std::ffi::CString::new(source).map_err(|e| format!("Invalid script: {}", e))?;
+        let source_nsstring: *mut objc::runtime::Object = msg_send![
+            ns_string_class,
+            stringWithUTF8String: c_source.as_ptr()
+        ];
+
+        if source_nsstring.is_null() {
+            return Err("Failed to create NSString".to_string());
+        }
+
+        let script_class = class!(NSAppleScript);
+        let script: *mut objc::runtime::Object = msg_send![script_class, alloc];
+        let script: *mut objc::runtime::Object = msg_send![script, initWithSource: source_nsstring];
+
+        if script.is_null() {
+            return Err("Failed to create NSAppleScript".to_string());
+        }
+
+        let mut error: *mut objc::runtime::Object = std::ptr::null_mut();
+        let result: *mut objc::runtime::Object = msg_send![script, executeAndReturnError: &mut error as *mut _];
+
+        if result.is_null() || !error.is_null() {
+            let err_msg = if !error.is_null() {
+                let desc: *mut objc::runtime::Object = msg_send![error, description];
+                if !desc.is_null() {
+                    let utf8: *const std::os::raw::c_char = msg_send![desc, UTF8String];
+                    if !utf8.is_null() {
+                        std::ffi::CStr::from_ptr(utf8).to_string_lossy().to_string()
+                    } else {
+                        "Unknown error".to_string()
+                    }
+                } else {
+                    "Unknown error".to_string()
+                }
+            } else {
+                "Script returned nil".to_string()
+            };
+            let _: () = msg_send![script, release];
+            return Err(format!("AppleScript error: {}", err_msg));
+        }
+
+        let string_value: *mut objc::runtime::Object = msg_send![result, stringValue];
+        let output = if !string_value.is_null() {
+            let utf8: *const std::os::raw::c_char = msg_send![string_value, UTF8String];
+            if !utf8.is_null() {
+                std::ffi::CStr::from_ptr(utf8).to_string_lossy().trim().to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let _: () = msg_send![script, release];
+        Ok(output)
+    }
+}
+
+/// Query clickable elements using the fast path (no System Events, no osascript subprocess).
+/// Gets window bounds from the browser's own AppleScript and elements from JS.
+pub fn get_browser_clickables_fast(browser_type: BrowserType) -> Result<Vec<WebClickable>, String> {
+    log::info!("Querying web clickables (fast path) from {:?}", browser_type);
+
+    let script = build_fast_chrome_script(browser_type.app_name(), GET_ALL_JS_EXPANDED);
+
+    let start = Instant::now();
+    let stdout = execute_applescript_inline(&script)?;
+    log::info!("[TIMING] In-process AppleScript took {}ms", start.elapsed().as_millis());
+
+    log::debug!("Fast AppleScript output: {}", &stdout[..stdout.len().min(200)]);
+
+    // Parse: "winLeft,winTop,winRight,winBottom|{json}"
+    let parts: Vec<&str> = stdout.splitn(2, '|').collect();
+    if parts.len() != 2 {
+        return Err(format!("Invalid fast output format: {}", stdout));
+    }
+
+    let win_parts: Vec<&str> = parts[0].split(',').collect();
+    if win_parts.len() != 4 {
+        return Err(format!("Invalid window bounds: {}", parts[0]));
+    }
+
+    let win_x: f64 = win_parts[0].parse().unwrap_or(0.0);
+    let win_y: f64 = win_parts[1].parse().unwrap_or(0.0);
+    let _win_right: f64 = win_parts[2].parse().unwrap_or(0.0);
+    let win_bottom: f64 = win_parts[3].parse().unwrap_or(0.0);
+    let win_height = win_bottom - win_y;
+
+    let js_result = parts[1];
+    if js_result.is_empty() || js_result == "null" || js_result == "missing value" {
+        log::info!("No clickables returned from browser (fast path)");
+        return Ok(Vec::new());
+    }
+
+    let result: BrowserQueryResultFull = serde_json::from_str(js_result)
+        .map_err(|e| format!("Failed to parse clickables JSON: {} (output: {})", e, &js_result[..js_result.len().min(200)]))?;
+
+    let chrome_height = win_height - result.vh;
+
+    log::info!(
+        "Browser fast: win_x={}, win_y={}, win_h={}, viewport_h={}, chrome_h={}, elements={}",
+        win_x, win_y, win_height, result.vh, chrome_height, result.els.len()
+    );
+
+    // Convert viewport-relative coordinates to screen coordinates
+    // Same logic as the original get_browser_clickables
+    let screen_clickables: Vec<WebClickable> = result.els
+        .into_iter()
+        .map(|mut c| {
+            c.x += win_x;
+            c.y += win_y + chrome_height;
+            c
+        })
+        .collect();
+
+    Ok(screen_clickables)
 }
 
 /// Query clickable elements from the browser's web content

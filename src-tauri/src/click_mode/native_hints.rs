@@ -1,6 +1,7 @@
 //! Native hint rendering using macOS NSWindow
 //!
-//! Creates small native windows for each hint label, positioned at element locations.
+//! Uses a pre-created pool of hint windows for fast activation.
+//! On show, windows are repositioned and text is updated (no alloc).
 //! All AppKit operations are dispatched to the main thread.
 
 #![allow(deprecated)] // objc/cocoa crates are deprecated, but objc2 migration is future work
@@ -21,8 +22,24 @@ struct SendableId(*mut objc::runtime::Object);
 unsafe impl Send for SendableId {}
 unsafe impl Sync for SendableId {}
 
-/// Store for active hint windows
-static HINT_WINDOWS: Mutex<Vec<SendableId>> = Mutex::new(Vec::new());
+/// A pre-created hint window with its text field reference
+struct PooledWindow {
+    window: SendableId,
+    text_field: SendableId,
+}
+
+/// Pool of pre-created hint windows ready to be shown
+struct WindowPool {
+    windows: Vec<PooledWindow>,
+    /// How many windows from the pool are currently in use (visible)
+    active_count: usize,
+}
+
+/// Global window pool
+static WINDOW_POOL: Mutex<Option<WindowPool>> = Mutex::new(None);
+
+/// Max pool size - pre-create this many windows
+const POOL_SIZE: usize = 200;
 
 /// Style settings for hint windows
 #[derive(Clone)]
@@ -45,262 +62,45 @@ impl Default for HintStyle {
 }
 
 // ============================================================================
-// Public API
+// Pool Initialization
 // ============================================================================
 
-/// Show native hint windows for the given elements
-pub fn show_hints(elements: &[ClickableElement], style: &HintStyle) {
-    let start = std::time::Instant::now();
+/// Pre-create hint windows at app startup. Call from main thread or dispatch to it.
+pub fn init_pool() {
+    Queue::main().exec_async(|| {
+        let start = std::time::Instant::now();
+        let mut pool_windows = Vec::with_capacity(POOL_SIZE);
 
-    let windows_to_close = drain_windows();
-    if windows_to_close.is_none() {
-        return;
-    }
-    let windows_to_close = windows_to_close.unwrap();
+        let style = HintStyle::default();
 
-    let elements = elements.to_vec();
-    let style = style.clone();
-    let element_count = elements.len();
+        for _ in 0..POOL_SIZE {
+            if let Some(pw) = unsafe { create_pooled_window(&style) } {
+                pool_windows.push(pw);
+            }
+        }
 
-    log::info!(
-        "[TIMING] show_hints prep took {}ms for {} elements",
-        start.elapsed().as_millis(),
-        element_count
-    );
+        let count = pool_windows.len();
+        if let Ok(mut pool) = WINDOW_POOL.lock() {
+            *pool = Some(WindowPool {
+                windows: pool_windows,
+                active_count: 0,
+            });
+        }
 
-    Queue::main().exec_async(move || {
-        let main_start = std::time::Instant::now();
-        close_windows(windows_to_close);
-        create_hint_windows(&elements, &style);
         log::info!(
-            "[TIMING] show_hints main thread took {}ms",
-            main_start.elapsed().as_millis()
+            "[TIMING] Pre-created {} hint windows in {}ms",
+            count,
+            start.elapsed().as_millis()
         );
     });
 }
 
-/// Hide and release all hint windows
-pub fn hide_hints() {
-    let windows_to_close = match drain_windows() {
-        Some(w) if !w.is_empty() => w,
-        _ => return,
-    };
-
-    let count = windows_to_close.len();
-    Queue::main().exec_async(move || {
-        close_windows(windows_to_close);
-        log::info!("Hid {} native hint windows", count);
-    });
-}
-
-/// Update hint visibility based on input filter
-pub fn filter_hints(input: &str, elements: &[ClickableElement]) {
-    let input_upper = input.to_uppercase();
-    let hints: Vec<String> = elements.iter().map(|e| e.hint.clone()).collect();
-
-    Queue::main().exec_async(move || {
-        with_windows(|windows| {
-            for (i, SendableId(window)) in windows.iter().enumerate() {
-                if i < hints.len() && !window.is_null() {
-                    let visible = input_upper.is_empty() || hints[i].starts_with(&input_upper);
-                    set_window_visibility(*window, visible);
-                }
-            }
-        });
-    });
-}
-
-/// Update hint visibility and text based on input filter
-pub fn filter_hints_with_input(input: &str, elements: &[ClickableElement]) {
-    let input_upper = input.to_uppercase();
-    let input_len = input_upper.len();
-    let hints: Vec<String> = elements.iter().map(|e| e.hint.clone()).collect();
-
-    Queue::main().exec_async(move || {
-        with_windows(|windows| {
-            for (i, SendableId(window)) in windows.iter().enumerate() {
-                if i < hints.len() && !window.is_null() {
-                    let hint = &hints[i];
-                    let visible = input_upper.is_empty() || hint.starts_with(&input_upper);
-
-                    if visible {
-                        set_window_visibility(*window, true);
-                        if input_len > 0 && hint.len() > input_len {
-                            unsafe { update_window_text(*window, &hint[input_len..]) };
-                        }
-                    } else {
-                        set_window_visibility(*window, false);
-                    }
-                }
-            }
-        });
-    });
-}
-
-/// Trigger shake animation on all visible hint windows
-pub fn shake_hints() {
-    Queue::main().exec_async(|| {
-        with_windows(|windows| {
-            for SendableId(window) in windows.iter() {
-                if !window.is_null() {
-                    unsafe {
-                        let is_visible: bool = msg_send![*window, isVisible];
-                        if is_visible {
-                            animate_shake(*window);
-                        }
-                    }
-                }
-            }
-        });
-    });
-}
-
-// ============================================================================
-// Window Management Helpers
-// ============================================================================
-
-fn drain_windows() -> Option<Vec<SendableId>> {
-    match HINT_WINDOWS.try_lock() {
-        Ok(mut w) => Some(w.drain(..).collect()),
-        Err(_) => {
-            log::warn!("Could not lock HINT_WINDOWS");
-            None
-        }
-    }
-}
-
-fn with_windows<F>(f: F)
-where
-    F: FnOnce(&Vec<SendableId>),
-{
-    if let Ok(windows) = HINT_WINDOWS.try_lock() {
-        f(&windows);
-    }
-}
-
-fn close_windows(windows: Vec<SendableId>) {
-    unsafe {
-        for SendableId(window) in windows {
-            if !window.is_null() {
-                let _: () = msg_send![window, orderOut: std::ptr::null::<objc::runtime::Object>()];
-                let _: () = msg_send![window, close];
-            }
-        }
-    }
-}
-
-fn set_window_visibility(window: *mut objc::runtime::Object, visible: bool) {
-    unsafe {
-        if visible {
-            let _: () = msg_send![window, orderFrontRegardless];
-        } else {
-            let _: () = msg_send![window, orderOut: std::ptr::null::<objc::runtime::Object>()];
-        }
-    }
-}
-
-// ============================================================================
-// Window Creation
-// ============================================================================
-
-/// SAFETY: This function is only called from the main thread via `Queue::main().exec_async`
-fn create_hint_windows(elements: &[ClickableElement], style: &HintStyle) {
-    let mut windows = match HINT_WINDOWS.try_lock() {
-        Ok(w) => w,
-        Err(_) => {
-            log::error!("Failed to lock HINT_WINDOWS for creating");
-            return;
-        }
-    };
-
-    let screen_height = match get_primary_screen_height() {
-        Some(h) => h,
-        None => return,
-    };
-
-    for (i, element) in elements.iter().enumerate() {
-        let hint_height = style.font_size + 4.0;
-        let cocoa_y = screen_height - element.y - hint_height;
-
-        if i < 3 {
-            log::info!(
-                "Hint '{}' at AX({}, {}) -> Cocoa({}, {})",
-                element.hint,
-                element.x,
-                element.y,
-                element.x,
-                cocoa_y
-            );
-        }
-
-        // SAFETY: We're creating windows on the main thread
-        if let Some(window) = unsafe { create_hint_window(element.x, cocoa_y, &element.hint, style) } {
-            windows.push(SendableId(window));
-        }
-    }
-
-    log::info!(
-        "Created {} native hint windows (screen_height={})",
-        windows.len(),
-        screen_height
-    );
-}
-
-fn get_primary_screen_height() -> Option<f64> {
-    unsafe {
-        let screens: *mut objc::runtime::Object = msg_send![class!(NSScreen), screens];
-        if screens.is_null() {
-            log::error!("Failed to get screens");
-            return None;
-        }
-
-        let count: usize = msg_send![screens, count];
-        if count == 0 {
-            log::error!("No screens found");
-            return None;
-        }
-
-        let primary_screen: *mut objc::runtime::Object = msg_send![screens, objectAtIndex: 0usize];
-        if primary_screen.is_null() {
-            log::error!("Failed to get primary screen");
-            return None;
-        }
-
-        let screen_frame: core_graphics::geometry::CGRect = msg_send![primary_screen, frame];
-        Some(screen_frame.size.height)
-    }
-}
-
-unsafe fn create_hint_window(
-    x: f64,
-    y: f64,
-    hint: &str,
-    style: &HintStyle,
-) -> Option<*mut objc::runtime::Object> {
-    let char_width = style.font_size * 0.75;
-    let width = (hint.len() as f64 * char_width).max(20.0) + 8.0;
-    let height = style.font_size + 4.0;
-
-    let window = create_borderless_window(x, y, width, height)?;
-    configure_window(window);
-
-    let content_view = get_content_view(window)?;
-    configure_layer(content_view, style);
-    add_text_field(content_view, hint, width, height, style);
-
-    let _: () = msg_send![window, orderFrontRegardless];
-    Some(window)
-}
-
-unsafe fn create_borderless_window(
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Option<*mut objc::runtime::Object> {
+/// Create a single pooled window (hidden, offscreen)
+unsafe fn create_pooled_window(style: &HintStyle) -> Option<PooledWindow> {
+    // Create offscreen, hidden
     let frame = core_graphics::geometry::CGRect::new(
-        &core_graphics::geometry::CGPoint::new(x, y),
-        &core_graphics::geometry::CGSize::new(width, height),
+        &core_graphics::geometry::CGPoint::new(-1000.0, -1000.0),
+        &core_graphics::geometry::CGSize::new(30.0, style.font_size + 4.0),
     );
 
     let window: *mut objc::runtime::Object = msg_send![class!(NSWindow), alloc];
@@ -315,84 +115,63 @@ unsafe fn create_borderless_window(
         backing: 2u64
         defer: true
     ];
-
     if window.is_null() {
-        None
-    } else {
-        Some(window)
+        return None;
     }
-}
 
-unsafe fn configure_window(window: *mut objc::runtime::Object) {
+    // Configure window properties (these don't change)
     let _: () = msg_send![window, setOpaque: false];
     let clear_color: *mut objc::runtime::Object = msg_send![class!(NSColor), clearColor];
     let _: () = msg_send![window, setBackgroundColor: clear_color];
     let _: () = msg_send![window, setLevel: 102i64];
     let _: () = msg_send![window, setIgnoresMouseEvents: true];
-}
 
-unsafe fn get_content_view(window: *mut objc::runtime::Object) -> Option<*mut objc::runtime::Object> {
     let content_view: *mut objc::runtime::Object = msg_send![window, contentView];
     if content_view.is_null() {
         let _: () = msg_send![window, close];
-        None
-    } else {
-        Some(content_view)
+        return None;
     }
-}
 
-unsafe fn configure_layer(content_view: *mut objc::runtime::Object, style: &HintStyle) {
+    // Configure layer
     let _: () = msg_send![content_view, setWantsLayer: true];
-
     let layer: *mut objc::runtime::Object = msg_send![content_view, layer];
-    if layer.is_null() {
-        return;
+    if !layer.is_null() {
+        let bg_color: *mut objc::runtime::Object = msg_send![
+            class!(NSColor),
+            colorWithRed: style.bg_color.0
+            green: style.bg_color.1
+            blue: style.bg_color.2
+            alpha: style.opacity
+        ];
+        let cg_color: CFTypeRef = msg_send![bg_color, CGColor];
+        let _: () = msg_send![layer, setBackgroundColor: cg_color];
+        let _: () = msg_send![layer, setCornerRadius: 2.0f64];
+        let _: () = msg_send![layer, setBorderWidth: 0.5f64];
+
+        let border_color: *mut objc::runtime::Object = msg_send![
+            class!(NSColor),
+            colorWithRed: 0.0f64
+            green: 0.0f64
+            blue: 0.0f64
+            alpha: 0.2f64
+        ];
+        let cg_border: CFTypeRef = msg_send![border_color, CGColor];
+        let _: () = msg_send![layer, setBorderColor: cg_border];
     }
 
-    let bg_color: *mut objc::runtime::Object = msg_send![
-        class!(NSColor),
-        colorWithRed: style.bg_color.0
-        green: style.bg_color.1
-        blue: style.bg_color.2
-        alpha: style.opacity
-    ];
-    let cg_color: CFTypeRef = msg_send![bg_color, CGColor];
-    let _: () = msg_send![layer, setBackgroundColor: cg_color];
-    let _: () = msg_send![layer, setCornerRadius: 2.0f64];
-    let _: () = msg_send![layer, setBorderWidth: 0.5f64];
-
-    let border_color: *mut objc::runtime::Object = msg_send![
-        class!(NSColor),
-        colorWithRed: 0.0f64
-        green: 0.0f64
-        blue: 0.0f64
-        alpha: 0.2f64
-    ];
-    let cg_border: CFTypeRef = msg_send![border_color, CGColor];
-    let _: () = msg_send![layer, setBorderColor: cg_border];
-}
-
-unsafe fn add_text_field(
-    content_view: *mut objc::runtime::Object,
-    text: &str,
-    width: f64,
-    height: f64,
-    style: &HintStyle,
-) {
-    let frame = core_graphics::geometry::CGRect::new(
+    // Create text field
+    let tf_frame = core_graphics::geometry::CGRect::new(
         &core_graphics::geometry::CGPoint::new(0.0, 0.0),
-        &core_graphics::geometry::CGSize::new(width, height),
+        &core_graphics::geometry::CGSize::new(30.0, style.font_size + 4.0),
     );
 
     let text_field: *mut objc::runtime::Object = msg_send![class!(NSTextField), alloc];
-    let text_field: *mut objc::runtime::Object = msg_send![text_field, initWithFrame: frame];
-
+    let text_field: *mut objc::runtime::Object = msg_send![text_field, initWithFrame: tf_frame];
     if text_field.is_null() {
-        return;
+        let _: () = msg_send![window, close];
+        return None;
     }
 
-    let nsstring = create_nsstring(text);
-    let _: () = msg_send![text_field, setStringValue: nsstring];
     let _: () = msg_send![text_field, setBezeled: false];
     let _: () = msg_send![text_field, setDrawsBackground: false];
     let _: () = msg_send![text_field, setEditable: false];
@@ -414,45 +193,263 @@ unsafe fn add_text_field(
     ];
     let _: () = msg_send![text_field, setTextColor: text_color];
     let _: () = msg_send![content_view, addSubview: text_field];
+
+    Some(PooledWindow {
+        window: SendableId(window),
+        text_field: SendableId(text_field),
+    })
 }
 
 // ============================================================================
-// Text Updates & Animation
+// Public API
 // ============================================================================
 
-unsafe fn update_window_text(window: *mut objc::runtime::Object, text: &str) {
-    let content_view: *mut objc::runtime::Object = msg_send![window, contentView];
-    if content_view.is_null() {
-        return;
+/// Show native hint windows for the given elements using the pre-created pool
+pub fn show_hints(elements: &[ClickableElement], _style: &HintStyle) {
+    let start = std::time::Instant::now();
+
+    let elements = elements.to_vec();
+    let element_count = elements.len();
+
+    log::info!(
+        "[TIMING] show_hints prep took {}ms for {} elements",
+        start.elapsed().as_millis(),
+        element_count
+    );
+
+    let queued_at = std::time::Instant::now();
+    Queue::main().exec_async(move || {
+        let dispatch_delay = queued_at.elapsed().as_millis();
+        let main_start = std::time::Instant::now();
+
+        let screen_height = match get_primary_screen_height() {
+            Some(h) => h,
+            None => return,
+        };
+
+        if let Ok(mut pool) = WINDOW_POOL.lock() {
+            if let Some(ref mut pool) = *pool {
+                // Hide any previously active windows
+                let hide_start = std::time::Instant::now();
+                for i in 0..pool.active_count {
+                    if i < pool.windows.len() {
+                        let w = pool.windows[i].window.0;
+                        if !w.is_null() {
+                            unsafe {
+                                let _: () = msg_send![w, orderOut: std::ptr::null::<objc::runtime::Object>()];
+                            }
+                        }
+                    }
+                }
+                let hide_ms = hide_start.elapsed().as_millis();
+
+                // Show new hints by repositioning pool windows
+                let show_start = std::time::Instant::now();
+                let count = elements.len().min(pool.windows.len());
+                let font_size = 11.0f64;
+                let hint_height = font_size + 4.0;
+                let char_width = font_size * 0.75;
+
+                for (i, element) in elements.iter().take(count).enumerate() {
+                    let pw = &pool.windows[i];
+                    let w = pw.window.0;
+                    let tf = pw.text_field.0;
+                    if w.is_null() || tf.is_null() {
+                        continue;
+                    }
+
+                    let width = (element.hint.len() as f64 * char_width).max(20.0) + 8.0;
+                    let cocoa_y = screen_height - element.y - hint_height;
+
+                    if i < 3 {
+                        log::info!(
+                            "Hint '{}' at AX({}, {}) -> Cocoa({}, {})",
+                            element.hint,
+                            element.x,
+                            element.y,
+                            element.x,
+                            cocoa_y
+                        );
+                    }
+
+                    unsafe {
+                        // Update text
+                        let nsstring = create_nsstring(&element.hint);
+                        let _: () = msg_send![tf, setStringValue: nsstring];
+
+                        // Resize text field
+                        let tf_frame = core_graphics::geometry::CGRect::new(
+                            &core_graphics::geometry::CGPoint::new(0.0, 0.0),
+                            &core_graphics::geometry::CGSize::new(width, hint_height),
+                        );
+                        let _: () = msg_send![tf, setFrame: tf_frame];
+
+                        // Reposition and resize window
+                        let frame = core_graphics::geometry::CGRect::new(
+                            &core_graphics::geometry::CGPoint::new(element.x, cocoa_y),
+                            &core_graphics::geometry::CGSize::new(width, hint_height),
+                        );
+                        let _: () = msg_send![w, setFrame: frame display: false];
+
+                        // Show
+                        let _: () = msg_send![w, orderFrontRegardless];
+                    }
+                }
+
+                pool.active_count = count;
+
+                log::info!(
+                    "Showed {} hint windows from pool (screen_height={})",
+                    count,
+                    screen_height
+                );
+                log::info!(
+                    "[TIMING] show_hints: dispatch_delay={}ms, hide_old={}ms, show_new={}ms, total_main={}ms",
+                    dispatch_delay, hide_ms, show_start.elapsed().as_millis(), main_start.elapsed().as_millis()
+                );
+            } else {
+                log::error!("Window pool not initialized - call init_pool() at startup");
+            }
+        }
+    });
+}
+
+/// Hide all active hint windows (return them to pool)
+pub fn hide_hints() {
+    Queue::main().exec_async(|| {
+        if let Ok(mut pool) = WINDOW_POOL.lock() {
+            if let Some(ref mut pool) = *pool {
+                let count = pool.active_count;
+                for i in 0..count {
+                    if i < pool.windows.len() {
+                        let w = pool.windows[i].window.0;
+                        if !w.is_null() {
+                            unsafe {
+                                let _: () = msg_send![w, orderOut: std::ptr::null::<objc::runtime::Object>()];
+                            }
+                        }
+                    }
+                }
+                pool.active_count = 0;
+                log::info!("Hid {} native hint windows", count);
+            }
+        }
+    });
+}
+
+/// Update hint visibility based on input filter
+pub fn filter_hints(input: &str, elements: &[ClickableElement]) {
+    let input_upper = input.to_uppercase();
+    let hints: Vec<String> = elements.iter().map(|e| e.hint.clone()).collect();
+
+    Queue::main().exec_async(move || {
+        if let Ok(pool) = WINDOW_POOL.lock() {
+            if let Some(ref pool) = *pool {
+                for (i, hint) in hints.iter().enumerate() {
+                    if i < pool.windows.len() && i < pool.active_count {
+                        let w = pool.windows[i].window.0;
+                        if !w.is_null() {
+                            let visible = input_upper.is_empty() || hint.starts_with(&input_upper);
+                            set_window_visibility(w, visible);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Update hint visibility and text based on input filter
+pub fn filter_hints_with_input(input: &str, elements: &[ClickableElement]) {
+    let input_upper = input.to_uppercase();
+    let input_len = input_upper.len();
+    let hints: Vec<String> = elements.iter().map(|e| e.hint.clone()).collect();
+
+    Queue::main().exec_async(move || {
+        if let Ok(pool) = WINDOW_POOL.lock() {
+            if let Some(ref pool) = *pool {
+                for (i, hint) in hints.iter().enumerate() {
+                    if i < pool.windows.len() && i < pool.active_count {
+                        let w = pool.windows[i].window.0;
+                        let tf = pool.windows[i].text_field.0;
+                        if w.is_null() {
+                            continue;
+                        }
+
+                        let visible = input_upper.is_empty() || hint.starts_with(&input_upper);
+                        if visible {
+                            set_window_visibility(w, true);
+                            if input_len > 0 && hint.len() > input_len && !tf.is_null() {
+                                unsafe {
+                                    let nsstring = create_nsstring(&hint[input_len..]);
+                                    let _: () = msg_send![tf, setStringValue: nsstring];
+                                }
+                            }
+                        } else {
+                            set_window_visibility(w, false);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Trigger shake animation on all visible hint windows
+pub fn shake_hints() {
+    Queue::main().exec_async(|| {
+        if let Ok(pool) = WINDOW_POOL.lock() {
+            if let Some(ref pool) = *pool {
+                for i in 0..pool.active_count {
+                    if i < pool.windows.len() {
+                        let w = pool.windows[i].window.0;
+                        if !w.is_null() {
+                            unsafe {
+                                let is_visible: bool = msg_send![w, isVisible];
+                                if is_visible {
+                                    animate_shake(w);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+fn get_primary_screen_height() -> Option<f64> {
+    unsafe {
+        let screens: *mut objc::runtime::Object = msg_send![class!(NSScreen), screens];
+        if screens.is_null() {
+            return None;
+        }
+
+        let count: usize = msg_send![screens, count];
+        if count == 0 {
+            return None;
+        }
+
+        let primary_screen: *mut objc::runtime::Object = msg_send![screens, objectAtIndex: 0usize];
+        if primary_screen.is_null() {
+            return None;
+        }
+
+        let screen_frame: core_graphics::geometry::CGRect = msg_send![primary_screen, frame];
+        Some(screen_frame.size.height)
     }
+}
 
-    let subviews: *mut objc::runtime::Object = msg_send![content_view, subviews];
-    if subviews.is_null() {
-        return;
-    }
-
-    let count: usize = msg_send![subviews, count];
-    for i in 0..count {
-        let subview: *mut objc::runtime::Object = msg_send![subviews, objectAtIndex: i];
-        if subview.is_null() {
-            continue;
-        }
-
-        let class_name: *mut objc::runtime::Object = msg_send![subview, className];
-        if class_name.is_null() {
-            continue;
-        }
-
-        let utf8: *const std::os::raw::c_char = msg_send![class_name, UTF8String];
-        if utf8.is_null() {
-            continue;
-        }
-
-        let name = std::ffi::CStr::from_ptr(utf8).to_string_lossy();
-        if name == "NSTextField" {
-            let nsstring = create_nsstring(text);
-            let _: () = msg_send![subview, setStringValue: nsstring];
-            break;
+fn set_window_visibility(window: *mut objc::runtime::Object, visible: bool) {
+    unsafe {
+        if visible {
+            let _: () = msg_send![window, orderFrontRegardless];
+        } else {
+            let _: () = msg_send![window, orderOut: std::ptr::null::<objc::runtime::Object>()];
         }
     }
 }
@@ -486,10 +483,6 @@ unsafe fn animate_shake(window: *mut objc::runtime::Object) {
     let _: () = msg_send![animation, setDuration: 0.25f64];
     let _: () = msg_send![layer, addAnimation: animation forKey: create_nsstring("shake")];
 }
-
-// ============================================================================
-// Utilities
-// ============================================================================
 
 unsafe fn create_nsstring(s: &str) -> *mut objc::runtime::Object {
     let nsstring: *mut objc::runtime::Object = msg_send![class!(NSString), alloc];
