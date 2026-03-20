@@ -189,6 +189,16 @@ export function Indicator() {
     }
   }, [])
 
+  const handleHideIndicator = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      await invoke("toggle_indicator_visible")
+    } catch (err) {
+      console.error("Failed to toggle indicator:", err)
+    }
+  }, [])
+
   // Show overlay when hovering
   const showOverlay = isHovered
 
@@ -306,6 +316,45 @@ export function Indicator() {
         </span>
       </div>
       {hasBottom && <Widget type={bottomWidget} fontFamily={fontFamily} />}
+
+      {/* Hide button - top right, visible on hover */}
+      {showOverlay && isHoverable && (
+        <button
+          onClick={handleHideIndicator}
+          title="Hide indicator"
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 2,
+            width: 14,
+            height: 14,
+            padding: 0,
+            margin: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            border: "none",
+            borderRadius: "50%",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20,
+          }}
+        >
+          <svg
+            width="9"
+            height="9"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      )}
 
       {/* Settings overlay when hovering */}
       {showOverlay && (

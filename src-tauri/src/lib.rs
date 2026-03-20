@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{
     image::Image,
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::TrayIcon,
     AppHandle, Emitter, Listener, Manager, State,
 };
@@ -559,6 +559,7 @@ pub fn run() {
             commands::set_indicator_ignores_mouse,
             commands::is_command_key_pressed,
             commands::is_mouse_over_indicator,
+            commands::toggle_indicator_visible,
             commands::get_version,
             commands::check_for_update,
             commands::restart_app,
@@ -582,14 +583,32 @@ pub fn run() {
             // Initialize launcher callback registry
             launcher_callback::init();
 
+            let initial_indicator_visible = Settings::load().indicator_visible;
+            let show_indicator_item = CheckMenuItem::with_id(
+                app,
+                "show_indicator",
+                "Show floating indicator",
+                true,
+                initial_indicator_visible,
+                None::<&str>,
+            )?;
             let settings_item =
                 MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_indicator_item, &settings_item, &quit_item])?;
 
             if let Some(tray) = app.tray_by_id("main") {
                 tray.set_menu(Some(menu))?;
                 tray.on_menu_event(|app, event| match event.id.as_ref() {
+                    "show_indicator" => {
+                        let state: State<AppState> = app.state();
+                        let mut settings = state.settings.lock().unwrap();
+                        settings.indicator_visible = !settings.indicator_visible;
+                        let _ = settings.save();
+                        let new_settings = settings.clone();
+                        drop(settings);
+                        let _ = app.emit("settings-changed", new_settings);
+                    }
                     "settings" => {
                         if let Some(window) = app.get_webview_window("settings") {
                             let _ = window.show();
@@ -608,11 +627,14 @@ pub fn run() {
                 }
 
                 let tray_clone = tray.clone();
+                let show_indicator_item_clone = show_indicator_item.clone();
                 app.listen("settings-changed", move |event| {
                     if let Ok(new_settings) = serde_json::from_str::<Settings>(event.payload()) {
                         if let Err(e) = tray_clone.set_visible(new_settings.show_in_menu_bar) {
                             log::error!("Failed to update tray visibility: {}", e);
                         }
+                        // Sync the check menu item with indicator_visible setting
+                        let _ = show_indicator_item_clone.set_checked(new_settings.indicator_visible);
                         // Update tray icon when show_mode_in_menu_bar changes
                         update_tray_icon(&tray_clone, "insert", new_settings.show_mode_in_menu_bar);
                     }

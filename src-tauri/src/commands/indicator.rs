@@ -1,6 +1,6 @@
 //! Indicator window commands
 
-use tauri::{Manager, WebviewWindow};
+use tauri::{Emitter, Manager, WebviewWindow};
 
 /// Set whether the indicator window ignores mouse events (click-through)
 #[tauri::command]
@@ -106,6 +106,23 @@ pub fn is_mouse_over_indicator(app: tauri::AppHandle) -> bool {
     {
         false
     }
+}
+
+/// Toggle the indicator visibility setting
+#[tauri::command]
+pub fn toggle_indicator_visible(
+    app: tauri::AppHandle,
+    state: tauri::State<crate::AppState>,
+) -> Result<bool, String> {
+    let mut settings = state.settings.lock().unwrap();
+    settings.indicator_visible = !settings.indicator_visible;
+    let visible = settings.indicator_visible;
+    settings.save()?;
+    let new_settings = settings.clone();
+    drop(settings);
+
+    let _ = app.emit("settings-changed", new_settings);
+    Ok(visible)
 }
 
 /// Check if the Command key is currently pressed
