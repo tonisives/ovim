@@ -272,7 +272,7 @@ impl Settings {
                 .indicator_rows
                 .iter()
                 .map(|r| match r {
-                    RowItem::ModeChar { size } => *size,
+                    RowItem::ModeChar { size } => *size + 1, // 1x=2, 2x=3, 3x=4
                     RowItem::Widget { .. } => 1,
                 })
                 .sum();

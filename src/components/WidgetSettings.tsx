@@ -36,7 +36,6 @@ const WIDGET_OPTIONS: { value: WidgetType; label: string }[] = [
   { value: "LineCount", label: "Lines" },
   { value: "CharacterAndLineCount", label: "Chars+Lines" },
   { value: "Battery", label: "Battery" },
-  { value: "CapsLock", label: "CapsLock" },
   { value: "KeystrokeBuffer", label: "Keys" },
 ];
 
@@ -48,8 +47,12 @@ function getWidgetLabel(widgetType: string): string {
   return opt?.label ?? widgetType;
 }
 
+function modeRowCost(size: number): number {
+  return size + 1; // 1x=2, 2x=3, 3x=4
+}
+
 function totalRowCount(rows: RowItem[]): number {
-  return rows.reduce((sum, r) => sum + (r.type === "ModeChar" ? r.size : 1), 0);
+  return rows.reduce((sum, r) => sum + (r.type === "ModeChar" ? modeRowCost(r.size) : 1), 0);
 }
 
 function rowId(row: RowItem, index: number): string {
@@ -368,7 +371,7 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
     // Check if changing size would exceed limit
     const modeRow = rows.find((r): r is { type: "ModeChar"; size: 1 | 2 | 3 } => r.type === "ModeChar");
     if (!modeRow) return;
-    const newUsed = used - modeRow.size + size;
+    const newUsed = used - modeRowCost(modeRow.size) + modeRowCost(size);
     if (newUsed > 5) return;
 
     const newRows = rows.map((r) => (r.type === "ModeChar" ? { ...r, size } : r));
@@ -483,7 +486,7 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
             <PaletteItem
               id="palette-ModeChar"
               label="Mode"
-              disabled={hasModeChar || used >= 5}
+              disabled={hasModeChar || used > 3}
             />
             {paletteItems.map((item) => (
               <PaletteItem

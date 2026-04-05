@@ -19,7 +19,7 @@ function computeIndicatorHeight(rows: RowItem[], scale: number): number {
       totalHeight += WIDGET_ROW_HEIGHT
     }
   }
-  return Math.round(totalHeight * scale) - 2
+  return Math.round(totalHeight * scale) + 2
 }
 
 export async function applyWindowSettings(settings: Settings): Promise<void> {

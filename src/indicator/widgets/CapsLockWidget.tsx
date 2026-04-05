@@ -8,21 +8,17 @@ export function CapsLockWidget({ fontFamily }: { fontFamily: string }) {
     eventName: "caps-lock-changed",
   })
 
-  if (!capsLock) {
-    return null
-  }
-
   return (
     <div
       style={{
         fontSize: "9px",
-        opacity: 0.9,
+        opacity: capsLock ? 0.9 : 0.3,
         fontFamily,
         whiteSpace: "nowrap",
         paddingTop: 2,
       }}
     >
-      CAPS
+      {capsLock ? "CAPS" : "caps"}
     </div>
   )
 }
