@@ -453,7 +453,6 @@ export function ConfigTab({
             disabled={!nvimEdit.enabled}
           />
           Live sync text field
-          <span className="beta-badge">BETA</span>
         </label>
         <span className="hint">
           Sync changes to the original text field as you type in the editor. Only works with Neovim.

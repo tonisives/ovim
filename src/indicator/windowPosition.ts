@@ -8,7 +8,7 @@ import type { Settings, RowItem } from "./types"
 
 const BASE_SIZE = 40
 const WIDGET_ROW_HEIGHT = 12
-const MODE_CHAR_ROW_HEIGHT = 18
+const MODE_CHAR_ROW_HEIGHT = 22
 
 function computeIndicatorHeight(rows: RowItem[], scale: number): number {
   let totalHeight = 0

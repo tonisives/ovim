@@ -238,17 +238,14 @@ impl Settings {
         self.indicator_rows
             .retain(|row| !matches!(row, RowItem::Widget { widget_type } if widget_type == "None"));
 
-        // Ensure exactly one ModeChar exists
+        // Ensure at most one ModeChar exists
         let mode_count = self
             .indicator_rows
             .iter()
             .filter(|r| matches!(r, RowItem::ModeChar { .. }))
             .count();
 
-        if mode_count == 0 {
-            self.indicator_rows
-                .insert(0, RowItem::ModeChar { size: 2 });
-        } else if mode_count > 1 {
+        if mode_count > 1 {
             // Keep only the first ModeChar
             let mut found = false;
             self.indicator_rows.retain(|row| {

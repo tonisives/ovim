@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   DndContext,
@@ -10,8 +10,8 @@ import {
   useDraggable,
   closestCenter,
   type DragStartEvent,
+  type DragMoveEvent,
   type DragEndEvent,
-  type DragOverEvent,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
 import {
@@ -88,6 +88,16 @@ function SortableRow({
         {...attributes}
         {...listeners}
       >
+        <button
+          className="replica-row-remove"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove?.();
+          }}
+          style={{ alignSelf: "flex-end" }}
+        >
+          {"\u00d7"}
+        </button>
         <div className="replica-mode-char" style={{ height: heights[row.size] }}>
           <span
             style={{
@@ -161,10 +171,22 @@ function PaletteItem({ id, label, disabled }: { id: string; label: string; disab
 }
 
 // Droppable zone for the replica
-function ReplicaDropZone({ children }: { children: React.ReactNode }) {
+function ReplicaDropZone({
+  children,
+  innerRef,
+}: {
+  children: React.ReactNode;
+  innerRef?: React.RefObject<HTMLDivElement | null>;
+}) {
   const { setNodeRef } = useDroppable({ id: "replica" });
   return (
-    <div ref={setNodeRef} className="indicator-replica-inner">
+    <div
+      ref={(node) => {
+        setNodeRef(node);
+        if (innerRef) (innerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      }}
+      className="indicator-replica-inner"
+    >
       {children}
     </div>
   );
@@ -227,11 +249,36 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  const replicaRef = useRef<HTMLDivElement | null>(null);
+  // Store stable item rects captured at drag start (unaffected by placeholder)
+  const itemRectsRef = useRef<{ top: number; bottom: number; midY: number }[]>([]);
 
   const rows = settings.indicator_rows;
   const used = totalRowCount(rows);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  // Snapshot item rects at drag start so placeholder insertion doesn't affect them
+  const captureItemRects = () => {
+    const container = replicaRef.current;
+    if (!container) return;
+    const children = Array.from(container.children).filter(
+      (el) => !el.classList.contains("replica-row-placeholder") && !el.classList.contains("replica-empty"),
+    );
+    itemRectsRef.current = children.map((el) => {
+      const rect = el.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, midY: rect.top + rect.height / 2 };
+    });
+  };
+
+  // Compute insertion index from pointer Y using cached rects
+  const computeInsertIndex = (pointerY: number): number => {
+    const rects = itemRectsRef.current;
+    for (let i = 0; i < rects.length; i++) {
+      if (pointerY < rects[i].midY) return i;
+    }
+    return rows.length;
+  };
 
   // All available palette items (built-in + shell widgets)
   const paletteItems = useMemo(() => {
@@ -250,45 +297,35 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
     rows.filter((r): r is { type: "Widget"; widget_type: WidgetType } => r.type === "Widget").map((r) => r.widget_type),
   );
 
+  const hasModeChar = rows.some((r) => r.type === "ModeChar");
+
   // Sortable IDs for the replica
   const sortableIds = rows.map((r, i) => rowId(r, i));
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id);
+    // Capture stable item positions before any placeholder is rendered
+    captureItemRects();
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over) {
+  const getPointerY = (event: { activatorEvent: Event; delta: { y: number } }) => {
+    return (event.activatorEvent as PointerEvent).clientY + event.delta.y;
+  };
+
+  const handleDragMove = (event: DragMoveEvent) => {
+    const activeIdStr = String(event.active.id);
+    if (!activeIdStr.startsWith("palette-") || used >= 5) {
       setOverIndex(null);
       return;
     }
-
-    const activeIdStr = String(active.id);
-    // Only show placeholder for palette items
-    if (!activeIdStr.startsWith("palette-")) {
-      setOverIndex(null);
-      return;
-    }
-
-    if (used >= 5) {
-      setOverIndex(null);
-      return;
-    }
-
-    const overIdStr = String(over.id);
-    if (overIdStr === "replica") {
-      setOverIndex(rows.length);
-    } else {
-      const idx = sortableIds.indexOf(overIdStr);
-      setOverIndex(idx >= 0 ? idx + 1 : rows.length);
-    }
+    setOverIndex(computeInsertIndex(getPointerY(event)));
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    const finalOverIndex = overIndex;
     setActiveId(null);
     setOverIndex(null);
-    const { active, over } = event;
     if (!over) return;
 
     const activeIdStr = String(active.id);
@@ -296,26 +333,15 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
 
     // Check if dragging from palette
     if (activeIdStr.startsWith("palette-")) {
-      const widgetType = activeIdStr.slice("palette-".length) as WidgetType;
-
-      // Check capacity
       if (used >= 5) return;
 
-      const newRow: RowItem = { type: "Widget", widget_type: widgetType };
+      const isModeChar = activeIdStr === "palette-ModeChar";
+      const newRow: RowItem = isModeChar
+        ? { type: "ModeChar", size: 2 }
+        : { type: "Widget", widget_type: activeIdStr.slice("palette-".length) as WidgetType };
       const newRows = [...rows];
-
-      // Find insertion index
-      if (overIdStr === "replica") {
-        newRows.push(newRow);
-      } else {
-        const idx = sortableIds.indexOf(overIdStr);
-        if (idx >= 0) {
-          newRows.splice(idx + 1, 0, newRow);
-        } else {
-          newRows.push(newRow);
-        }
-      }
-
+      const insertAt = finalOverIndex ?? computeInsertIndex(getPointerY(event));
+      newRows.splice(insertAt, 0, newRow);
       onUpdate({ indicator_rows: newRows });
       return;
     }
@@ -357,12 +383,7 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
     ? paletteItems.find((p) => `palette-${p.value}` === String(activeId))?.label
     : undefined;
 
-  // Build replica rows with placeholder inserted at overIndex
   const isPaletteDrag = activeId && String(activeId).startsWith("palette-");
-  const replicaRows: (RowItem | "placeholder")[] = [...rows];
-  if (isPaletteDrag && overIndex !== null) {
-    replicaRows.splice(overIndex, 0, "placeholder");
-  }
 
   // Blue replica background
   const replicaBg = "rgb(56, 132, 244)";
@@ -451,7 +472,7 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
+        onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
@@ -459,6 +480,11 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
           {/* Widget palette */}
           <div className="widget-palette">
             <div className="palette-label">Available widgets</div>
+            <PaletteItem
+              id="palette-ModeChar"
+              label="Mode"
+              disabled={hasModeChar || used >= 5}
+            />
             {paletteItems.map((item) => (
               <PaletteItem
                 key={item.value}
@@ -473,23 +499,23 @@ export function WidgetSettings({ settings, onUpdate }: Props) {
           <div className="indicator-replica" style={{ background: replicaBg }}>
             <div className="replica-capacity">{used}/5 rows</div>
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              <ReplicaDropZone>
-                {replicaRows.map((row, i) => {
-                  if (row === "placeholder") {
-                    return <div key="placeholder" className="replica-row replica-row-placeholder" />;
-                  }
-                  // Compute real index (offset by placeholder if it appears before this item)
-                  const realIndex = isPaletteDrag && overIndex !== null && i > overIndex ? i - 1 : i;
-                  return (
+              <ReplicaDropZone innerRef={replicaRef}>
+                {rows.map((row, i) => (
+                  <React.Fragment key={rowId(row, i)}>
+                    {isPaletteDrag && overIndex === i && (
+                      <div className="replica-row replica-row-placeholder" />
+                    )}
                     <SortableRow
-                      key={rowId(row, realIndex)}
-                      id={rowId(row, realIndex)}
+                      id={rowId(row, i)}
                       row={row}
-                      onRemove={row.type === "Widget" ? () => handleRemoveRow(realIndex) : undefined}
+                      onRemove={() => handleRemoveRow(i)}
                       onModeSize={row.type === "ModeChar" ? handleModeSize : undefined}
                     />
-                  );
-                })}
+                  </React.Fragment>
+                ))}
+                {isPaletteDrag && overIndex !== null && overIndex >= rows.length && (
+                  <div className="replica-row replica-row-placeholder" />
+                )}
                 {rows.length === 0 && !isPaletteDrag && (
                   <div className="replica-empty">Drop widgets here</div>
                 )}
