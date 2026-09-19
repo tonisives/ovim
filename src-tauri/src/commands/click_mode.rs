@@ -19,6 +19,19 @@ pub async fn activate_click_mode(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<ClickableElement>, String> {
+    {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        if !settings.click_mode.enabled {
+            return Err("Click Mode is disabled".to_string());
+        }
+        if crate::click_mode::is_disabled_for_frontmost_app(&settings.click_mode) {
+            return Err("Click Mode is disabled for the frontmost application".to_string());
+        }
+    }
+
     let elements = {
         let mut manager = state
             .click_mode_manager

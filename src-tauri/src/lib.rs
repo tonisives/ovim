@@ -146,12 +146,17 @@ fn handle_ipc_command(
             IpcResponse::Ok
         }
         IpcCommand::ClickMode => {
-            let is_enabled = {
+            let is_disabled_for_app = {
                 let s = settings.lock().unwrap();
-                s.click_mode.enabled
+                if !s.click_mode.enabled {
+                    return IpcResponse::Error("Click Mode is disabled".to_string());
+                }
+                click_mode::is_disabled_for_frontmost_app(&s.click_mode)
             };
-            if !is_enabled {
-                return IpcResponse::Error("Click Mode is disabled".to_string());
+            if is_disabled_for_app {
+                return IpcResponse::Error(
+                    "Click Mode is disabled for the frontmost application".to_string(),
+                );
             }
 
             // Set click mode to activating state
@@ -276,7 +281,11 @@ fn handle_double_tap_activation(
 
     // Don't allow both to be triggered by the same key
     // Click mode takes priority if both are set to the same key
-    if click_mode_trigger && settings_guard.click_mode.enabled {
+    let click_mode_enabled = click_mode_trigger
+        && settings_guard.click_mode.enabled
+        && !click_mode::is_disabled_for_frontmost_app(&settings_guard.click_mode);
+
+    if click_mode_enabled {
         log::info!("Double-tap {:?} detected - activating click mode", double_tap_key);
         drop(settings_guard);
 

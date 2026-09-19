@@ -110,11 +110,14 @@ Example: Right-click on element with hint "AS"
 
 Access settings via the tray menu -> Settings -> Click Mode tab.
 
+Click Mode can be disabled for selected applications under **Disabled Applications**. Choose an application or enter its bundle identifier manually. Shortcut, double-tap, and CLI activation are blocked while a listed application is focused.
+
 ### Configurable Options
 
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Enable Click Mode | Toggle feature on/off | On |
+| Disabled Applications | Apps where Click Mode cannot activate | None |
 | Activation Shortcut | Key combination to activate | Cmd+Shift+F |
 | Hint Characters | Characters used for hints | asdfghjkl... |
 | Font Size | Hint label text size | 11px |

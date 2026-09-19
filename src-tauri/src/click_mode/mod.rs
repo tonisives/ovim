@@ -12,9 +12,17 @@ pub mod native_hints;
 
 use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
+
+use crate::config::click_mode::ClickModeSettings;
+
 pub use element::{ClickableElement, ClickableElementInternal};
 
-use serde::{Deserialize, Serialize};
+/// Check whether click mode is disabled for the frontmost application.
+pub fn is_disabled_for_frontmost_app(settings: &ClickModeSettings) -> bool {
+    let bundle_id = accessibility::get_frontmost_app_bundle_id();
+    settings.is_disabled_for_app(bundle_id.as_deref())
+}
 
 /// The type of click action to perform
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]

@@ -68,7 +68,11 @@ pub fn create_keyboard_callback(
                 if let Some(double_tap_key) = dt_manager.process_key_event(DoubleTapKey::Escape, event.is_key_down) {
                     // Check if Escape double-tap is configured for either mode
                     let settings_guard = settings.lock().unwrap();
-                    let click_uses_escape = settings_guard.click_mode.double_tap_modifier == DoubleTapModifier::Escape;
+                    let click_uses_escape = settings_guard.click_mode.enabled
+                        && settings_guard.click_mode.double_tap_modifier == DoubleTapModifier::Escape
+                        && !crate::click_mode::is_disabled_for_frontmost_app(
+                            &settings_guard.click_mode,
+                        );
                     let nvim_uses_escape = settings_guard.nvim_edit.double_tap_modifier == DoubleTapModifier::Escape;
                     drop(settings_guard);
 

@@ -25,6 +25,8 @@ pub enum DoubleTapModifier {
 pub struct ClickModeSettings {
     /// Enable the feature
     pub enabled: bool,
+    /// Bundle identifiers of apps where click mode is disabled
+    pub disabled_apps: Vec<String>,
     /// Keyboard shortcut key (e.g., "f")
     pub shortcut_key: String,
     /// Shortcut modifiers (default: Cmd+Shift)
@@ -85,6 +87,7 @@ impl Default for ClickModeSettings {
     fn default() -> Self {
         Self {
             enabled: true,
+            disabled_apps: vec![],
             shortcut_key: "".to_string(), // Disabled by default
             shortcut_modifiers: VimKeyModifiers {
                 shift: false,
@@ -108,6 +111,11 @@ impl Default for ClickModeSettings {
 }
 
 impl ClickModeSettings {
+    /// Check whether click mode is disabled for an application.
+    pub fn is_disabled_for_app(&self, bundle_id: Option<&str>) -> bool {
+        bundle_id.is_some_and(|bundle_id| self.disabled_apps.iter().any(|id| id == bundle_id))
+    }
+
     /// Check if the shortcut matches the given key and modifiers
     pub fn matches_shortcut(
         &self,
@@ -128,5 +136,30 @@ impl ClickModeSettings {
             && self.shortcut_modifiers.command == command;
 
         key_matches && mods_match
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClickModeSettings;
+
+    #[test]
+    fn disabled_apps_default_to_empty() {
+        let settings: ClickModeSettings = serde_json::from_str(r#"{"enabled":true}"#)
+            .expect("legacy click mode settings should deserialize");
+
+        assert!(settings.disabled_apps.is_empty());
+    }
+
+    #[test]
+    fn detects_disabled_app() {
+        let settings = ClickModeSettings {
+            disabled_apps: vec!["com.example.Disabled".to_string()],
+            ..ClickModeSettings::default()
+        };
+
+        assert!(settings.is_disabled_for_app(Some("com.example.Disabled")));
+        assert!(!settings.is_disabled_for_app(Some("com.example.Enabled")));
+        assert!(!settings.is_disabled_for_app(None));
     }
 }

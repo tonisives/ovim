@@ -37,6 +37,7 @@ export interface NvimEditSettings {
 
 export interface ClickModeSettings {
   enabled: boolean;
+  disabled_apps: string[];
   shortcut_key: string;
   shortcut_modifiers: VimKeyModifiers;
   double_tap_modifier: DoubleTapModifier;

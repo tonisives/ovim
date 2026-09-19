@@ -1,6 +1,8 @@
 import { useCallback } from "react"
+import { invoke } from "@tauri-apps/api/core"
 import type { Settings, ClickModeSettings, DoubleTapModifier } from "./SettingsApp"
 import { useKeyRecording } from "../hooks/useKeyRecording"
+import { AppList } from "./AppList"
 import { Slider, ColorPicker } from "./common"
 
 interface Props {
@@ -30,6 +32,35 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
       })
     },
   })
+
+  const handleAddDisabledApp = useCallback(async () => {
+    try {
+      const bundleId = await invoke<string | null>("pick_app")
+      if (bundleId && !clickMode.disabled_apps.includes(bundleId)) {
+        updateClickMode({ disabled_apps: [...clickMode.disabled_apps, bundleId] })
+      }
+    } catch (error) {
+      console.error("Failed to pick app:", error)
+    }
+  }, [clickMode.disabled_apps, updateClickMode])
+
+  const handleAddManualDisabledApp = useCallback(
+    (bundleId: string) => {
+      if (!clickMode.disabled_apps.includes(bundleId)) {
+        updateClickMode({ disabled_apps: [...clickMode.disabled_apps, bundleId] })
+      }
+    },
+    [clickMode.disabled_apps, updateClickMode],
+  )
+
+  const handleRemoveDisabledApp = useCallback(
+    (bundleId: string) => {
+      updateClickMode({
+        disabled_apps: clickMode.disabled_apps.filter((id) => id !== bundleId),
+      })
+    },
+    [clickMode.disabled_apps, updateClickMode],
+  )
 
   return (
     <div className="settings-section">
@@ -135,6 +166,19 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="color-settings">
+        <h3>Disabled Applications</h3>
+        <p className="help-text">
+          Click mode cannot be activated while one of these apps is focused.
+        </p>
+        <AppList
+          items={clickMode.disabled_apps}
+          onAdd={handleAddDisabledApp}
+          onAddManual={handleAddManualDisabledApp}
+          onRemove={handleRemoveDisabledApp}
+        />
       </div>
 
       {/* Hint Characters */}
