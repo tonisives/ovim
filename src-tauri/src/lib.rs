@@ -372,6 +372,22 @@ fn update_tray_icon(tray: &TrayIcon, mode: &str, show_mode: bool) {
     }
 }
 
+fn show_settings_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("settings") else {
+        log::error!("Settings window is unavailable");
+        return;
+    };
+
+    if let Err(error) = window.show() {
+        log::error!("Failed to show settings window: {}", error);
+        return;
+    }
+
+    if let Err(error) = window.set_focus() {
+        log::error!("Failed to focus settings window: {}", error);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_file_logger();
@@ -534,7 +550,7 @@ pub fn run() {
 
     let mode_rx = Arc::new(Mutex::new(mode_rx));
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -620,10 +636,7 @@ pub fn run() {
                         let _ = app.emit("settings-changed", new_settings);
                     }
                     "settings" => {
-                        if let Some(window) = app.get_webview_window("settings") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_settings_window(app);
                     }
                     "quit" => {
                         app.exit(0);
@@ -749,6 +762,14 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            log::info!("Application reopened - showing settings");
+            show_settings_window(app);
+        }
+    });
 }
