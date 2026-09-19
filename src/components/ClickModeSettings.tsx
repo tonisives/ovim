@@ -171,7 +171,7 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
       <div className="color-settings">
         <h3>Disabled Applications</h3>
         <p className="help-text">
-          Click mode cannot be activated while one of these apps is focused.
+          Ovim does not handle the Click Mode shortcut in these apps, allowing the app to use it instead.
         </p>
         <AppList
           items={clickMode.disabled_apps}

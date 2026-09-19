@@ -110,7 +110,7 @@ Example: Right-click on element with hint "AS"
 
 Access settings via the tray menu -> Settings -> Click Mode tab.
 
-Click Mode can be disabled for selected applications under **Disabled Applications**. Choose an application or enter its bundle identifier manually. Shortcut, double-tap, and CLI activation are blocked while a listed application is focused.
+Click Mode can be disabled for selected applications under **Disabled Applications**. Choose an application or enter its bundle identifier manually. While a listed application is focused, Ovim passes the configured shortcut through so the application can handle it. Double-tap and CLI activation remain blocked.
 
 ### Configurable Options
 

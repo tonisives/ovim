@@ -142,8 +142,8 @@ pub fn check_click_mode_shortcut(
     }
 
     if crate::click_mode::is_disabled_for_frontmost_app(click_settings) {
-        log::debug!("Click mode shortcut ignored in disabled app");
-        return None;
+        log::debug!("Click mode shortcut passed through in disabled app");
+        return Some(Some(*event));
     }
 
     // Set click mode to activating state IMMEDIATELY
