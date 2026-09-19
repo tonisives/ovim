@@ -114,6 +114,7 @@ export interface Settings {
   ignored_apps: string[];
   launch_at_login: boolean;
   show_in_menu_bar: boolean;
+  show_in_dock: boolean;
   indicator_rows: RowItem[];
   electron_apps: string[];
   nvim_edit: NvimEditSettings;

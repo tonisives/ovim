@@ -97,6 +97,9 @@ pub struct Settings {
     pub launch_at_login: bool,
     /// Show in menu bar
     pub show_in_menu_bar: bool,
+    /// Show the application icon in the macOS Dock
+    #[serde(default)]
+    pub show_in_dock: bool,
     /// Ordered layout rows for the indicator
     #[serde(default)]
     pub indicator_rows: Vec<RowItem>,
@@ -158,6 +161,7 @@ impl Default for Settings {
             ignored_apps: vec![],
             launch_at_login: false,
             show_in_menu_bar: true,
+            show_in_dock: false,
             indicator_rows: vec![RowItem::ModeChar { size: 2 }],
             top_widget: "None".to_string(),
             bottom_widget: "None".to_string(),
@@ -168,6 +172,23 @@ impl Default for Settings {
             auto_update_enabled: true,
             shell_widgets: vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn dock_icon_is_hidden_by_default() {
+        assert!(!Settings::default().show_in_dock);
+    }
+
+    #[test]
+    fn settings_without_dock_preference_keep_icon_hidden() {
+        let settings: Settings = serde_yml::from_str("{}").expect("settings should deserialize");
+
+        assert!(!settings.show_in_dock);
     }
 }
 
