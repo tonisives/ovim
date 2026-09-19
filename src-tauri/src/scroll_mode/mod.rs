@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::keyboard::{self, KeyCode};
+use crate::keyboard::{self, KeyCode, Modifiers};
 
 /// State for scroll mode processing
 #[derive(Debug, Default)]
@@ -41,16 +41,13 @@ impl ScrollModeState {
     pub fn process_key(
         &mut self,
         keycode: KeyCode,
-        shift: bool,
-        control: bool,
-        option: bool,
-        command: bool,
+        modifiers: Modifiers,
         scroll_step: u32,
         disabled_shortcuts: &[String],
     ) -> ScrollResult {
         // If any modifier besides shift is pressed, pass through
         // (We need shift for G and R)
-        if control || option || command {
+        if modifiers.control || modifiers.option || modifiers.command {
             self.reset();
             return ScrollResult::PassThrough;
         }
@@ -58,7 +55,7 @@ impl ScrollModeState {
         // Handle pending g (for gg command)
         if self.pending_g {
             self.pending_g = false;
-            if keycode == KeyCode::G && !shift {
+            if keycode == KeyCode::G && !modifiers.shift {
                 // gg - scroll to top
                 if let Err(e) = keyboard::scroll_to_top() {
                     log::error!("Failed to scroll to top: {}", e);
@@ -73,7 +70,7 @@ impl ScrollModeState {
 
         match keycode {
             // h - scroll left
-            KeyCode::H if !shift => {
+            KeyCode::H if !modifiers.shift => {
                 if is_disabled("hjkl") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::scroll_left(scroll_step) {
                     log::error!("Failed to scroll left: {}", e);
@@ -82,7 +79,7 @@ impl ScrollModeState {
             }
 
             // j - scroll down
-            KeyCode::J if !shift => {
+            KeyCode::J if !modifiers.shift => {
                 if is_disabled("hjkl") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::scroll_down(scroll_step) {
                     log::error!("Failed to scroll down: {}", e);
@@ -91,7 +88,7 @@ impl ScrollModeState {
             }
 
             // k - scroll up
-            KeyCode::K if !shift => {
+            KeyCode::K if !modifiers.shift => {
                 if is_disabled("hjkl") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::scroll_up(scroll_step) {
                     log::error!("Failed to scroll up: {}", e);
@@ -100,7 +97,7 @@ impl ScrollModeState {
             }
 
             // l - scroll right
-            KeyCode::L if !shift => {
+            KeyCode::L if !modifiers.shift => {
                 if is_disabled("hjkl") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::scroll_right(scroll_step) {
                     log::error!("Failed to scroll right: {}", e);
@@ -109,7 +106,7 @@ impl ScrollModeState {
             }
 
             // G (shift+g) - scroll to bottom
-            KeyCode::G if shift => {
+            KeyCode::G if modifiers.shift => {
                 if is_disabled("G") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::scroll_to_bottom() {
                     log::error!("Failed to scroll to bottom: {}", e);
@@ -118,14 +115,14 @@ impl ScrollModeState {
             }
 
             // g - start gg sequence (scroll to top)
-            KeyCode::G if !shift => {
+            KeyCode::G if !modifiers.shift => {
                 if is_disabled("gg") { return ScrollResult::PassThrough; }
                 self.pending_g = true;
                 ScrollResult::Handled
             }
 
             // d - half page down
-            KeyCode::D if !shift => {
+            KeyCode::D if !modifiers.shift => {
                 if is_disabled("du") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::half_page_scroll_down() {
                     log::error!("Failed to half page down: {}", e);
@@ -134,7 +131,7 @@ impl ScrollModeState {
             }
 
             // u - half page up
-            KeyCode::U if !shift => {
+            KeyCode::U if !modifiers.shift => {
                 if is_disabled("du") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::half_page_scroll_up() {
                     log::error!("Failed to half page up: {}", e);
@@ -143,7 +140,7 @@ impl ScrollModeState {
             }
 
             // / - open find (Cmd+F)
-            KeyCode::Slash if !shift => {
+            KeyCode::Slash if !modifiers.shift => {
                 if is_disabled("slash") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::open_find() {
                     log::error!("Failed to open find: {}", e);
@@ -152,7 +149,7 @@ impl ScrollModeState {
             }
 
             // H (shift+h) - history back
-            KeyCode::H if shift => {
+            KeyCode::H if modifiers.shift => {
                 if is_disabled("HL") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::history_back() {
                     log::error!("Failed to go back in history: {}", e);
@@ -161,7 +158,7 @@ impl ScrollModeState {
             }
 
             // L (shift+l) - history forward
-            KeyCode::L if shift => {
+            KeyCode::L if modifiers.shift => {
                 if is_disabled("HL") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::history_forward() {
                     log::error!("Failed to go forward in history: {}", e);
@@ -170,7 +167,7 @@ impl ScrollModeState {
             }
 
             // r - reload
-            KeyCode::R if !shift => {
+            KeyCode::R if !modifiers.shift => {
                 if is_disabled("rR") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::reload_page(false) {
                     log::error!("Failed to reload: {}", e);
@@ -179,7 +176,7 @@ impl ScrollModeState {
             }
 
             // R (shift+r) - hard reload
-            KeyCode::R if shift => {
+            KeyCode::R if modifiers.shift => {
                 if is_disabled("rR") { return ScrollResult::PassThrough; }
                 if let Err(e) = keyboard::reload_page(true) {
                     log::error!("Failed to hard reload: {}", e);

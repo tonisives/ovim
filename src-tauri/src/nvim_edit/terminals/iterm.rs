@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::process_utils::find_editor_pid_for_file;
-use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
+use super::{EditorContext, SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
 /// Escape a string for use in shell (single-quote escaping)
@@ -27,9 +27,9 @@ impl TerminalSpawner for ITermSpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
-        text_is_empty: bool,
-        filetype: Option<&str>,
+        editor_context: EditorContext<'_>,
     ) -> Result<SpawnInfo, String> {
+        let EditorContext { text_is_empty, filetype } = editor_context;
         // Get editor path and args from settings (insert mode if text is empty)
         let editor_path = settings.editor_path();
         let editor_args = settings.editor_args(text_is_empty);

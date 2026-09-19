@@ -7,9 +7,9 @@ pub fn run_shell_script(script: Option<&str>, script_path: Option<&str>) -> Stri
         Command::new("/bin/sh").arg("-c").arg(inline).output()
     } else if let Some(path) = script_path {
         // Expand ~ to home directory
-        let expanded = if path.starts_with("~/") {
+        let expanded = if let Some(relative_path) = path.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
-                home.join(&path[2..]).to_string_lossy().to_string()
+                home.join(relative_path).to_string_lossy().to_string()
             } else {
                 path.to_string()
             }

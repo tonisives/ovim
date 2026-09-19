@@ -51,10 +51,11 @@ impl ClickAction {
 }
 
 /// Click mode state machine
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(tag = "type")]
 pub enum ClickModeState {
     /// Click mode is inactive
+    #[default]
     Inactive,
     /// Hints are displayed, waiting for user input
     ShowingHints {
@@ -76,12 +77,6 @@ pub enum ClickModeState {
         /// The type of click action to perform
         click_action: ClickAction,
     },
-}
-
-impl Default for ClickModeState {
-    fn default() -> Self {
-        Self::Inactive
-    }
 }
 
 impl ClickModeState {
@@ -556,7 +551,7 @@ where
             // Get the notification name
             let notification_name: *mut objc::runtime::Object = msg_send![
                 class!(NSString),
-                stringWithUTF8String: b"NSWorkspaceDidActivateApplicationNotification\0".as_ptr()
+                stringWithUTF8String: c"NSWorkspaceDidActivateApplicationNotification".as_ptr()
             ];
 
             // Add observer using the block-based API

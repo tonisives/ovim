@@ -155,7 +155,7 @@ pub fn position_click_overlay_fullscreen(window: &WebviewWindow) -> Result<(f64,
                 width, height,
             )));
 
-            return Ok((min_x, min_y));
+            Ok((min_x, min_y))
         }
     }
 

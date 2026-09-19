@@ -148,9 +148,7 @@ fn query_elements_inner(pid: i32) -> Result<HelperOutput, String> {
         }
         // Test if we can access the window's role before using it
         let role_test = w.get_string_attribute("AXRole");
-        if role_test.is_none() {
-            return None;
-        }
+        role_test.as_ref()?;
         std::mem::forget(w);
         unsafe { CFRetain(ptr) };
         Some(CFHandle(ptr))

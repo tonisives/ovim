@@ -34,19 +34,11 @@ pub fn handle_scroll_mode_key(
 
     // Clone state for async execution
     let state = scroll_state.clone();
-    let shift = event.modifiers.shift;
-    let control = event.modifiers.control;
-    let option = event.modifiers.option;
-    let command = event.modifiers.command;
-
     // Process the key
     let mut scroll_state_guard = state.lock().unwrap();
     let result = scroll_state_guard.process_key(
         keycode,
-        shift,
-        control,
-        option,
-        command,
+        event.modifiers,
         scroll_step,
         disabled_shortcuts,
     );

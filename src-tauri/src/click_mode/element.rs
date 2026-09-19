@@ -37,30 +37,8 @@ pub struct ClickableElementInternal {
 }
 
 impl ClickableElementInternal {
-    pub fn new(
-        id: usize,
-        hint: String,
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-        role: String,
-        title: String,
-        ax_element: Option<AXElementHandle>,
-    ) -> Self {
-        Self {
-            element: ClickableElement {
-                id,
-                hint,
-                x,
-                y,
-                width,
-                height,
-                role,
-                title,
-            },
-            ax_element,
-        }
+    pub fn new(element: ClickableElement, ax_element: Option<AXElementHandle>) -> Self {
+        Self { element, ax_element }
     }
 
     /// Get the serializable element for sending to frontend

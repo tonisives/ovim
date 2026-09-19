@@ -65,11 +65,9 @@ pub fn set_browser_element_text(
     if stdout.starts_with("ok") {
         log::info!("Browser text sync succeeded: {}", stdout);
         // Extract element ID if present (format: "ok_draftjs:element-id")
-        let element_id = if let Some(colon_pos) = stdout.find(':') {
-            Some(stdout[colon_pos + 1..].to_string())
-        } else {
-            None
-        };
+        let element_id = stdout
+            .find(':')
+            .map(|colon_pos| stdout[colon_pos + 1..].to_string());
         Ok(element_id)
     } else {
         Err(format!("JavaScript returned: {}", stdout))

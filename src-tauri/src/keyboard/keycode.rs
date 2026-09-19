@@ -1,6 +1,5 @@
 /// macOS virtual keycodes
 /// Reference: https://developer.apple.com/documentation/carbon/1430449-virtual_key_codes
-
 /// Macro to define keycodes with all their properties in one place.
 /// Format: (Variant, raw_code, name, display_name, optional_char, optional_digit)
 macro_rules! define_keycodes {
@@ -29,14 +28,14 @@ macro_rules! define_keycodes {
             }
 
             /// Convert keycode to a snake_case string name (for settings storage)
-            pub fn to_name(&self) -> &'static str {
+            pub fn to_name(self) -> &'static str {
                 match self {
                     $(Self::$variant => $name,)*
                 }
             }
 
             /// Convert keycode to a human-readable display name
-            pub fn to_display_name(&self) -> &'static str {
+            pub fn to_display_name(self) -> &'static str {
                 match self {
                     $(Self::$variant => $display,)*
                 }

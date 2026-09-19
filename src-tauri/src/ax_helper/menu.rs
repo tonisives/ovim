@@ -124,10 +124,8 @@ pub fn collect_menu_elements(elements: &mut Vec<RawElement>, pid: i32) -> bool {
 
             // Check if this is a window - look for menus inside any window
             // Context menus can appear in various window types
-            if child_role == "AXWindow" {
-                if find_menus_in_element(&child, elements) {
-                    return true;
-                }
+            if child_role == "AXWindow" && find_menus_in_element(&child, elements) {
+                return true;
             }
         }
     }
@@ -208,10 +206,9 @@ fn find_menus_recursive(element: &CFHandle, elements: &mut Vec<RawElement>, dept
         if !matches!(
             role.as_str(),
             "AXStaticText" | "AXImage" | "AXTextField" | "AXTextArea"
-        ) {
-            if find_menus_recursive(&child, elements, depth + 1) {
-                return true;
-            }
+        ) && find_menus_recursive(&child, elements, depth + 1)
+        {
+            return true;
         }
     }
 

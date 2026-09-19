@@ -31,7 +31,7 @@ use config::click_mode::DoubleTapModifier;
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
 use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture};
-use keyboard_handler::create_keyboard_callback;
+use keyboard_handler::{create_keyboard_callback, KeyboardCallbackContext};
 use keyboard_handler::double_tap::{DoubleTapKey, DoubleTapManager};
 use nvim_edit::prewarm::PrewarmManager;
 use nvim_edit::terminals::install_scripts;
@@ -248,14 +248,14 @@ fn handle_set_mode(state: &mut VimState, app_handle: &AppHandle, mode_str: &str)
 
 /// Helper to check if a double-tap key matches a setting
 fn matches_double_tap_setting(setting: &DoubleTapModifier, key: &DoubleTapKey) -> bool {
-    match (setting, key) {
-        (DoubleTapModifier::Command, DoubleTapKey::Command) => true,
-        (DoubleTapModifier::Option, DoubleTapKey::Option) => true,
-        (DoubleTapModifier::Control, DoubleTapKey::Control) => true,
-        (DoubleTapModifier::Shift, DoubleTapKey::Shift) => true,
-        (DoubleTapModifier::Escape, DoubleTapKey::Escape) => true,
-        _ => false,
-    }
+    matches!(
+        (setting, key),
+        (DoubleTapModifier::Command, DoubleTapKey::Command)
+            | (DoubleTapModifier::Option, DoubleTapKey::Option)
+            | (DoubleTapModifier::Control, DoubleTapKey::Control)
+            | (DoubleTapModifier::Shift, DoubleTapKey::Shift)
+            | (DoubleTapModifier::Escape, DoubleTapKey::Escape)
+    )
 }
 
 /// Handle double-tap activation for click mode or nvim edit
@@ -441,17 +441,17 @@ pub fn run() {
     };
 
     let keyboard_capture = KeyboardCapture::new();
-    keyboard_capture.set_callback(create_keyboard_callback(
-        Arc::clone(&vim_state),
-        Arc::clone(&settings),
-        Arc::clone(&record_key_tx),
-        Arc::clone(&edit_session_manager),
-        Arc::clone(&click_mode_manager),
-        Arc::clone(&double_tap_manager),
+    keyboard_capture.set_callback(create_keyboard_callback(KeyboardCallbackContext {
+        vim_state: Arc::clone(&vim_state),
+        settings: Arc::clone(&settings),
+        record_key_tx: Arc::clone(&record_key_tx),
+        edit_session_manager: Arc::clone(&edit_session_manager),
+        click_mode_manager: Arc::clone(&click_mode_manager),
+        double_tap_manager: Arc::clone(&double_tap_manager),
         double_tap_callback,
-        Arc::clone(&scroll_state),
-        Arc::clone(&list_state),
-    ));
+        scroll_state: Arc::clone(&scroll_state),
+        list_state: Arc::clone(&list_state),
+    }));
 
     // Set up mouse click callback to hide click mode on any mouse click
     {

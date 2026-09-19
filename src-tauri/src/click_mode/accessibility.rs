@@ -6,7 +6,7 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use super::element::ClickableElementInternal;
+use super::element::{ClickableElement, ClickableElementInternal};
 use super::hints::generate_hints;
 
 /// Cache for clickable elements to speed up repeated activations
@@ -513,14 +513,16 @@ pub fn get_clickable_elements() -> Result<Vec<ClickableElementInternal>, String>
         .enumerate()
         .map(|(i, elem)| {
             ClickableElementInternal::new(
-                i,
-                hints.get(i).cloned().unwrap_or_else(|| i.to_string()),
-                elem.x,
-                elem.y,
-                elem.width,
-                elem.height,
-                elem.role,
-                elem.title,
+                ClickableElement {
+                    id: i,
+                    hint: hints.get(i).cloned().unwrap_or_else(|| i.to_string()),
+                    x: elem.x,
+                    y: elem.y,
+                    width: elem.width,
+                    height: elem.height,
+                    role: elem.role,
+                    title: elem.title,
+                },
                 None, // No AX handle in subprocess mode
             )
         })

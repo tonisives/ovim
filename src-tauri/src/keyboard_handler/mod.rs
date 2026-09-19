@@ -30,18 +30,35 @@ use shortcuts::{
 /// Callback type for when a double-tap triggers a mode activation
 pub type DoubleTapCallback = Box<dyn Fn(DoubleTapKey) + Send + 'static>;
 
+/// Shared state and callbacks used while handling keyboard events.
+pub struct KeyboardCallbackContext {
+    pub vim_state: Arc<Mutex<VimState>>,
+    pub settings: Arc<Mutex<Settings>>,
+    pub record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>>,
+    pub edit_session_manager: Arc<EditSessionManager>,
+    pub click_mode_manager: SharedClickModeManager,
+    pub double_tap_manager: Arc<Mutex<DoubleTapManager>>,
+    pub double_tap_callback: DoubleTapCallback,
+    pub scroll_state: SharedScrollModeState,
+    pub list_state: SharedListModeState,
+}
+
 /// Create the keyboard callback that processes key events
 pub fn create_keyboard_callback(
-    vim_state: Arc<Mutex<VimState>>,
-    settings: Arc<Mutex<Settings>>,
-    record_key_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<RecordedKey>>>>,
-    edit_session_manager: Arc<EditSessionManager>,
-    click_mode_manager: SharedClickModeManager,
-    double_tap_manager: Arc<Mutex<DoubleTapManager>>,
-    double_tap_callback: DoubleTapCallback,
-    scroll_state: SharedScrollModeState,
-    list_state: SharedListModeState,
+    context: KeyboardCallbackContext,
 ) -> impl Fn(KeyEvent) -> Option<KeyEvent> + Send + 'static {
+    let KeyboardCallbackContext {
+        vim_state,
+        settings,
+        record_key_tx,
+        edit_session_manager,
+        click_mode_manager,
+        double_tap_manager,
+        double_tap_callback,
+        scroll_state,
+        list_state,
+    } = context;
+
     move |event| {
         // Reset modifier double-tap trackers when any non-modifier key is pressed.
         // This prevents false double-tap detection when using shortcuts like CMD+C
@@ -179,9 +196,7 @@ pub fn create_keyboard_callback(
                             let result = handle_list_mode_key(event, &list_state);
 
                             // If list mode handled the key, return the result
-                            if result.is_none() {
-                                return None;
-                            }
+                            result?;
                             // Otherwise continue to scroll/vim processing
                         }
                     }
@@ -238,9 +253,7 @@ pub fn create_keyboard_callback(
                             );
 
                             // If scroll mode handled the key, return the result
-                            if result.is_none() {
-                                return None;
-                            }
+                            result?;
                             // Otherwise continue to vim processing
                             return result;
                         }

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::process_utils::{find_editor_pid_for_file, resolve_command_path, resolve_terminal_path};
-use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
+use super::{EditorContext, SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
 
@@ -99,9 +99,9 @@ impl TerminalSpawner for AlacrittySpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
-        text_is_empty: bool,
-        filetype: Option<&str>,
+        editor_context: EditorContext<'_>,
     ) -> Result<SpawnInfo, String> {
+        let EditorContext { text_is_empty, filetype } = editor_context;
         let config = SpawnConfig::new(settings, file_path, socket_path, text_is_empty, filetype)
             .with_geometry(geometry.as_ref());
 

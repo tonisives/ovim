@@ -15,7 +15,7 @@ use std::process::{Child, Command};
 use std::time::Duration;
 
 use super::process_utils::find_editor_pid_for_file_no_delay;
-use super::{ensure_launcher_script, SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
+use super::{ensure_launcher_script, EditorContext, SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 use crate::launcher_callback::{self, LauncherCallback};
 
@@ -235,8 +235,7 @@ impl TerminalSpawner for CustomSpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         _custom_env: Option<&HashMap<String, String>>,
-        _text_is_empty: bool,
-        _filetype: Option<&str>,
+        _editor_context: EditorContext<'_>,
     ) -> Result<SpawnInfo, String> {
         // When terminal=custom, use run_launcher_script which handles IPC callbacks
         match run_launcher_script(settings, file_path, geometry.as_ref(), socket_path) {

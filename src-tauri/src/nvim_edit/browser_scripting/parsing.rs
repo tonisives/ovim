@@ -10,7 +10,7 @@ pub fn extract_json_number(json: &str, key: &str) -> Option<f64> {
 
     // Find the end of the number (comma, }, or end of string)
     let end = remaining
-        .find(|c: char| c == ',' || c == '}')
+        .find([',', '}'])
         .unwrap_or(remaining.len());
 
     let num_str = remaining[..end].trim();

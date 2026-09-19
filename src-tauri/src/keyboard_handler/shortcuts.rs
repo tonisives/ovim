@@ -208,7 +208,7 @@ pub fn check_vim_key(
 
     if current_mode == VimMode::Insert && is_frontmost_app_ignored(&ignored_apps) {
         log::debug!("Vim key: ignored app, passing through");
-        return Some(Some(event.clone()));
+        return Some(Some(*event));
     }
 
     let result = {

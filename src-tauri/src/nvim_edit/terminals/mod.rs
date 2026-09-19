@@ -84,6 +84,13 @@ pub struct SpawnInfo {
     pub window_title: Option<String>,
 }
 
+/// Editor state that influences terminal startup behavior.
+#[derive(Clone, Copy)]
+pub struct EditorContext<'a> {
+    pub text_is_empty: bool,
+    pub filetype: Option<&'a str>,
+}
+
 /// Trait for terminal spawners
 pub trait TerminalSpawner {
     /// The terminal type this spawner handles
@@ -109,8 +116,7 @@ pub trait TerminalSpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
-        text_is_empty: bool,
-        filetype: Option<&str>,
+        editor_context: EditorContext<'_>,
     ) -> Result<SpawnInfo, String>;
 }
 
@@ -152,14 +158,15 @@ pub fn spawn_terminal(
         }
     }
 
+    let editor_context = EditorContext { text_is_empty, filetype };
     match terminal_type {
-        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty, filetype),
-        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty, filetype),
-        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty, filetype),
-        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty, filetype),
-        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty, filetype),
-        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty, filetype),
-        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, None, text_is_empty, filetype),
+        TerminalType::Alacritty => AlacrittySpawner.spawn(settings, &file_path, geometry, socket_path, None, editor_context),
+        TerminalType::Ghostty => GhosttySpawner.spawn(settings, &file_path, geometry, socket_path, None, editor_context),
+        TerminalType::Kitty => KittySpawner.spawn(settings, &file_path, geometry, socket_path, None, editor_context),
+        TerminalType::WezTerm => WezTermSpawner.spawn(settings, &file_path, geometry, socket_path, None, editor_context),
+        TerminalType::ITerm => ITermSpawner.spawn(settings, &file_path, geometry, socket_path, None, editor_context),
+        TerminalType::Custom => CustomSpawner.spawn(settings, &file_path, geometry, socket_path, None, editor_context),
+        TerminalType::Default => TerminalAppSpawner.spawn(settings, &file_path, geometry, socket_path, None, editor_context),
     }
 }
 

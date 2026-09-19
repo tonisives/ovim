@@ -92,7 +92,7 @@ fn minify_js(js: &str) -> String {
             if !result.is_empty() {
                 let last = result.chars().last().unwrap();
                 let need_space = is_identifier_char(last)
-                    && next_char.map(|c| is_identifier_char(c)).unwrap_or(false);
+                    && next_char.map(is_identifier_char).unwrap_or(false);
                 if need_space {
                     result.push(' ');
                 }

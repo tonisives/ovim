@@ -7,7 +7,7 @@ use super::bindings::CLICKABLE_ROLES;
 use super::cf_handle::CFHandle;
 
 pub fn is_clickable_role(role: &str) -> bool {
-    CLICKABLE_ROLES.iter().any(|r| *r == role)
+    CLICKABLE_ROLES.contains(&role)
 }
 
 pub fn has_press_action(element: &CFHandle) -> bool {

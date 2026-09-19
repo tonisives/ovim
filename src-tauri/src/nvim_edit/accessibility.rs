@@ -504,14 +504,14 @@ pub fn is_text_field_focused() -> bool {
             // Check AXSelectedTextRange, but only for roles that could plausibly
             // be text inputs (e.g. AXGroup used by Chromium for address bar).
             // Exclude AXWebArea which is the main page content area.
-            if role_str != "AXWebArea" {
-                if focused_element.get_attribute("AXSelectedTextRange").is_some() {
-                    log::debug!(
-                        "is_text_field_focused: role={} has AXSelectedTextRange, treating as text field",
-                        role_str
-                    );
-                    return true;
-                }
+            if role_str != "AXWebArea"
+                && focused_element.get_attribute("AXSelectedTextRange").is_some()
+            {
+                log::debug!(
+                    "is_text_field_focused: role={} has AXSelectedTextRange, treating as text field",
+                    role_str
+                );
+                return true;
             }
         }
     }

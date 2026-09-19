@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::process_utils::{find_editor_pid_for_file, resolve_command_path};
-use super::{SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
+use super::{EditorContext, SpawnInfo, TerminalSpawner, TerminalType, WindowGeometry};
 use crate::config::NvimEditSettings;
 
 pub struct GhosttySpawner;
@@ -22,9 +22,9 @@ impl TerminalSpawner for GhosttySpawner {
         geometry: Option<WindowGeometry>,
         socket_path: Option<&Path>,
         custom_env: Option<&HashMap<String, String>>,
-        text_is_empty: bool,
-        filetype: Option<&str>,
+        editor_context: EditorContext<'_>,
     ) -> Result<SpawnInfo, String> {
+        let EditorContext { text_is_empty, filetype } = editor_context;
         // Generate a unique window title so we can find it
         let unique_title = format!("ovim-edit-{}", std::process::id());
 
