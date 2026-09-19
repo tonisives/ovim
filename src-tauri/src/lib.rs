@@ -388,6 +388,22 @@ fn show_settings_window(app: &AppHandle) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn apply_activation_policy(app: &AppHandle, show_in_dock: bool) -> Result<(), String> {
+    let policy = if show_in_dock {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+    app.set_activation_policy(policy)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_activation_policy(_app: &AppHandle, _show_in_dock: bool) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_file_logger();
@@ -600,8 +616,15 @@ pub fn run() {
             commands::get_click_mode_elements,
         ])
         .setup(move |app| {
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            let show_in_dock = app
+                .state::<AppState>()
+                .settings
+                .lock()
+                .unwrap()
+                .show_in_dock;
+            if let Err(error) = apply_activation_policy(app.handle(), show_in_dock) {
+                log::error!("Failed to apply Dock icon preference: {}", error);
+            }
 
             // Store app handle for global access (used by keyboard handler for events)
             let _ = APP_HANDLE.set(app.handle().clone());
@@ -708,6 +731,8 @@ pub fn run() {
                     }
                 });
             }
+
+            show_settings_window(app.handle());
 
             let app_handle = app.handle().clone();
             let mut rx = mode_rx.lock().unwrap().resubscribe();

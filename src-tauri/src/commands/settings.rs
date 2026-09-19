@@ -32,6 +32,7 @@ pub fn set_settings(
     *settings = new_settings.clone();
     settings.save()?;
 
+    crate::apply_activation_policy(&app, new_settings.show_in_dock)?;
     let _ = app.emit("settings-changed", new_settings);
     Ok(())
 }
