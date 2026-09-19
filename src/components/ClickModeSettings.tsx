@@ -168,19 +168,6 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
         </div>
       </div>
 
-      <div className="color-settings">
-        <h3>Disabled Applications</h3>
-        <p className="help-text">
-          Ovim does not handle the Click Mode shortcut in these apps, allowing the app to use it instead.
-        </p>
-        <AppList
-          items={clickMode.disabled_apps}
-          onAdd={handleAddDisabledApp}
-          onAddManual={handleAddManualDisabledApp}
-          onRemove={handleRemoveDisabledApp}
-        />
-      </div>
-
       {/* Hint Characters */}
       <div className="form-group">
         <label>Hint characters</label>
@@ -219,6 +206,19 @@ export function ClickModeSettingsComponent({ settings, onUpdate }: Props) {
         clickMode={clickMode}
         updateClickMode={updateClickMode}
       />
+
+      <div className="color-settings">
+        <h3>Disabled Applications</h3>
+        <p className="help-text">
+          Ovim does not handle the Click Mode shortcut in these apps, allowing the app to use it instead.
+        </p>
+        <AppList
+          items={clickMode.disabled_apps}
+          onAdd={handleAddDisabledApp}
+          onAddManual={handleAddManualDisabledApp}
+          onRemove={handleRemoveDisabledApp}
+        />
+      </div>
     </div>
   )
 }

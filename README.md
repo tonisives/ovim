@@ -61,6 +61,20 @@ pnpm tauri build
 
 Requires [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) v18+, and [pnpm](https://pnpm.io/).
 
+### Package after local merges
+
+The repository includes a tracked `post-merge` hook that builds the macOS app
+from the primary checkout and installs it at `~/workspace/_tools/ovim.app`:
+
+```bash
+pnpm hooks:install
+```
+
+The Git setting is shared with linked worktrees, but merges inside task
+worktrees are skipped. Set `OVIM_OUTPUT_DIR` to choose another installation
+directory, or set `OVIM_SKIP_POST_MERGE_PACKAGE=1` to skip a build for one
+merge. The hook does not restart a running app.
+
 ## Requirements
 
 - macOS 10.15 (Catalina) or later

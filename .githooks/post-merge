@@ -1,0 +1,22 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$(uname -s)" != "Darwin" ] || [ "${OVIM_SKIP_POST_MERGE_PACKAGE:-0}" = "1" ]; then
+  exit 0
+fi
+
+repository=$(git rev-parse --show-toplevel)
+common_git_directory=$(git rev-parse --path-format=absolute --git-common-dir)
+primary_checkout=$(dirname "$common_git_directory")
+
+# A merge in a task worktree should not replace the installed application.
+if [ "$repository" != "$primary_checkout" ]; then
+  exit 0
+fi
+
+output_directory=${OVIM_OUTPUT_DIR:-"${HOME}/workspace/_tools"}
+
+echo "Packaging merged Ovim checkout into $output_directory/ovim.app"
+cd "$repository"
+OVIM_OUTPUT_DIR="$output_directory" pnpm package

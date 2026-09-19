@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "package": "pnpm tauri build --bundles app --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}' -- --jobs 4 && node scripts/install-app.mjs",
+    "hooks:install": "git config --local core.hooksPath .githooks",
     "preview": "vite preview",
     "tauri": "tauri"
   },
