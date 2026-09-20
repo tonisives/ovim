@@ -2,7 +2,7 @@
 #[allow(deprecated)]
 mod macos {
     use std::ffi::CString;
-    use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, Ordering};
     use std::sync::OnceLock;
 
     use cocoa::base::{id, nil};
@@ -26,12 +26,16 @@ mod macos {
     const NS_DRAG_OPERATION_COPY: usize = 1;
     const PANEL_WIDTH: f64 = 280.0;
     const PANEL_HEIGHT: f64 = 238.0;
+    const PERMISSION_NONE: u8 = 0;
+    const PERMISSION_ACCESSIBILITY: u8 = 1;
+    const PERMISSION_INPUT_MONITORING: u8 = 2;
 
     static DRAG_VIEW_CLASS: OnceLock<usize> = OnceLock::new();
     static FOLLOWER_CLASS: OnceLock<usize> = OnceLock::new();
     static FOLLOWER_STARTED: AtomicBool = AtomicBool::new(false);
     static HELPER_PANEL: AtomicPtr<Object> = AtomicPtr::new(std::ptr::null_mut());
     static HELPER_TITLE: AtomicPtr<Object> = AtomicPtr::new(std::ptr::null_mut());
+    static ACTIVE_PERMISSION: AtomicU8 = AtomicU8::new(PERMISSION_NONE);
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -109,6 +113,19 @@ mod macos {
     extern "C" fn update_panel_position(_follower: &Object, _selector: Sel, _timer: id) {
         let panel = HELPER_PANEL.load(Ordering::Acquire);
         if panel.is_null() {
+            return;
+        }
+
+        let permission_granted = match ACTIVE_PERMISSION.load(Ordering::Acquire) {
+            PERMISSION_ACCESSIBILITY => crate::keyboard::check_accessibility_permission(),
+            PERMISSION_INPUT_MONITORING => crate::keyboard::check_input_monitoring_permission(),
+            _ => false,
+        };
+        if permission_granted {
+            ACTIVE_PERMISSION.store(PERMISSION_NONE, Ordering::Release);
+            unsafe {
+                let _: () = msg_send![panel, orderOut: nil];
+            }
             return;
         }
 
@@ -454,6 +471,13 @@ mod macos {
                 let _: () = msg_send![title, setStringValue: ns_string(&title_text)?];
             }
 
+            let active_permission = match permission_name {
+                "Accessibility" => PERMISSION_ACCESSIBILITY,
+                "Input Monitoring" => PERMISSION_INPUT_MONITORING,
+                _ => PERMISSION_NONE,
+            };
+            ACTIVE_PERMISSION.store(active_permission, Ordering::Release);
+
             position_panel(panel);
             start_following_settings()?;
             let _: () = msg_send![panel, orderFrontRegardless];
@@ -462,6 +486,7 @@ mod macos {
     }
 
     pub fn hide() {
+        ACTIVE_PERMISSION.store(PERMISSION_NONE, Ordering::Release);
         let panel = HELPER_PANEL.load(Ordering::Acquire);
         if !panel.is_null() {
             unsafe {
