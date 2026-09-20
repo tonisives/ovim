@@ -244,6 +244,26 @@ mod macos {
             true,
         )?;
         let _: () = msg_send![arrow, setAlignment: 1usize];
+        let _: () = msg_send![arrow, setWantsLayer: true];
+        let arrow_layer: id = msg_send![arrow, layer];
+        if arrow_layer != nil {
+            let animation: id = msg_send![
+                class!(CABasicAnimation),
+                animationWithKeyPath: ns_string("transform.translation.y")?
+            ];
+            let from_value: id = msg_send![class!(NSNumber), numberWithDouble: 0.0f64];
+            let to_value: id = msg_send![class!(NSNumber), numberWithDouble: 9.0f64];
+            let _: () = msg_send![animation, setFromValue: from_value];
+            let _: () = msg_send![animation, setToValue: to_value];
+            let _: () = msg_send![animation, setDuration: 0.65f64];
+            let _: () = msg_send![animation, setAutoreverses: true];
+            let _: () = msg_send![animation, setRepeatCount: f32::INFINITY];
+            let _: () = msg_send![
+                arrow_layer,
+                addAnimation: animation
+                forKey: ns_string("ovim-permission-arrow")?
+            ];
+        }
 
         let drag_frame = CGRect::new(&CGPoint::new(100.0, 32.0), &CGSize::new(80.0, 80.0));
         let drag_view_class = drag_view_class()
@@ -383,12 +403,13 @@ mod macos {
         let origin = if let Some(settings_bounds) = system_settings_bounds() {
             CGPoint::new(
                 settings_bounds.origin.x + settings_bounds.size.width - PANEL_WIDTH - 20.0,
-                screen_frame.size.height - settings_bounds.origin.y - PANEL_HEIGHT - 72.0,
+                screen_frame.size.height - settings_bounds.origin.y - settings_bounds.size.height
+                    + 20.0,
             )
         } else {
             CGPoint::new(
                 visible_frame.origin.x + visible_frame.size.width - PANEL_WIDTH - 24.0,
-                visible_frame.origin.y + visible_frame.size.height - PANEL_HEIGHT - 24.0,
+                visible_frame.origin.y + 24.0,
             )
         };
         let _: () = msg_send![panel, setFrameOrigin: origin];

@@ -15,9 +15,7 @@ body,
 
 body {
   color: var(--text-primary);
-  background:
-    radial-gradient(circle at 50% -20%, var(--accent-hover), transparent 48%),
-    var(--bg-primary);
+  background: var(--bg-secondary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -42,7 +40,6 @@ body {
   font-size: 17px;
   font-weight: 700;
   letter-spacing: -0.5px;
-  box-shadow: 0 10px 24px var(--accent-hover);
 }
 
 .permissions-window h1 {
