@@ -135,20 +135,22 @@ fn capture_text_content_with_source() -> (String, bool, bool) {
     // Check if we're in the browser address bar before capturing
     let is_address_bar = is_browser_address_bar();
 
-    // First try accessibility API (doesn't cause beeps)
-    let text = accessibility::get_focused_element_text().unwrap_or_default();
+    // An empty AXValue is a valid value for an empty text field. Only fall back
+    // to clipboard capture when the accessibility API cannot return a value.
+    match accessibility::get_focused_element_text() {
+        Some(text) => {
+            let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
+            log::info!("Got text: {} chars, preview: {}", text.len(), preview);
+            (text, false, is_address_bar)
+        }
+        None => {
+            log::info!("Accessibility text capture unavailable, trying clipboard-based capture");
+            if let Some(captured) = capture_text_via_clipboard() {
+                log::info!("Captured {} chars via clipboard", captured.len());
+                return (captured, true, is_address_bar);
+            }
 
-    let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
-    log::info!("Got text: {} chars, preview: {}", text.len(), preview);
-
-    // If accessibility API failed/empty, try clipboard-based capture as fallback
-    if text.is_empty() {
-        log::info!("Accessibility text capture returned empty, trying clipboard-based capture");
-        if let Some(captured) = capture_text_via_clipboard() {
-            log::info!("Captured {} chars via clipboard", captured.len());
-            return (captured, true, is_address_bar);
+            (String::new(), false, is_address_bar)
         }
     }
-
-    (text, false, is_address_bar)
 }
