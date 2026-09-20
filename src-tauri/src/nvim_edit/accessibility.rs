@@ -414,7 +414,19 @@ pub fn get_focused_element_text() -> Option<String> {
     let focused_app = system_wide.get_attribute("AXFocusedApplication")?;
     let focused_element = focused_app.get_attribute("AXFocusedUIElement")?;
     let value = focused_element.get_attribute("AXValue")?;
-    value.into_string()
+    let text = value.into_string()?;
+    let placeholder = focused_element
+        .get_attribute("AXPlaceholderValue")
+        .and_then(CFHandle::into_string);
+
+    Some(remove_placeholder_text(text, placeholder.as_deref()))
+}
+
+fn remove_placeholder_text(text: String, placeholder: Option<&str>) -> String {
+    match placeholder {
+        Some(placeholder) if !placeholder.is_empty() && text == placeholder => String::new(),
+        _ => text,
+    }
 }
 
 /// Get the AXRole of the currently focused UI element
@@ -790,5 +802,39 @@ pub fn set_element_text(element: &AXElementHandle, text: &str) -> Result<(), Str
             // -25212: kAXErrorFailure
             Err(format!("AXUIElementSetAttributeValue failed with error code: {}", result))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remove_placeholder_text;
+
+    #[test]
+    fn matching_placeholder_is_treated_as_empty() {
+        assert_eq!(
+            remove_placeholder_text("Message".to_string(), Some("Message")),
+            ""
+        );
+    }
+
+    #[test]
+    fn real_text_is_preserved() {
+        assert_eq!(
+            remove_placeholder_text("Hello".to_string(), Some("Message")),
+            "Hello"
+        );
+    }
+
+    #[test]
+    fn empty_text_is_preserved() {
+        assert_eq!(remove_placeholder_text(String::new(), Some("Message")), "");
+    }
+
+    #[test]
+    fn value_without_placeholder_is_preserved() {
+        assert_eq!(
+            remove_placeholder_text("Message".to_string(), None),
+            "Message"
+        );
     }
 }
