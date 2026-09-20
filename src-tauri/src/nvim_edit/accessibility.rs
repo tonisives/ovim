@@ -7,6 +7,8 @@ use core_foundation::string::CFString;
 const kAXValueCGPointType: i32 = 1;
 #[allow(non_upper_case_globals)]
 const kAXValueCGSizeType: i32 = 2;
+#[allow(non_upper_case_globals)]
+const kAXValueCFRangeType: i32 = 4;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
@@ -141,6 +143,32 @@ impl CFHandle {
         } else {
             None
         }
+    }
+
+    /// Extract a CFRange from an AXValue.
+    fn extract_range(&self) -> Option<(isize, isize)> {
+        let mut range = core_foundation::base::CFRange::init(0, 0);
+        let extracted = unsafe {
+            AXValueGetValue(
+                self.0,
+                kAXValueCFRangeType,
+                &mut range as *mut _ as *mut std::ffi::c_void,
+            )
+        };
+        extracted.then_some((range.location, range.length))
+    }
+
+    /// Extract a signed integer from a CFNumber.
+    fn extract_i64(&self) -> Option<i64> {
+        let mut value = 0_i64;
+        let extracted = unsafe {
+            core_foundation::number::CFNumberGetValue(
+                self.0 as core_foundation::number::CFNumberRef,
+                core_foundation::number::kCFNumberSInt64Type,
+                &mut value as *mut i64 as *mut std::ffi::c_void,
+            )
+        };
+        extracted.then_some(value)
     }
 
     /// Convert to CFString and get as Rust String.
@@ -418,14 +446,48 @@ pub fn get_focused_element_text() -> Option<String> {
     let placeholder = focused_element
         .get_attribute("AXPlaceholderValue")
         .and_then(CFHandle::into_string);
+    let labels = ["AXDescription", "AXTitle", "AXHelp"]
+        .into_iter()
+        .filter_map(|attribute| {
+            focused_element
+                .get_attribute(attribute)
+                .and_then(CFHandle::into_string)
+        })
+        .collect::<Vec<_>>();
+    let character_count = focused_element
+        .get_attribute("AXNumberOfCharacters")
+        .and_then(|value| value.extract_i64());
+    let selected_range = focused_element
+        .get_attribute("AXSelectedTextRange")
+        .and_then(|value| value.extract_range());
 
-    Some(remove_placeholder_text(text, placeholder.as_deref()))
+    Some(remove_placeholder_text(
+        text,
+        placeholder.as_deref(),
+        &labels,
+        character_count,
+        selected_range,
+    ))
 }
 
-fn remove_placeholder_text(text: String, placeholder: Option<&str>) -> String {
-    match placeholder {
-        Some(placeholder) if !placeholder.is_empty() && text == placeholder => String::new(),
-        _ => text,
+fn remove_placeholder_text(
+    text: String,
+    placeholder: Option<&str>,
+    labels: &[String],
+    character_count: Option<i64>,
+    selected_range: Option<(isize, isize)>,
+) -> String {
+    let matches_placeholder = placeholder.is_some_and(|value| !value.is_empty() && text == value);
+    let has_no_editable_characters = character_count == Some(0) && !text.is_empty();
+    let matches_empty_field_label = selected_range == Some((0, 0))
+        && labels
+            .iter()
+            .any(|label| !label.is_empty() && text == *label);
+
+    if matches_placeholder || has_no_editable_characters || matches_empty_field_label {
+        String::new()
+    } else {
+        text
     }
 }
 
@@ -809,31 +871,68 @@ pub fn set_element_text(element: &AXElementHandle, text: &str) -> Result<(), Str
 mod tests {
     use super::remove_placeholder_text;
 
+    fn normalize(
+        text: &str,
+        placeholder: Option<&str>,
+        labels: &[&str],
+        character_count: Option<i64>,
+        selected_range: Option<(isize, isize)>,
+    ) -> String {
+        remove_placeholder_text(
+            text.to_string(),
+            placeholder,
+            &labels
+                .iter()
+                .map(|label| (*label).to_string())
+                .collect::<Vec<_>>(),
+            character_count,
+            selected_range,
+        )
+    }
+
     #[test]
     fn matching_placeholder_is_treated_as_empty() {
-        assert_eq!(
-            remove_placeholder_text("Message".to_string(), Some("Message")),
-            ""
-        );
+        assert_eq!(normalize("Message", Some("Message"), &[], None, None), "");
     }
 
     #[test]
     fn real_text_is_preserved() {
         assert_eq!(
-            remove_placeholder_text("Hello".to_string(), Some("Message")),
+            normalize("Hello", Some("Message"), &[], None, None),
             "Hello"
         );
     }
 
     #[test]
     fn empty_text_is_preserved() {
-        assert_eq!(remove_placeholder_text(String::new(), Some("Message")), "");
+        assert_eq!(
+            normalize("", Some("Message"), &[], Some(0), Some((0, 0))),
+            ""
+        );
     }
 
     #[test]
     fn value_without_placeholder_is_preserved() {
+        assert_eq!(normalize("Message", None, &[], None, None), "Message");
+    }
+
+    #[test]
+    fn value_with_zero_editable_characters_is_treated_as_empty() {
+        assert_eq!(normalize("Message", None, &[], Some(0), Some((0, 0))), "");
+    }
+
+    #[test]
+    fn empty_field_accessible_label_is_treated_as_empty() {
         assert_eq!(
-            remove_placeholder_text("Message".to_string(), None),
+            normalize("Message", None, &["Message"], Some(7), Some((0, 0))),
+            ""
+        );
+    }
+
+    #[test]
+    fn matching_label_with_active_cursor_is_preserved() {
+        assert_eq!(
+            normalize("Message", None, &["Message"], Some(7), Some((7, 0))),
             "Message"
         );
     }
