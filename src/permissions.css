@@ -1,0 +1,72 @@
+@import "./styles/variables.css";
+@import "./styles/permissions.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  color: var(--text-primary);
+  background:
+    radial-gradient(circle at 50% -20%, var(--accent-hover), transparent 48%),
+    var(--bg-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.permissions-window {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 36px 34px 28px;
+  text-align: center;
+}
+
+.permissions-mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 13px;
+  color: white;
+  background: var(--accent-color);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  box-shadow: 0 10px 24px var(--accent-hover);
+}
+
+.permissions-window h1 {
+  margin: 20px 0 8px;
+  font-size: 25px;
+  line-height: 1.2;
+  letter-spacing: -0.4px;
+}
+
+.permissions-intro,
+.permissions-footnote {
+  color: var(--text-secondary);
+}
+
+.permissions-intro {
+  max-width: 430px;
+  margin: 0 0 24px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.permissions-footnote {
+  max-width: 440px;
+  margin: 18px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}

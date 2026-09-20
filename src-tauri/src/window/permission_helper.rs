@@ -2,11 +2,18 @@
 #[allow(deprecated)]
 mod macos {
     use std::ffi::CString;
-    use std::sync::atomic::{AtomicPtr, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
     use std::sync::OnceLock;
 
     use cocoa::base::{id, nil};
+    use core_foundation::base::{CFRelease, TCFType};
+    use core_foundation::dictionary::{CFDictionaryGetValueIfPresent, CFDictionaryRef};
+    use core_foundation::number::{kCFNumberSInt32Type, CFNumberGetValue, CFNumberRef};
+    use core_foundation::string::CFString;
     use core_graphics::geometry::{CGPoint, CGRect, CGSize};
+    use core_graphics::window::{
+        kCGNullWindowID, kCGWindowListOptionOnScreenOnly, CGWindowListCopyWindowInfo,
+    };
     use objc::declare::ClassDecl;
     use objc::runtime::{Class, Object, Sel};
     use objc::{class, msg_send, sel, sel_impl};
@@ -17,12 +24,22 @@ mod macos {
     const NS_WINDOW_STYLE_MASK_UTILITY_WINDOW: usize = 1 << 4;
     const NS_FLOATING_WINDOW_LEVEL: i64 = 3;
     const NS_DRAG_OPERATION_COPY: usize = 1;
-    const PANEL_WIDTH: f64 = 360.0;
-    const PANEL_HEIGHT: f64 = 178.0;
+    const PANEL_WIDTH: f64 = 280.0;
+    const PANEL_HEIGHT: f64 = 238.0;
 
     static DRAG_VIEW_CLASS: OnceLock<usize> = OnceLock::new();
+    static FOLLOWER_CLASS: OnceLock<usize> = OnceLock::new();
+    static FOLLOWER_STARTED: AtomicBool = AtomicBool::new(false);
     static HELPER_PANEL: AtomicPtr<Object> = AtomicPtr::new(std::ptr::null_mut());
     static HELPER_TITLE: AtomicPtr<Object> = AtomicPtr::new(std::ptr::null_mut());
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGRectMakeWithDictionaryRepresentation(
+            dictionary: CFDictionaryRef,
+            rect: *mut CGRect,
+        ) -> bool;
+    }
 
     extern "C" fn drag_view_mouse_down(view: &Object, _selector: Sel, event: id) {
         unsafe {
@@ -79,6 +96,45 @@ mod macos {
                 );
             }
 
+            declaration.register() as *const Class as usize
+        });
+
+        if class_address == 0 {
+            None
+        } else {
+            Some(unsafe { &*(class_address as *const Class) })
+        }
+    }
+
+    extern "C" fn update_panel_position(_follower: &Object, _selector: Sel, _timer: id) {
+        let panel = HELPER_PANEL.load(Ordering::Acquire);
+        if panel.is_null() {
+            return;
+        }
+
+        let is_visible: bool = unsafe { msg_send![panel, isVisible] };
+        if is_visible {
+            unsafe { position_panel(panel) };
+        }
+    }
+
+    fn follower_class() -> Option<&'static Class> {
+        let class_address = *FOLLOWER_CLASS.get_or_init(|| {
+            if let Some(existing_class) = Class::get("OvimPermissionPanelFollower") {
+                return existing_class as *const Class as usize;
+            }
+
+            let Some(mut declaration) =
+                ClassDecl::new("OvimPermissionPanelFollower", class!(NSObject))
+            else {
+                return 0;
+            };
+            unsafe {
+                declaration.add_method(
+                    sel!(updatePermissionPanel:),
+                    update_panel_position as extern "C" fn(&Object, Sel, id),
+                );
+            }
             declaration.register() as *const Class as usize
         });
 
@@ -167,21 +223,29 @@ mod macos {
         }
 
         let title = label(
-            CGRect::new(&CGPoint::new(112.0, 103.0), &CGSize::new(220.0, 24.0)),
+            CGRect::new(&CGPoint::new(18.0, 190.0), &CGSize::new(244.0, 24.0)),
             "Accessibility permission",
             15.0,
             true,
         )?;
         let instruction = label(
-            CGRect::new(&CGPoint::new(112.0, 55.0), &CGSize::new(220.0, 48.0)),
-            "Drag the ovim icon into the app list, then enable its switch.",
+            CGRect::new(&CGPoint::new(18.0, 155.0), &CGSize::new(244.0, 36.0)),
+            "Drag the ovim icon into the app list above, then enable its switch.",
             12.0,
             false,
         )?;
-        let _: () = msg_send![instruction, setMaximumNumberOfLines: 3usize];
+        let _: () = msg_send![instruction, setMaximumNumberOfLines: 2usize];
         let _: () = msg_send![instruction, setLineBreakMode: 0usize];
 
-        let drag_frame = CGRect::new(&CGPoint::new(28.0, 50.0), &CGSize::new(64.0, 64.0));
+        let arrow = label(
+            CGRect::new(&CGPoint::new(112.0, 108.0), &CGSize::new(56.0, 40.0)),
+            "\u{2191}",
+            28.0,
+            true,
+        )?;
+        let _: () = msg_send![arrow, setAlignment: 1usize];
+
+        let drag_frame = CGRect::new(&CGPoint::new(100.0, 32.0), &CGSize::new(80.0, 80.0));
         let drag_view_class = drag_view_class()
             .ok_or_else(|| "Could not register permission drag view class".to_string())?;
         let drag_view: id = msg_send![drag_view_class, alloc];
@@ -195,7 +259,7 @@ mod macos {
         let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
         let app_path: id = msg_send![app_url, path];
         let icon: id = msg_send![workspace, iconForFile: app_path];
-        let icon_size = CGSize::new(64.0, 64.0);
+        let icon_size = CGSize::new(80.0, 80.0);
         let _: () = msg_send![icon, setSize: icon_size];
         let _: () = msg_send![drag_view, setImage: icon];
         let _: () = msg_send![drag_view, setImageScaling: 3usize];
@@ -204,10 +268,108 @@ mod macos {
 
         let _: () = msg_send![content_view, addSubview: title];
         let _: () = msg_send![content_view, addSubview: instruction];
+        let _: () = msg_send![content_view, addSubview: arrow];
         let _: () = msg_send![content_view, addSubview: drag_view];
 
         HELPER_TITLE.store(title, Ordering::Release);
         Ok(panel)
+    }
+
+    unsafe fn system_settings_bounds() -> Option<CGRect> {
+        let bundle_identifier = ns_string("com.apple.systempreferences").ok()?;
+        let applications: id = msg_send![
+            class!(NSRunningApplication),
+            runningApplicationsWithBundleIdentifier: bundle_identifier
+        ];
+        if applications == nil {
+            return None;
+        }
+        let application_count: usize = msg_send![applications, count];
+        if application_count == 0 {
+            return None;
+        }
+        let application: id = msg_send![applications, objectAtIndex: 0usize];
+        let system_settings_pid: i32 = msg_send![application, processIdentifier];
+
+        let window_list =
+            CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+        if window_list.is_null() {
+            return None;
+        }
+
+        let count = core_foundation::array::CFArrayGetCount(window_list as _);
+        let pid_key = CFString::new("kCGWindowOwnerPID");
+        let layer_key = CFString::new("kCGWindowLayer");
+        let bounds_key = CFString::new("kCGWindowBounds");
+        let mut result = None;
+
+        for index in 0..count {
+            let window_info =
+                core_foundation::array::CFArrayGetValueAtIndex(window_list as _, index)
+                    as CFDictionaryRef;
+            if window_info.is_null() {
+                continue;
+            }
+
+            let mut pid_value = std::ptr::null();
+            let has_pid = CFDictionaryGetValueIfPresent(
+                window_info,
+                pid_key.as_CFTypeRef() as _,
+                &mut pid_value,
+            );
+            let mut owner_pid = 0i32;
+            if has_pid == 0
+                || pid_value.is_null()
+                || !CFNumberGetValue(
+                    pid_value as CFNumberRef,
+                    kCFNumberSInt32Type,
+                    &mut owner_pid as *mut i32 as _,
+                )
+                || owner_pid != system_settings_pid
+            {
+                continue;
+            }
+
+            let mut layer_value = std::ptr::null();
+            let mut layer = -1i32;
+            if CFDictionaryGetValueIfPresent(
+                window_info,
+                layer_key.as_CFTypeRef() as _,
+                &mut layer_value,
+            ) == 0
+                || layer_value.is_null()
+                || !CFNumberGetValue(
+                    layer_value as CFNumberRef,
+                    kCFNumberSInt32Type,
+                    &mut layer as *mut i32 as _,
+                )
+                || layer != 0
+            {
+                continue;
+            }
+
+            let mut bounds_value = std::ptr::null();
+            let mut bounds = CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(0.0, 0.0));
+            if CFDictionaryGetValueIfPresent(
+                window_info,
+                bounds_key.as_CFTypeRef() as _,
+                &mut bounds_value,
+            ) != 0
+                && !bounds_value.is_null()
+                && CGRectMakeWithDictionaryRepresentation(
+                    bounds_value as CFDictionaryRef,
+                    &mut bounds,
+                )
+                && bounds.size.width >= PANEL_WIDTH
+                && bounds.size.height >= PANEL_HEIGHT
+            {
+                result = Some(bounds);
+                break;
+            }
+        }
+
+        CFRelease(window_list as _);
+        result
     }
 
     unsafe fn position_panel(panel: id) {
@@ -217,11 +379,43 @@ mod macos {
         }
 
         let visible_frame: CGRect = msg_send![screen, visibleFrame];
-        let origin = CGPoint::new(
-            visible_frame.origin.x + visible_frame.size.width - PANEL_WIDTH - 24.0,
-            visible_frame.origin.y + visible_frame.size.height - PANEL_HEIGHT - 24.0,
-        );
+        let screen_frame: CGRect = msg_send![screen, frame];
+        let origin = if let Some(settings_bounds) = system_settings_bounds() {
+            CGPoint::new(
+                settings_bounds.origin.x + settings_bounds.size.width - PANEL_WIDTH - 20.0,
+                screen_frame.size.height - settings_bounds.origin.y - PANEL_HEIGHT - 72.0,
+            )
+        } else {
+            CGPoint::new(
+                visible_frame.origin.x + visible_frame.size.width - PANEL_WIDTH - 24.0,
+                visible_frame.origin.y + visible_frame.size.height - PANEL_HEIGHT - 24.0,
+            )
+        };
         let _: () = msg_send![panel, setFrameOrigin: origin];
+    }
+
+    unsafe fn start_following_settings() -> Result<(), String> {
+        if FOLLOWER_STARTED.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        let follower_class = follower_class()
+            .ok_or_else(|| "Could not register permission panel follower".to_string())?;
+        let follower: id = msg_send![follower_class, new];
+        if follower == nil {
+            return Err("Could not create permission panel follower".to_string());
+        }
+        let _: id = msg_send![
+            class!(NSTimer),
+            scheduledTimerWithTimeInterval: 0.2f64
+            target: follower
+            selector: sel!(updatePermissionPanel:)
+            userInfo: nil
+            repeats: true
+        ];
+        let _: () = msg_send![follower, release];
+        FOLLOWER_STARTED.store(true, Ordering::Release);
+        Ok(())
     }
 
     pub fn show(permission_name: &str) -> Result<(), String> {
@@ -240,8 +434,18 @@ mod macos {
             }
 
             position_panel(panel);
+            start_following_settings()?;
             let _: () = msg_send![panel, orderFrontRegardless];
             Ok(())
+        }
+    }
+
+    pub fn hide() {
+        let panel = HELPER_PANEL.load(Ordering::Acquire);
+        if !panel.is_null() {
+            unsafe {
+                let _: () = msg_send![panel, orderOut: nil];
+            }
         }
     }
 }
@@ -251,7 +455,15 @@ pub fn show_permission_drag_helper(permission_name: &str) -> Result<(), String> 
     macos::show(permission_name)
 }
 
+#[cfg(target_os = "macos")]
+pub fn hide_permission_drag_helper() {
+    macos::hide();
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn show_permission_drag_helper(_permission_name: &str) -> Result<(), String> {
     Ok(())
 }
+
+#[cfg(not(target_os = "macos"))]
+pub fn hide_permission_drag_helper() {}

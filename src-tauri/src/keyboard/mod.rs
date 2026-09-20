@@ -6,4 +6,4 @@ mod permission;
 pub use capture::KeyboardCapture;
 pub use inject::*;
 pub use keycode::{KeyCode, KeyEvent, Modifiers};
-pub use permission::{check_accessibility_permission, request_accessibility_permission};
+pub use permission::{check_accessibility_permission, check_input_monitoring_permission};

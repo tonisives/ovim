@@ -30,7 +30,9 @@ use commands::RecordedKey;
 use config::click_mode::DoubleTapModifier;
 use config::Settings;
 use ipc::{IpcCommand, IpcResponse};
-use keyboard::{check_accessibility_permission, request_accessibility_permission, KeyboardCapture};
+use keyboard::{
+    check_accessibility_permission, check_input_monitoring_permission, KeyboardCapture,
+};
 use keyboard_handler::{create_keyboard_callback, KeyboardCallbackContext};
 use keyboard_handler::double_tap::{DoubleTapKey, DoubleTapManager};
 use nvim_edit::prewarm::PrewarmManager;
@@ -573,8 +575,8 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::check_permission,
-            commands::request_permission,
             commands::get_permission_status,
+            commands::complete_permission_setup,
             commands::open_accessibility_settings,
             commands::open_input_monitoring_settings,
             commands::get_vim_mode,
@@ -732,6 +734,17 @@ pub fn run() {
                 });
             }
 
+            if let Some(permissions_window) = app.get_webview_window("permissions") {
+                let window = permissions_window.clone();
+                permissions_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        crate::window::hide_permission_drag_helper();
+                        let _ = window.hide();
+                    }
+                });
+            }
+
             let app_handle = app.handle().clone();
             let mut rx = mode_rx.lock().unwrap().resubscribe();
 
@@ -742,7 +755,7 @@ pub fn run() {
                 }
             });
 
-            if check_accessibility_permission() {
+            if check_accessibility_permission() && check_input_monitoring_permission() {
                 let state: State<AppState> = app.state();
                 if let Err(e) = state.keyboard_capture.start() {
                     log::error!("Failed to start keyboard capture: {}", e);
@@ -750,8 +763,14 @@ pub fn run() {
                     log::info!("Keyboard capture started automatically");
                 }
             } else {
-                log::warn!("Accessibility permission not granted, requesting...");
-                request_accessibility_permission();
+                log::warn!("Required macOS permissions are not granted");
+                if let Some(window) = app.get_webview_window("permissions") {
+                    if let Err(error) = window.show() {
+                        log::error!("Failed to show permission setup window: {}", error);
+                    } else if let Err(error) = window.set_focus() {
+                        log::error!("Failed to focus permission setup window: {}", error);
+                    }
+                }
             }
 
             // Install launcher and sample scripts to config directory

@@ -48,6 +48,20 @@
         "center": true
       },
       {
+        "label": "permissions",
+        "title": "Set Up ovim",
+        "url": "/permissions.html",
+        "width": 560,
+        "height": 500,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": true,
+        "transparent": false,
+        "visible": false,
+        "center": true
+      },
+      {
         "label": "click-overlay",
         "title": "",
         "url": "/click-overlay.html",

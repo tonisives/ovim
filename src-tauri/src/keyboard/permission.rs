@@ -1,29 +1,17 @@
-use core_foundation::base::TCFType;
-use core_foundation::boolean::CFBoolean;
-use core_foundation::dictionary::CFDictionary;
-use core_foundation::string::CFString;
-
-// ApplicationServices framework binding for accessibility
+// ApplicationServices framework bindings for macOS privacy permissions.
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
-    fn AXIsProcessTrustedWithOptions(options: core_foundation::dictionary::CFDictionaryRef) -> bool;
+    fn AXIsProcessTrustedWithOptions(options: core_foundation::dictionary::CFDictionaryRef)
+        -> bool;
+    fn CGPreflightListenEventAccess() -> bool;
 }
 
-const K_AX_TRUSTED_CHECK_OPTION_PROMPT: &str = "AXTrustedCheckOptionPrompt";
-
-/// Check if the app has accessibility/input monitoring permission
+/// Check whether macOS allows ovim to use the Accessibility API.
 pub fn check_accessibility_permission() -> bool {
     unsafe { AXIsProcessTrustedWithOptions(std::ptr::null()) }
 }
 
-/// Request accessibility permission (shows system prompt)
-pub fn request_accessibility_permission() -> bool {
-    unsafe {
-        let key = CFString::new(K_AX_TRUSTED_CHECK_OPTION_PROMPT);
-        let value = CFBoolean::true_value();
-
-        let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
-
-        AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef())
-    }
+/// Check whether macOS allows ovim to listen to keyboard input.
+pub fn check_input_monitoring_permission() -> bool {
+    unsafe { CGPreflightListenEventAccess() }
 }
