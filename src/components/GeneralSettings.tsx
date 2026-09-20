@@ -70,7 +70,7 @@ export function GeneralSettings({ settings, onUpdate }: Props) {
                   Request
                 </button>
                 <button type="button" className="permission-btn secondary" onClick={handleOpenAccessibility}>
-                  Open Settings
+                  Open with Drag Helper
                 </button>
               </div>
             )}
@@ -78,13 +78,14 @@ export function GeneralSettings({ settings, onUpdate }: Props) {
               <div className="permission-item">
                 <span className="permission-status missing">Input Monitoring</span>
                 <button type="button" className="permission-btn" onClick={handleOpenInputMonitoring}>
-                  Open Settings
+                  Open with Drag Helper
                 </button>
               </div>
             )}
           </div>
           <div className="permission-hint">
-            Grant permissions and restart the app for changes to take effect.
+            Drag the ovim icon into the System Settings list if ovim is not already shown, then
+            enable it. Restart ovim for Input Monitoring changes to take effect.
           </div>
         </div>
       )}

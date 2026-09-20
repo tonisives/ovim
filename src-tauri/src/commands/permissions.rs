@@ -1,6 +1,6 @@
 //! Permission-related Tauri commands
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::keyboard::{check_accessibility_permission, request_accessibility_permission};
 use crate::AppState;
@@ -29,20 +29,42 @@ pub fn get_permission_status(state: State<AppState>) -> PermissionStatus {
     }
 }
 
-#[tauri::command]
-pub fn open_accessibility_settings() {
+fn open_permission_settings(
+    app: &AppHandle,
+    settings_url: &str,
+    permission_name: &'static str,
+) -> Result<(), String> {
     use std::process::Command;
-    let _ = Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        .spawn();
+
+    Command::new("open")
+        .arg(settings_url)
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    app.run_on_main_thread(move || {
+        if let Err(error) = crate::window::show_permission_drag_helper(permission_name) {
+            log::warn!("Could not show permission drag helper: {error}");
+        }
+    })
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn open_input_monitoring_settings() {
-    use std::process::Command;
-    let _ = Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-        .spawn();
+pub fn open_accessibility_settings(app: AppHandle) -> Result<(), String> {
+    open_permission_settings(
+        &app,
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "Accessibility",
+    )
+}
+
+#[tauri::command]
+pub fn open_input_monitoring_settings(app: AppHandle) -> Result<(), String> {
+    open_permission_settings(
+        &app,
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+        "Input Monitoring",
+    )
 }
 
 #[tauri::command]
