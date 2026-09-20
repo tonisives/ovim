@@ -732,8 +732,6 @@ pub fn run() {
                 });
             }
 
-            show_settings_window(app.handle());
-
             let app_handle = app.handle().clone();
             let mut rx = mode_rx.lock().unwrap().resubscribe();
 
