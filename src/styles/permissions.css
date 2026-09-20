@@ -8,6 +8,10 @@
   width: 100%;
 }
 
+.settings-section > .permission-setup {
+  margin-bottom: 16px;
+}
+
 .permission-card {
   display: flex;
   min-height: 82px;
