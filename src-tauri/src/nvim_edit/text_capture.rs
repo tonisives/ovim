@@ -88,7 +88,7 @@ pub fn capture_text_and_frame(
     };
 
     // Get text from the focused element, tracking whether we used clipboard
-    let (text, _used_clipboard, is_address_bar) = capture_text_content_with_source();
+    let (text, _used_clipboard, is_address_bar) = capture_text_content_with_source(app_bundle_id);
 
     // If we're in a browser's address bar, disable browser live sync
     // to avoid updating web page elements when editing the URL
@@ -131,13 +131,13 @@ fn is_browser_address_bar() -> bool {
 
 /// Capture text content from the focused element
 /// Returns (text, used_clipboard, is_address_bar)
-fn capture_text_content_with_source() -> (String, bool, bool) {
+fn capture_text_content_with_source(app_bundle_id: &str) -> (String, bool, bool) {
     // Check if we're in the browser address bar before capturing
     let is_address_bar = is_browser_address_bar();
 
     // An empty AXValue is a valid value for an empty text field. Only fall back
     // to clipboard capture when the accessibility API cannot return a value.
-    match accessibility::get_focused_element_text() {
+    match accessibility::get_focused_element_text(app_bundle_id) {
         Some(text) => {
             let preview: String = text.lines().take(5).collect::<Vec<_>>().join("\\n");
             log::info!("Got text: {} chars, preview: {}", text.len(), preview);
