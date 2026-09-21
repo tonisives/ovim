@@ -437,7 +437,7 @@ pub fn get_focused_element_frame() -> Option<ElementFrame> {
 }
 
 /// Get the full text value from the currently focused UI element
-pub fn get_focused_element_text() -> Option<String> {
+pub fn get_focused_element_text(app_bundle_id: &str) -> Option<String> {
     let system_wide = CFHandle::new(unsafe { AXUIElementCreateSystemWide() })?;
     let focused_app = system_wide.get_attribute("AXFocusedApplication")?;
     let focused_element = focused_app.get_attribute("AXFocusedUIElement")?;
@@ -467,6 +467,7 @@ pub fn get_focused_element_text() -> Option<String> {
         &labels,
         character_count,
         selected_range,
+        app_bundle_id,
     ))
 }
 
@@ -476,6 +477,7 @@ fn remove_placeholder_text(
     labels: &[String],
     character_count: Option<i64>,
     selected_range: Option<(isize, isize)>,
+    app_bundle_id: &str,
 ) -> String {
     let matches_placeholder = placeholder.is_some_and(|value| !value.is_empty() && text == value);
     let has_no_editable_characters = character_count == Some(0) && !text.is_empty();
@@ -483,8 +485,19 @@ fn remove_placeholder_text(
         && labels
             .iter()
             .any(|label| !label.is_empty() && text == *label);
+    // Signal's Quill editor exposes its generated placeholder as AXValue with
+    // a trailing newline, but does not publish AXPlaceholderValue or a label.
+    let matches_signal_generated_placeholder = app_bundle_id == "org.whispersystems.signal-desktop"
+        && selected_range == Some((0, 0))
+        && text
+            .strip_suffix('\n')
+            .is_some_and(|content| !content.is_empty() && !content.contains('\n'));
 
-    if matches_placeholder || has_no_editable_characters || matches_empty_field_label {
+    if matches_placeholder
+        || has_no_editable_characters
+        || matches_empty_field_label
+        || matches_signal_generated_placeholder
+    {
         String::new()
     } else {
         text
@@ -878,6 +891,24 @@ mod tests {
         character_count: Option<i64>,
         selected_range: Option<(isize, isize)>,
     ) -> String {
+        normalize_for_app(
+            text,
+            placeholder,
+            labels,
+            character_count,
+            selected_range,
+            "",
+        )
+    }
+
+    fn normalize_for_app(
+        text: &str,
+        placeholder: Option<&str>,
+        labels: &[&str],
+        character_count: Option<i64>,
+        selected_range: Option<(isize, isize)>,
+        app_bundle_id: &str,
+    ) -> String {
         remove_placeholder_text(
             text.to_string(),
             placeholder,
@@ -887,6 +918,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             character_count,
             selected_range,
+            app_bundle_id,
         )
     }
 
@@ -934,6 +966,51 @@ mod tests {
         assert_eq!(
             normalize("Message", None, &["Message"], Some(7), Some((7, 0))),
             "Message"
+        );
+    }
+
+    #[test]
+    fn signal_generated_placeholder_with_trailing_newline_is_empty() {
+        assert_eq!(
+            normalize_for_app(
+                "Message\n",
+                None,
+                &[],
+                Some(8),
+                Some((0, 0)),
+                "org.whispersystems.signal-desktop",
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn signal_typed_message_is_preserved() {
+        assert_eq!(
+            normalize_for_app(
+                "Message",
+                None,
+                &[],
+                Some(7),
+                Some((0, 0)),
+                "org.whispersystems.signal-desktop",
+            ),
+            "Message"
+        );
+    }
+
+    #[test]
+    fn signal_text_with_trailing_newline_and_active_cursor_is_preserved() {
+        assert_eq!(
+            normalize_for_app(
+                "Message\n",
+                None,
+                &[],
+                Some(8),
+                Some((8, 0)),
+                "org.whispersystems.signal-desktop",
+            ),
+            "Message\n"
         );
     }
 }
