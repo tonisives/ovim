@@ -182,6 +182,30 @@ impl CFHandle {
         std::mem::forget(self);
         Some(result)
     }
+
+    /// Convert a CFArray of CFStrings into owned Rust strings.
+    fn to_string_array(&self) -> Vec<String> {
+        let type_id = unsafe { core_foundation::base::CFGetTypeID(self.0) };
+        let array_type_id = unsafe { core_foundation::array::CFArrayGetTypeID() };
+        if type_id != array_type_id {
+            return Vec::new();
+        }
+
+        let count = unsafe { core_foundation::array::CFArrayGetCount(self.0 as _) };
+
+        (0..count)
+            .filter_map(|index| {
+                let value =
+                    unsafe { core_foundation::array::CFArrayGetValueAtIndex(self.0 as _, index) };
+                if value.is_null() {
+                    return None;
+                }
+
+                let value = unsafe { CFString::wrap_under_get_rule(value as _) };
+                Some(value.to_string())
+            })
+            .collect()
+    }
 }
 
 impl Drop for CFHandle {
@@ -460,6 +484,9 @@ pub fn get_focused_element_text(app_bundle_id: &str) -> Option<String> {
     let selected_range = focused_element
         .get_attribute("AXSelectedTextRange")
         .and_then(|value| value.extract_range());
+    let classes = focused_element
+        .get_attribute("AXDOMClassList")
+        .map_or_else(Vec::new, |value| value.to_string_array());
 
     Some(remove_placeholder_text(
         text,
@@ -467,6 +494,7 @@ pub fn get_focused_element_text(app_bundle_id: &str) -> Option<String> {
         &labels,
         character_count,
         selected_range,
+        &classes,
         app_bundle_id,
     ))
 }
@@ -477,6 +505,7 @@ fn remove_placeholder_text(
     labels: &[String],
     character_count: Option<i64>,
     selected_range: Option<(isize, isize)>,
+    classes: &[String],
     app_bundle_id: &str,
 ) -> String {
     let matches_placeholder = placeholder.is_some_and(|value| !value.is_empty() && text == value);
@@ -486,9 +515,11 @@ fn remove_placeholder_text(
             .iter()
             .any(|label| !label.is_empty() && text == *label);
     // Signal's Quill editor exposes its generated placeholder as AXValue with
-    // a trailing newline, but does not publish AXPlaceholderValue or a label.
+    // a trailing newline and marks the editor with its ql-blank class, but does
+    // not publish AXPlaceholderValue or a label. Its selection location can be
+    // either zero or the length of the visible placeholder depending on focus.
     let matches_signal_generated_placeholder = app_bundle_id == "org.whispersystems.signal-desktop"
-        && selected_range == Some((0, 0))
+        && classes.iter().any(|class| class == "ql-blank")
         && text
             .strip_suffix('\n')
             .is_some_and(|content| !content.is_empty() && !content.contains('\n'));
@@ -909,6 +940,26 @@ mod tests {
         selected_range: Option<(isize, isize)>,
         app_bundle_id: &str,
     ) -> String {
+        normalize_for_app_with_classes(
+            text,
+            placeholder,
+            labels,
+            character_count,
+            selected_range,
+            &[],
+            app_bundle_id,
+        )
+    }
+
+    fn normalize_for_app_with_classes(
+        text: &str,
+        placeholder: Option<&str>,
+        labels: &[&str],
+        character_count: Option<i64>,
+        selected_range: Option<(isize, isize)>,
+        classes: &[&str],
+        app_bundle_id: &str,
+    ) -> String {
         remove_placeholder_text(
             text.to_string(),
             placeholder,
@@ -918,6 +969,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             character_count,
             selected_range,
+            &classes
+                .iter()
+                .map(|class| (*class).to_string())
+                .collect::<Vec<_>>(),
             app_bundle_id,
         )
     }
@@ -972,12 +1027,13 @@ mod tests {
     #[test]
     fn signal_generated_placeholder_with_trailing_newline_is_empty() {
         assert_eq!(
-            normalize_for_app(
+            normalize_for_app_with_classes(
                 "Message\n",
                 None,
                 &[],
                 Some(8),
-                Some((0, 0)),
+                Some((7, 0)),
+                &["ql-editor", "ql-editor--loaded", "ql-blank"],
                 "org.whispersystems.signal-desktop",
             ),
             ""
@@ -987,12 +1043,13 @@ mod tests {
     #[test]
     fn signal_typed_message_is_preserved() {
         assert_eq!(
-            normalize_for_app(
+            normalize_for_app_with_classes(
                 "Message",
                 None,
                 &[],
                 Some(7),
-                Some((0, 0)),
+                Some((7, 0)),
+                &["ql-editor", "ql-editor--loaded"],
                 "org.whispersystems.signal-desktop",
             ),
             "Message"
@@ -1002,12 +1059,13 @@ mod tests {
     #[test]
     fn signal_text_with_trailing_newline_and_active_cursor_is_preserved() {
         assert_eq!(
-            normalize_for_app(
+            normalize_for_app_with_classes(
                 "Message\n",
                 None,
                 &[],
                 Some(8),
                 Some((8, 0)),
+                &["ql-editor", "ql-editor--loaded"],
                 "org.whispersystems.signal-desktop",
             ),
             "Message\n"
