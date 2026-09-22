@@ -26,16 +26,29 @@ pub fn trigger_nvim_edit(
     shared_settings: Option<Arc<Mutex<Settings>>>,
 ) -> Result<(), String> {
     // 1. Capture focus context (which app we're in)
-    let focus_context = accessibility::capture_focus_context()
-        .ok_or("No focused application found")?;
+    let focus_context =
+        accessibility::capture_focus_context().ok_or("No focused application found")?;
     log::info!("Captured focus context: {:?}", focus_context);
 
     // 2. Capture geometry info BEFORE any clipboard operations (which may change focus)
-    log::info!("popup_mode={}, popup_width={}, popup_height={}", settings.popup_mode, settings.popup_width, settings.popup_height);
+    log::info!(
+        "popup_mode={}, popup_width={}, popup_height={}",
+        settings.popup_mode,
+        settings.popup_width,
+        settings.popup_height
+    );
     let element_frame = accessibility::get_focused_element_frame();
     let window_frame = accessibility::get_focused_window_frame();
-    log::info!("Element frame from accessibility: {:?}", element_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
-    log::info!("Window frame: {:?}", window_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height)));
+    log::info!(
+        "Element frame from accessibility: {:?}",
+        element_frame
+            .as_ref()
+            .map(|f| (f.x, f.y, f.width, f.height))
+    );
+    log::info!(
+        "Window frame: {:?}",
+        window_frame.as_ref().map(|f| (f.x, f.y, f.width, f.height))
+    );
 
     // 3. Capture text and get element frame (may use browser scripting as fallback)
     let capture_result = text_capture::capture_text_and_frame(
@@ -46,16 +59,20 @@ pub fn trigger_nvim_edit(
     let text = capture_result.text;
     let element_frame = capture_result.element_frame;
     let initial_cursor = capture_result.cursor_position;
-    let browser_type = capture_result.browser_type;
+    let browser_target = capture_result.browser_target;
 
     if let Some(ref cursor) = initial_cursor {
-        log::info!("Initial cursor position: line={}, col={}", cursor.line, cursor.column);
+        log::info!(
+            "Initial cursor position: line={}, col={}",
+            cursor.line,
+            cursor.column
+        );
     }
 
     // 4. Determine domain key for filetype persistence
     // For browsers, use the hostname. For native apps, use bundle ID.
-    let domain_key = if let Some(bt) = browser_type {
-        browser_scripting::get_browser_hostname(bt)
+    let domain_key = if let Some(target) = browser_target.as_ref() {
+        browser_scripting::get_browser_hostname(target)
             .unwrap_or_else(|| focus_context.app_bundle_id.clone())
     } else {
         focus_context.app_bundle_id.clone()
@@ -63,7 +80,9 @@ pub fn trigger_nvim_edit(
     log::info!("Domain key for filetype: {}", domain_key);
 
     // 5. Look up saved filetype for this domain
-    let saved_filetype = settings.get_filetype_for_domain(&domain_key).map(|s| s.to_string());
+    let saved_filetype = settings
+        .get_filetype_for_domain(&domain_key)
+        .map(|s| s.to_string());
     if let Some(ref ft) = saved_filetype {
         log::info!("Found saved filetype for domain '{}': {}", domain_key, ft);
     }
@@ -85,7 +104,8 @@ pub fn trigger_nvim_edit(
 
     // 8. Start RPC connection and live sync in background
     // If clipboard_mode is enabled, skip live sync entirely
-    let session = manager.get_session(&session_id)
+    let session = manager
+        .get_session(&session_id)
         .ok_or("Session not found immediately after creation")?;
 
     let live_sync_worked = Arc::new(AtomicBool::new(false));
@@ -104,7 +124,7 @@ pub fn trigger_nvim_edit(
             &session,
             &settings,
             Arc::clone(&live_sync_worked),
-            browser_type,
+            browser_target.clone(),
             initial_cursor,
         )
     };
@@ -115,7 +135,7 @@ pub fn trigger_nvim_edit(
         session_id,
         rpc_handle,
         live_sync_worked,
-        browser_type,
+        browser_target,
         clipboard_mode,
         shared_settings,
     );
@@ -156,7 +176,7 @@ fn spawn_rpc_handler(
     session: &session::EditSession,
     settings: &NvimEditSettings,
     live_sync_worked: Arc<AtomicBool>,
-    browser_type: Option<browser_scripting::BrowserType>,
+    browser_target: Option<browser_scripting::BrowserTarget>,
     initial_cursor: Option<browser_scripting::CursorPosition>,
 ) -> thread::JoinHandle<Option<RpcResult>> {
     let socket_path = session.socket_path.clone();
@@ -194,7 +214,7 @@ fn spawn_rpc_handler(
             let on_lines = Arc::new(move |lines: Vec<String>| {
                 handle_live_sync_update(
                     &lines,
-                    browser_type,
+                    browser_target.as_ref(),
                     element_for_callback.as_ref(),
                     &sync_flag,
                     &cached_id_for_callback,
@@ -210,7 +230,11 @@ fn spawn_rpc_handler(
                         if let Err(e) = rpc_session.set_cursor(cursor.line, cursor.column).await {
                             log::debug!("Failed to set initial nvim cursor: {}", e);
                         } else {
-                            log::info!("Set nvim cursor to line={}, col={}", cursor.line, cursor.column);
+                            log::info!(
+                                "Set nvim cursor to line={}, col={}",
+                                cursor.line,
+                                cursor.column
+                            );
                         }
                     }
 
@@ -222,7 +246,8 @@ fn spawn_rpc_handler(
                         // Try to get current cursor position first
                         match rpc_session.get_cursor().await {
                             Ok((line, col)) => {
-                                last_cursor = Some(browser_scripting::CursorPosition { line, column: col });
+                                last_cursor =
+                                    Some(browser_scripting::CursorPosition { line, column: col });
                             }
                             Err(_) => {
                                 // RPC failed, nvim is probably closing
@@ -255,7 +280,11 @@ fn spawn_rpc_handler(
                     }
 
                     if let Some(ref cursor) = last_cursor {
-                        log::info!("Final nvim cursor: line={}, col={}", cursor.line, cursor.column);
+                        log::info!(
+                            "Final nvim cursor: line={}, col={}",
+                            cursor.line,
+                            cursor.column
+                        );
                     }
 
                     // Use the filetype we captured during polling
@@ -266,10 +295,16 @@ fn spawn_rpc_handler(
 
                     let _ = rpc_session.detach().await;
 
-                    Some(RpcResult { final_cursor: last_cursor, filetype })
+                    Some(RpcResult {
+                        final_cursor: last_cursor,
+                        filetype,
+                    })
                 }
                 Err(e) => {
-                    log::warn!("RPC connection failed, falling back to clipboard-only mode: {}", e);
+                    log::warn!(
+                        "RPC connection failed, falling back to clipboard-only mode: {}",
+                        e
+                    );
                     None
                 }
             }
@@ -280,25 +315,33 @@ fn spawn_rpc_handler(
 /// Handle a live sync update from nvim
 fn handle_live_sync_update(
     lines: &[String],
-    browser_type: Option<browser_scripting::BrowserType>,
+    browser_target: Option<&browser_scripting::BrowserTarget>,
     focus_element: Option<&accessibility::AXElementHandle>,
     sync_flag: &AtomicBool,
     cached_element_id: &std::sync::Mutex<Option<String>>,
 ) {
     let text = lines.join("\n");
     let preview: String = text.lines().take(3).collect::<Vec<_>>().join("\\n");
-    log::info!("Live sync update: {} lines, {} chars, browser={:?}, preview: {}",
-        lines.len(), text.len(), browser_type, preview);
+    log::info!(
+        "Live sync update: {} lines, {} chars, browser={:?}, preview: {}",
+        lines.len(),
+        text.len(),
+        browser_target,
+        preview
+    );
 
     // For browsers, use browser scripting (JS) which works with code editors
     let mut skip_ax_fallback = false;
-    if let Some(bt) = browser_type {
+    if let Some(target) = browser_target {
         // Get cached element ID if any
         let target_id = cached_element_id.lock().ok().and_then(|g| g.clone());
-        match browser_scripting::set_browser_element_text(bt, &text, target_id.as_deref()) {
+        match browser_scripting::set_browser_element_text(target, &text, target_id.as_deref()) {
             Ok(new_element_id) => {
                 sync_flag.store(true, Ordering::SeqCst);
-                log::info!("Live sync (browser JS): updated text field ({} chars)", text.len());
+                log::info!(
+                    "Live sync (browser JS): updated text field ({} chars)",
+                    text.len()
+                );
                 // Cache the element ID for subsequent calls
                 if let Some(id) = new_element_id {
                     if let Ok(mut guard) = cached_element_id.lock() {
@@ -311,7 +354,10 @@ fn handle_live_sync_update(
                 log::info!("Browser live sync failed: {}", e);
                 // Lexical and Monaco editors don't respond to AX value changes,
                 // so skip the AX fallback and rely on clipboard mode
-                if e.contains("unsupported_lexical") || e.contains("monaco_dom") {
+                if e.contains("unsupported_lexical")
+                    || e.contains("unsupported_draftjs")
+                    || e.contains("monaco_dom")
+                {
                     log::info!("Lexical/Monaco editor detected - will use clipboard mode on exit");
                     skip_ax_fallback = true;
                 }
@@ -342,7 +388,7 @@ fn spawn_completion_handler(
     session_id: uuid::Uuid,
     rpc_handle: thread::JoinHandle<Option<RpcResult>>,
     live_sync_worked: Arc<AtomicBool>,
-    browser_type: Option<browser_scripting::BrowserType>,
+    browser_target: Option<browser_scripting::BrowserTarget>,
     clipboard_mode: bool,
     shared_settings: Option<Arc<Mutex<Settings>>>,
 ) {
@@ -361,17 +407,25 @@ fn spawn_completion_handler(
 
         // Save the filetype for this domain if we got one
         if let Some(ref ft) = final_filetype {
-            log::info!("Saving filetype '{}' for domain '{}'", ft, session.domain_key);
+            log::info!(
+                "Saving filetype '{}' for domain '{}'",
+                ft,
+                session.domain_key
+            );
 
             // Update in-memory settings if we have shared state
             if let Some(ref shared) = shared_settings {
                 let mut settings = shared.lock().unwrap();
-                settings.nvim_edit.set_filetype_for_domain(session.domain_key.clone(), ft.clone());
+                settings
+                    .nvim_edit
+                    .set_filetype_for_domain(session.domain_key.clone(), ft.clone());
                 log::info!("Updated in-memory settings with filetype");
             } else {
                 // Fallback: just save to file (will be loaded on next restart)
                 let mut settings = Settings::load();
-                settings.nvim_edit.set_filetype_for_domain(session.domain_key.clone(), ft.clone());
+                settings
+                    .nvim_edit
+                    .set_filetype_for_domain(session.domain_key.clone(), ft.clone());
             }
         }
 
@@ -401,7 +455,12 @@ fn spawn_completion_handler(
         } else {
             live_sync_worked.load(Ordering::SeqCst)
         };
-        log::info!("Live sync status: {}, clipboard_mode: {}, browser_type: {:?}", if did_live_sync { "worked" } else { "not used" }, clipboard_mode, browser_type);
+        log::info!(
+            "Live sync status: {}, clipboard_mode: {}, browser={:?}",
+            if did_live_sync { "worked" } else { "not used" },
+            clipboard_mode,
+            browser_target
+        );
 
         // Complete the session - skip clipboard paste if live sync worked
         if let Err(e) = complete_edit_session(&manager, &session_id, did_live_sync) {
@@ -409,9 +468,14 @@ fn spawn_completion_handler(
         }
 
         // Restore cursor position in browser if we have it
-        if let (Some(bt), Some(cursor)) = (browser_type, final_cursor) {
-            log::info!("Restoring browser cursor to line={}, col={}", cursor.line, cursor.column);
-            match browser_scripting::set_browser_cursor_position(bt, cursor.line, cursor.column) {
+        if let (Some(target), Some(cursor)) = (browser_target.as_ref(), final_cursor) {
+            log::info!(
+                "Restoring browser cursor to line={}, col={}",
+                cursor.line,
+                cursor.column
+            );
+            match browser_scripting::set_browser_cursor_position(target, cursor.line, cursor.column)
+            {
                 Ok(()) => log::info!("Browser cursor restored successfully"),
                 Err(e) => log::info!("Failed to restore browser cursor: {}", e),
             }
@@ -431,21 +495,32 @@ fn complete_edit_session(
     session_id: &uuid::Uuid,
     live_sync_worked: bool,
 ) -> Result<(), String> {
-    let session = manager.get_session(session_id)
-        .ok_or("Session not found")?;
+    let session = manager.get_session(session_id).ok_or("Session not found")?;
 
     log::info!("Reading temp file: {:?}", session.temp_file);
 
     // Debug: write to temp file for troubleshooting
     let debug_log = |msg: &str| {
         use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/ovim_debug.log") {
-            let _ = writeln!(f, "{}: {}", chrono::Local::now().format("%H:%M:%S%.3f"), msg);
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/ovim_debug.log")
+        {
+            let _ = writeln!(
+                f,
+                "{}: {}",
+                chrono::Local::now().format("%H:%M:%S%.3f"),
+                msg
+            );
         }
         log::info!("{}", msg);
     };
 
-    debug_log(&format!("complete_edit_session: live_sync_worked={}", live_sync_worked));
+    debug_log(&format!(
+        "complete_edit_session: live_sync_worked={}",
+        live_sync_worked
+    ));
 
     // Check if file was modified by comparing modification times
     let current_mtime = std::fs::metadata(&session.temp_file)
@@ -462,7 +537,10 @@ fn complete_edit_session(
         .map_err(|e| format!("Failed to read temp file: {}", e))?;
 
     // Strip trailing newline that nvim adds (fixeol option)
-    let edited_text = edited_text.strip_suffix('\n').unwrap_or(&edited_text).to_string();
+    let edited_text = edited_text
+        .strip_suffix('\n')
+        .unwrap_or(&edited_text)
+        .to_string();
 
     debug_log(&format!("Read {} chars from temp file", edited_text.len()));
 
@@ -479,7 +557,10 @@ fn complete_edit_session(
     debug_log("Waiting 300ms for focus to settle...");
     thread::sleep(Duration::from_millis(300));
 
-    debug_log(&format!("Replacing text via clipboard, {} chars", edited_text.len()));
+    debug_log(&format!(
+        "Replacing text via clipboard, {} chars",
+        edited_text.len()
+    ));
     clipboard::replace_text_via_clipboard(&edited_text)?;
 
     debug_log("Successfully restored edited text");
