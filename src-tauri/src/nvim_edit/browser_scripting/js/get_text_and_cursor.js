@@ -1,47 +1,63 @@
-// Get BOTH text AND cursor position in one call
-// This avoids cursor position being lost between separate calls
-// Returns JSON: {text: string, cursor: {line, column} | null}
-// Note: Uses String.fromCharCode(10) for newline to avoid AppleScript escaping issues
+// Get the focused editor's text and cursor position in one call.
 (function () {
-  var NL = String.fromCharCode(10);
-  var result = { text: "", cursor: null };
+  var result = { text: "", cursor: null, found: false };
 
-  var e = document.querySelector(".cm-editor");
-  if (e) {
-    // Get text from all lines
-    var lines = e.querySelectorAll(".cm-line");
+  function deepActiveElement(element) {
+    if (element && element.shadowRoot && element.shadowRoot.activeElement) {
+      return deepActiveElement(element.shadowRoot.activeElement);
+    }
+    return element;
+  }
+
+  function cursorFromPrefix(prefix) {
+    var lines = prefix.split(String.fromCharCode(10));
+    return { line: lines.length - 1, column: lines[lines.length - 1].length };
+  }
+
+  var active = deepActiveElement(document.activeElement);
+  if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
+    result.found = true;
+    result.text = active.value || "";
+    if (typeof active.selectionStart === "number") {
+      result.cursor = cursorFromPrefix(result.text.slice(0, active.selectionStart));
+    }
+    return JSON.stringify(result);
+  }
+
+  var editable = null;
+  if (active && active.isContentEditable) {
+    editable = active;
+  } else if (active && active.closest) {
+    editable = active.closest('[contenteditable="true"]');
+  }
+  if (editable) {
+    result.found = true;
+    result.text = editable.innerText || "";
+    if ((editable.textContent || "") === "") {
+      result.text = "";
+    }
+    var selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      var range = selection.getRangeAt(0);
+      if (editable.contains(range.startContainer)) {
+        var prefixRange = range.cloneRange();
+        prefixRange.selectNodeContents(editable);
+        prefixRange.setEnd(range.startContainer, range.startOffset);
+        result.cursor = cursorFromPrefix(prefixRange.toString());
+      }
+    }
+    return JSON.stringify(result);
+  }
+
+  var codeMirror = document.querySelector(".cm-editor");
+  if (codeMirror) {
+    result.found = true;
+    var lines = codeMirror.querySelectorAll(".cm-line");
     var textParts = [];
     for (var j = 0; j < lines.length; j++) {
       textParts.push(lines[j].textContent);
     }
-    result.text = textParts.join(NL);
-
-    // Get cursor position
-    var s = window.getSelection();
-    if (s.rangeCount > 0) {
-      var r = s.getRangeAt(0);
-      for (var i = 0; i < lines.length; i++) {
-        if (lines[i].contains(r.startContainer)) {
-          var w = document.createTreeWalker(
-            lines[i],
-            NodeFilter.SHOW_TEXT,
-            null,
-            false
-          );
-          var n;
-          var c = 0;
-          while ((n = w.nextNode())) {
-            if (n === r.startContainer) {
-              c += r.startOffset;
-              result.cursor = { line: i, column: c };
-              break;
-            }
-            c += n.textContent.length;
-          }
-          break;
-        }
-      }
-    }
+    result.text = textParts.join(String.fromCharCode(10));
   }
 
   return JSON.stringify(result);

@@ -140,21 +140,10 @@
     var draftRoot = el.closest(".DraftEditor-root");
     if (!draftRoot) return null;
 
-    var editable = draftRoot.querySelector('[contenteditable="true"]');
-    if (!editable) return null;
-
-    // Assign ID for subsequent lookups
-    if (!editable.id) {
-      editable.id = "ovim-editor-" + Date.now();
-    }
-
-    editable.focus();
-    document.execCommand("selectAll", false, null);
-    var success = document.execCommand("insertText", false, text);
-    if (success) {
-      return "ok_draftjs:" + editable.id;
-    }
-    return null;
+    // Draft.js ignores synthetic browser events and reverts direct DOM writes.
+    // A caller with a trusted input channel (such as bmux) handles this editor
+    // before running this generic JavaScript path.
+    return "unsupported_draftjs";
   }
 
   // === Lexical Editor Handler ===
@@ -273,27 +262,7 @@
   // If we have a cached element ID, try to use it (Draft.js support)
   var targetId = "{{TARGET_ELEMENT_ID}}";
   if (targetId && targetId !== "" && targetId !== "{{" + "TARGET_ELEMENT_ID}}") {
-    var targetEl = document.getElementById(targetId);
-    if (targetEl) {
-      targetEl.focus();
-      document.execCommand("selectAll", false, null);
-      if (document.execCommand("insertText", false, text)) {
-        return "ok_cached:" + targetId;
-      }
-    }
-    // Draft.js may have recreated the element - find it again
-    var draftRoot = document.querySelector(".DraftEditor-root");
-    if (draftRoot) {
-      var editable = draftRoot.querySelector('[contenteditable="true"]');
-      if (editable) {
-        editable.id = targetId;
-        editable.focus();
-        document.execCommand("selectAll", false, null);
-        if (document.execCommand("insertText", false, text)) {
-          return "ok_draftjs_refound:" + targetId;
-        }
-      }
-    }
+    return "unsupported_draftjs";
   }
 
   var el = document.activeElement;

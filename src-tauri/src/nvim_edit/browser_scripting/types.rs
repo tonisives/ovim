@@ -11,6 +11,12 @@ pub enum BrowserType {
     Arc,
 }
 
+#[derive(Debug, Clone)]
+pub enum BrowserTarget {
+    AppleScript(BrowserType),
+    Bmux { pane_id: String },
+}
+
 impl BrowserType {
     /// Get the application name for AppleScript
     pub fn app_name(&self) -> &'static str {
@@ -29,6 +35,7 @@ pub const CHROME_BUNDLE: &str = "com.google.Chrome";
 pub const ARC_BUNDLE: &str = "company.thebrowser.Browser";
 pub const BRAVE_BUNDLE: &str = "com.brave.Browser";
 pub const EDGE_BUNDLE: &str = "com.microsoft.edgemac";
+pub const BMUX_BUNDLE: &str = "bmux.tonis.dev";
 
 /// Detect if a bundle ID corresponds to a scriptable browser
 pub fn detect_browser_type(bundle_id: &str) -> Option<BrowserType> {
@@ -52,6 +59,7 @@ pub struct CursorPosition {
 pub struct TextAndCursor {
     pub text: String,
     pub cursor: Option<CursorPosition>,
+    pub found: bool,
 }
 
 /// Viewport-relative frame from browser JavaScript

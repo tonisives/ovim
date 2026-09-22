@@ -1,6 +1,7 @@
 //! JSON parsing utilities for browser scripting responses
 
 use super::types::{CursorPosition, TextAndCursor, ViewportFrame};
+use serde::Deserialize;
 
 /// Extract a number from a JSON string by key
 pub fn extract_json_number(json: &str, key: &str) -> Option<f64> {
@@ -9,9 +10,7 @@ pub fn extract_json_number(json: &str, key: &str) -> Option<f64> {
     let remaining = &json[start..];
 
     // Find the end of the number (comma, }, or end of string)
-    let end = remaining
-        .find([',', '}'])
-        .unwrap_or(remaining.len());
+    let end = remaining.find([',', '}']).unwrap_or(remaining.len());
 
     let num_str = remaining[..end].trim();
     num_str.parse().ok()
@@ -64,29 +63,29 @@ pub fn parse_text_and_cursor_json(json: &str) -> Option<TextAndCursor> {
         return None;
     }
 
-    // Parse JSON: {"text":"...", "cursor": {"line":X,"column":Y} | null}
-    let text_start = json.find("\"text\":\"")? + 8;
-    let text_end = json[text_start..].find("\",\"cursor\"").map(|i| text_start + i)?;
-    let text_escaped = &json[text_start..text_end];
+    #[derive(Deserialize)]
+    struct Response {
+        text: String,
+        cursor: Option<CursorPositionResponse>,
+        #[serde(default)]
+        found: bool,
+    }
 
-    // Unescape the text (handle \n, \", etc.)
-    let text = text_escaped
-        .replace("\\n", "\n")
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\");
+    #[derive(Deserialize)]
+    struct CursorPositionResponse {
+        line: usize,
+        column: usize,
+    }
 
-    // Parse cursor if present
-    let cursor = if json.contains("\"cursor\":null") {
-        None
-    } else if let Some(cursor_start) = json.find("\"cursor\":{") {
-        let line = extract_json_number(&json[cursor_start..], "line")? as usize;
-        let column = extract_json_number(&json[cursor_start..], "column")? as usize;
-        Some(CursorPosition { line, column })
-    } else {
-        None
-    };
-
-    Some(TextAndCursor { text, cursor })
+    let response: Response = serde_json::from_str(json).ok()?;
+    Some(TextAndCursor {
+        text: response.text,
+        cursor: response.cursor.map(|cursor| CursorPosition {
+            line: cursor.line,
+            column: cursor.column,
+        }),
+        found: response.found,
+    })
 }
 
 #[cfg(test)]
@@ -110,5 +109,25 @@ mod tests {
         assert_eq!(extract_json_number(json, "x"), Some(123.0));
         assert_eq!(extract_json_number(json, "y"), Some(456.0));
         assert_eq!(extract_json_number(json, "z"), None);
+    }
+
+    #[test]
+    fn parses_empty_focused_editor() {
+        let parsed = parse_text_and_cursor_json(
+            r#"{"text":"","cursor":{"line":0,"column":0},"found":true}"#,
+        )
+        .expect("valid editor response");
+        assert!(parsed.found);
+        assert_eq!(parsed.text, "");
+        assert_eq!(parsed.cursor.map(|cursor| cursor.column), Some(0));
+    }
+
+    #[test]
+    fn parses_escaped_editor_text() {
+        let parsed = parse_text_and_cursor_json(
+            r#"{"text":"line 1\n\"quoted\"\\tail","cursor":null,"found":true}"#,
+        )
+        .expect("valid editor response");
+        assert_eq!(parsed.text, "line 1\n\"quoted\"\\tail");
     }
 }
