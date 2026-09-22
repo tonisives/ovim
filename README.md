@@ -1,21 +1,3 @@
-<div align="center">
-<sup>Built with:</sup>
-<br>
-<br>
-<a href="https://github.com/tonisives/clawtab" target="_blank">
-  <div>
-    <img src="https://github.com/tonisives/clawtab/blob/98c6b95b37c94004e146ec90e7bc3ab2dcf66816/docs/readme-pics/3-providers-in-separate-split-panes.png" width="800" alt="ClawTab">
-  </div>
-  <b>ClawTab, the agent multiplexer</b>
-  <br>
-</a>
-  
-<div>Desktop app to create and manage groups of agents from any provider and monitor them on the web or mobile.</div>
-<div>It is another app from me. Free to use and MIT like ovim.</div>
-
-</div>
-
-
 # ovim
 
 macOS system-wide Vim keybindings and modal editor.
