@@ -337,52 +337,58 @@ jobs:
   # Update Homebrew tap with new SHA256 checksums
   update-homebrew:
     needs: [sign, generate-latest-json]
-    runs-on: ubuntu-latest
+    runs-on: macos-15
+    timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
     steps:
-      - name: Download release artifacts and calculate checksums
+      - name: Download exact release assets
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Download GUI artifacts (DMG)
-          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_aarch64.dmg" -o dmg-arm.dmg
-          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_x64.dmg" -o dmg-intel.dmg
+          set -euo pipefail
+          mkdir release-assets
+          version="${RELEASE_TAG#v}"
+          for name in ovim_aarch64.dmg ovim_x64.dmg; do
+            gh release download "$RELEASE_TAG" --pattern "$name" --dir release-assets --repo "$GITHUB_REPOSITORY"
+            test -s "release-assets/$name"
+            case "$name" in
+              *.dmg) hdiutil verify "release-assets/$name" ;;
+              *.tar.gz) tar -tzf "release-assets/$name" >/dev/null ;;
+            esac
+          done
 
-          # Calculate GUI checksums
-          echo "SHA256_DMG_ARM=$(sha256sum dmg-arm.dmg | cut -d' ' -f1)" >> $GITHUB_ENV
-          echo "SHA256_DMG_INTEL=$(sha256sum dmg-intel.dmg | cut -d' ' -f1)" >> $GITHUB_ENV
-
-      - name: Checkout homebrew-tap
+      - name: Checkout Homebrew tap
         uses: actions/checkout@v4
         with:
           repository: tonisives/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Update cask
+      - name: Update tap from verified assets
         run: |
-          cd homebrew-tap
+          python3 homebrew-tap/scripts/update_release.py \
+            --product ovim --tag "$RELEASE_TAG" \
+            --assets release-assets --tap homebrew-tap
 
-          # Update Cask with arch-specific checksums
-          awk -v arm="$SHA256_DMG_ARM" -v intel="$SHA256_DMG_INTEL" '
-            /^cask/ { in_cask=1 }
-            /sha256.*:no_check/ && in_cask {
-              print "  sha256 arm: \"" arm "\", intel: \"" intel "\""
-              next
-            }
-            /sha256 arm:/ && in_cask {
-              print "  sha256 arm: \"" arm "\", intel: \"" intel "\""
-              next
-            }
-            { print }
-          ' Casks/ovim.rb > Casks/ovim.rb.tmp && mv Casks/ovim.rb.tmp Casks/ovim.rb
+      - name: Verify Homebrew entries before publishing
+        run: |
+          set -euo pipefail
+          brew tap tonisives/tap
+          if brew help trust >/dev/null 2>&1; then brew trust --tap tonisives/tap; fi
+          tap_dir="$(brew --repository tonisives/tap)"
+          cp homebrew-tap/Casks/ovim.rb "$tap_dir/Casks/ovim.rb"
+          brew style homebrew-tap/Casks/ovim.rb
+          brew audit --cask --strict tonisives/tap/ovim
+          brew fetch --cask tonisives/tap/ovim
 
       - name: Commit and push
+        working-directory: homebrew-tap
         run: |
-          cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/ovim.rb
-          git diff --staged --quiet || git commit -m "Update ovim to ${{ github.ref_name }}"
+          git diff --staged --quiet || git commit -m "Update ovim to $RELEASE_TAG"
           git push
