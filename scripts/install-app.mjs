@@ -34,8 +34,16 @@ let preserveTemporaryDirectory = false
 
 try {
   await executeFile("/usr/bin/ditto", [source, stagedApplication])
-  // Preserve Tauri's certificate signature: ad-hoc re-signing changes the TCC identity.
-  let { stderr: signature } = await executeFile("/usr/bin/codesign", ["--display", "--verbose=2", stagedApplication])
+  // Keep existing certificate signatures; sign worker bundles on the host.
+  let signature = ""
+  try {
+    let result = await executeFile("/usr/bin/codesign", ["--display", "--verbose=2", stagedApplication])
+    signature = result.stderr
+  } catch (error) {
+    if (error.code !== 1 || !error.stderr?.includes("code object is not signed at all")) {
+      throw error
+    }
+  }
   if (!signature.includes("Authority=")) {
     let identity = process.env.APPLE_SIGNING_IDENTITY
     if (!identity || identity === "-") {
