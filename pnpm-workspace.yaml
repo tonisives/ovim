@@ -1,5 +1,8 @@
 packages:
   - .
 
+# Dependency preparation runs in the shared worker.
+verifyDepsBeforeRun: false
+
 allowBuilds:
   esbuild: true
