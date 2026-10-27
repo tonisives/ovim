@@ -37,7 +37,11 @@ try {
   // Preserve Tauri's certificate signature: ad-hoc re-signing changes the TCC identity.
   let { stderr: signature } = await executeFile("/usr/bin/codesign", ["--display", "--verbose=2", stagedApplication])
   if (!signature.includes("Authority=")) {
-    throw new Error("Local installation requires a certificate signature. Run pnpm package with APPLE_SIGNING_IDENTITY set to a code-signing certificate.")
+    let identity = process.env.APPLE_SIGNING_IDENTITY
+    if (!identity || identity === "-") {
+      throw new Error("Local installation requires APPLE_SIGNING_IDENTITY to select a code-signing certificate.")
+    }
+    await executeFile("/usr/bin/codesign", ["--force", "--deep", "--options", "runtime", "--timestamp=none", "--sign", identity, stagedApplication])
   }
   await executeFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", stagedApplication])
 
