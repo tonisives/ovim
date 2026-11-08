@@ -1,21 +1,20 @@
 #!/usr/bin/env node
-import { execFile } from 'node:child_process';
 import { access, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
+import { createHumanTransport } from './transport.mjs';
 
-let execute = promisify(execFile);
 let directory = path.dirname(fileURLToPath(import.meta.url));
 
 export let findCli = async () => {
   for (let candidate of [process.env.BMUX_BIN, '/Applications/bmux.app/Contents/Resources/bin/bmux',
     path.join(os.homedir(), 'Applications/bmux.app/Contents/Resources/bin/bmux'),
-    path.join(os.homedir(), 'workspace/_tools/bmux.app/Contents/Resources/bin/bmux')].filter(Boolean)) {
+    path.join(os.homedir(), 'workspace/_tools/bmux.app/Contents/Resources/bin/bmux'),
+    ...(process.env.PATH ?? '').split(path.delimiter).filter(Boolean).map(directory => path.join(directory, 'bmux'))].filter(Boolean)) {
     if (await access(candidate).then(() => true, () => false)) return candidate;
   }
-  return 'bmux';
+  throw new Error('bmux installation not found');
 };
 
 let script = name => readFile(path.join(directory, name), 'utf8');
@@ -96,20 +95,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     let input = '';
     for await (let chunk of process.stdin) input += chunk;
-    let cli = await findCli();
-    // Desktop launches have a minimal PATH. The CLI's Node launcher must use
-    // the same Node directory as this adapter, without inheriting agent identity.
-    let environment = { ...process.env, PATH: `${path.dirname(process.execPath)}:${process.env.PATH ?? '/usr/bin:/bin'}` };
-    for (let key of Object.keys(environment)) {
-      if (key.startsWith('BMUX_AGENT_') || key.startsWith('CODEX_') || key === 'TMUX' || key === 'TMUX_PANE') delete environment[key];
+    let operation = process.argv[2], request = JSON.parse(input);
+    if (operation === 'capture' && request.bundle_id !== 'bmux.tonis.dev') {
+      console.log(JSON.stringify({ handled: false }));
+      process.exit(0);
     }
-    let run = async args => {
-      let { stdout } = await execute(cli, args, { env: environment, timeout: 8000, maxBuffer: 8 * 1024 * 1024 });
-      let response = JSON.parse(stdout);
-      if (!response.ok) throw new Error(response.error ?? 'bmux command failed');
-      return response.result;
-    };
-    console.log(JSON.stringify(await handle(process.argv[2], JSON.parse(input), run)));
+    let cli = await findCli();
+    let run = await createHumanTransport(cli);
+    console.log(JSON.stringify(await handle(operation, request, run)));
   } catch {
     console.error('Browser edit adapter failed');
     process.exitCode = 1;

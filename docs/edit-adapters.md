@@ -60,7 +60,11 @@ directory and writes a launcher using the current Node executable. It preserves
 an existing custom dispatcher. Re-run the command to update an installed adapter.
 Remove `edit-adapter` to disable it. No app restart is needed for adapter changes.
 
-bmux browser commands accept callers without an agent identity by default. If
-you previously enabled identity requirements, disable **Require agent ID** and
-**Require agent type** in bmux's Bot settings. The adapter edits on your behalf
-and supplies no agent identity.
+The adapter uses bmux's local socket with `inputSource: "human"`. These calls
+skip automation pacing, reading overlays, command labels, agent input locks,
+and bot protection limits. They do not register an agent or inherit terminal
+agent identity. Agent settings can stay enabled for actual automation.
+
+Updates go directly to the socket without launching the CLI for each command.
+The adapter checks `input.capabilities` before editing, so it requires a bmux
+version with human input support. Reopen bmux after installing that update.
