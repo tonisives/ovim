@@ -3,16 +3,6 @@
 use super::types::{CursorPosition, TextAndCursor, ViewportFrame};
 use serde::Deserialize;
 
-/// Bmux reports the native screen origin alongside the viewport rectangle.
-pub fn parse_bmux_element_frame(json: &str) -> Option<super::super::accessibility::ElementFrame> {
-    Some(super::types::viewport_to_element_frame(
-        parse_viewport_frame_json(json)?,
-        extract_json_number(json, "screenX")?,
-        extract_json_number(json, "screenY")?,
-        extract_json_number(json, "windowHeight")?,
-    ))
-}
-
 /// Extract a number from a JSON string by key
 pub fn extract_json_number(json: &str, key: &str) -> Option<f64> {
     let pattern = format!("\"{}\":", key);
@@ -101,16 +91,6 @@ pub fn parse_text_and_cursor_json(json: &str) -> Option<TextAndCursor> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bmux_viewport_rect_converts_to_screen_coordinates() {
-        let frame = parse_bmux_element_frame(
-            r#"{"x":25,"y":300,"width":500,"height":80,"viewportHeight":900,"screenX":-1200,"screenY":39,"windowHeight":958}"#,
-        ).expect("screen rectangle");
-        assert_eq!((frame.x, frame.y, frame.width, frame.height), (-1175.0, 397.0, 500.0, 80.0));
-        assert!(parse_bmux_element_frame("null").is_none());
-        assert!(parse_bmux_element_frame(r#"{"x":1,"y":2,"width":10,"height":10}"#).is_none());
-    }
 
     #[test]
     fn test_parse_viewport_frame_json() {

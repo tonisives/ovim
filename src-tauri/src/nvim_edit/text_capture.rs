@@ -12,6 +12,7 @@ pub struct CaptureResult {
     pub cursor_position: Option<CursorPosition>,
     /// Browser type if this is a browser
     pub browser_target: Option<BrowserTarget>,
+    pub allow_ax_sync: bool,
 }
 
 /// Capture text and element frame from the focused element
@@ -21,8 +22,6 @@ pub fn capture_text_and_frame(
     initial_element_frame: Option<ElementFrame>,
     clipboard_mode: bool,
 ) -> CaptureResult {
-    let browser_target = browser_scripting::detect_browser_target(app_bundle_id);
-
     // If clipboard_mode is enabled, skip smart detection and use clipboard directly
     if clipboard_mode {
         log::info!("Clipboard mode enabled, using Cmd+A/Cmd+C for text capture");
@@ -34,8 +33,14 @@ pub fn capture_text_and_frame(
             element_frame: initial_element_frame,
             cursor_position: None, // No cursor tracking in clipboard mode
             browser_target: None,  // Disable browser-specific features
+            allow_ax_sync: false,
         };
     }
+
+    let (browser_target, adapter_failed) = browser_scripting::detect_browser_target(app_bundle_id);
+    let allow_ax_sync = !adapter_failed
+        && browser_target.is_none()
+        && !browser_scripting::is_browser_bundle(app_bundle_id);
 
     // For browsers, try to get text AND cursor in one JS call
     // This is more reliable as cursor position won't be affected by text capture
@@ -53,7 +58,9 @@ pub fn capture_text_and_frame(
                 );
 
                 // Get element frame if needed
-                let element_frame = if initial_element_frame.is_none() {
+                let element_frame = if matches!(target, BrowserTarget::Adapter(_)) {
+                    browser_scripting::get_browser_element_frame(target).or(initial_element_frame)
+                } else if initial_element_frame.is_none() {
                     log::info!("Getting element frame via browser scripting");
                     browser_scripting::get_browser_element_frame(target)
                 } else {
@@ -65,6 +72,7 @@ pub fn capture_text_and_frame(
                     element_frame,
                     cursor_position: result.cursor,
                     browser_target,
+                    allow_ax_sync: false,
                 };
             }
             log::info!("Text capture: JS found no editable element, falling back to clipboard");
@@ -76,9 +84,7 @@ pub fn capture_text_and_frame(
     // JS capture failed - fall back to clipboard mode
     // IMPORTANT: Clear the browser target since JS-based live sync won't work.
     // This ensures we use clipboard-based restoration instead of failing JS calls
-    log::info!(
-        "JS capture failed, disabling browser live sync for this session"
-    );
+    log::info!("JS capture failed, disabling browser live sync for this session");
 
     // Get element frame from browser scripting (this can still work for positioning)
     let element_frame = if initial_element_frame.is_none() {
@@ -119,6 +125,7 @@ pub fn capture_text_and_frame(
         element_frame,
         cursor_position: None,
         browser_target: effective_browser_target,
+        allow_ax_sync,
     }
 }
 

@@ -125,10 +125,11 @@ Opens your actual Neovim installation in a terminal window. Your full config (`~
 
 With AeroSpace running, Ovim automatically floats its own Alacritty popup before positioning it beside the text field. Regular Alacritty windows keep their layout. This also covers prewarmed editor windows and requires the `aerospace` CLI on PATH or in a standard Homebrew location; no AeroSpace configuration change is needed.
 
-In bmux, live sync keeps trusted keyboard/text input for controlled editors such as X. Temporary replacement selections are hidden only in the edited field, then collapsed and restored after the update, including on failure.
+The optional [bmux edit adapter](docs/edit-adapters.md) keeps trusted keyboard/text input for controlled editors such as X. Temporary replacement selections are hidden only in the edited field, then collapsed and restored after the update, including on failure.
 
 ## More features
 
+- Edit adapters - connect app-specific text capture and synchronization. [docs/edit-adapters.md](docs/edit-adapters.md)
 - Custom launch script - use your own editor. [docs/launcher-script.md](docs/launcher-script.md)
 - CLI - toggle modes via CLI. [docs/cli.md](docs/cli.md)
 

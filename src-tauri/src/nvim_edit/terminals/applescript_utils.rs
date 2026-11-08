@@ -172,6 +172,10 @@ pub fn set_window_size_by_title(process_names: &[&str], title: &str, width: u32,
 /// Set window bounds by title (position and size in one call)
 #[allow(dead_code)]
 pub fn set_window_bounds_by_title(process_names: &[&str], title: &str, x: i32, y: i32, width: u32, height: u32) {
+    if crate::nvim_edit::accessibility::set_window_frame_by_title(process_names, title, x, y, width, height) {
+        log::info!("Positioned popup '{}' through Accessibility", title);
+        return;
+    }
     let name_conditions: Vec<String> = process_names
         .iter()
         .map(|n| format!("name is \"{}\"", n))
@@ -270,6 +274,7 @@ pub fn show_and_position_window_by_title(
     height: u32,
 ) {
     super::aerospace::float_window(title);
+    crate::nvim_edit::accessibility::set_window_frame_by_title(process_names, title, x, y, width, height);
     let name_conditions: Vec<String> = process_names
         .iter()
         .map(|n| format!("name is \"{}\"", n))

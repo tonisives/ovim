@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 
-const source = readFileSync(new URL('../src-tauri/src/nvim_edit/browser_scripting/js/get_element_rect.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../adapters/browser/get_element_rect.js', import.meta.url), 'utf8');
 
 test('returns screen origin alongside a shadow editor viewport rectangle', () => {
   const editor = { getBoundingClientRect: () => ({ left: 25, top: 300, width: 500, height: 80 }) };

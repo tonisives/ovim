@@ -1,7 +1,7 @@
-//! Browser scripting via AppleScript to get focused element positions in web browsers
+//! Browser editing through script adapters or built-in AppleScript transports.
 
+mod adapter;
 mod applescript;
-mod bmux;
 mod javascript;
 mod parsing;
 mod types;
@@ -19,17 +19,24 @@ use javascript::{
 use parsing::{parse_cursor_position_json, parse_text_and_cursor_json, parse_viewport_frame_json};
 use types::viewport_to_element_frame;
 
-pub fn detect_browser_target(bundle_id: &str) -> Option<BrowserTarget> {
-    if bundle_id == types::BMUX_BUNDLE {
-        return match bmux::focused_pane_id() {
-            Ok(pane_id) => Some(BrowserTarget::Bmux { pane_id }),
-            Err(error) => {
-                log::warn!("Failed to identify focused bmux pane: {error}");
-                None
-            }
-        };
+pub fn is_browser_bundle(bundle_id: &str) -> bool {
+    types::detect_browser_type(bundle_id).is_some()
+}
+
+/// The flag indicates a failed adapter capture, which must use paste on exit.
+pub fn detect_browser_target(bundle_id: &str) -> (Option<BrowserTarget>, bool) {
+    match adapter::capture(bundle_id) {
+        Ok(Some(target)) => return (Some(BrowserTarget::Adapter(target)), false),
+        Ok(None) => {}
+        Err(error) => {
+            log::warn!("Edit adapter capture failed: {error}");
+            return (None, true);
+        }
     }
-    types::detect_browser_type(bundle_id).map(BrowserTarget::AppleScript)
+    (
+        types::detect_browser_type(bundle_id).map(BrowserTarget::AppleScript),
+        false,
+    )
 }
 
 fn execute_javascript(target: &BrowserTarget, js: &str) -> Result<String, String> {
@@ -38,13 +45,16 @@ fn execute_javascript(target: &BrowserTarget, js: &str) -> Result<String, String
             let script = build_execute_script(*browser_type, js);
             execute_applescript(&script)
         }
-        BrowserTarget::Bmux { pane_id } => bmux::execute_javascript(pane_id, js),
+        BrowserTarget::Adapter(_) => Err("Adapter does not expose JavaScript execution".into()),
     }
 }
 
 pub fn finish_browser_edit(target: &BrowserTarget, target_element_id: &str) {
-    if let BrowserTarget::Bmux { pane_id } = target {
-        bmux::finish_edit(pane_id, target_element_id);
+    if let BrowserTarget::Adapter(adapter) = target {
+        if let Err(error) = adapter.call("finish", serde_json::json!({"token": target_element_id}))
+        {
+            log::warn!("Edit adapter cleanup failed: {error}");
+        }
     }
 }
 
@@ -56,8 +66,18 @@ pub fn set_browser_element_text(
     text: &str,
     target_element_id: Option<&str>,
 ) -> Result<Option<String>, String> {
-    if let BrowserTarget::Bmux { pane_id } = target {
-        return bmux::replace_text(pane_id, text, target_element_id);
+    if let BrowserTarget::Adapter(adapter) = target {
+        let result = adapter.call(
+            "update",
+            serde_json::json!({"text": text, "token": target_element_id}),
+        )?;
+        return Ok(Some(
+            result
+                .get("token")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("Edit adapter update returned no token")?
+                .to_string(),
+        ));
     }
 
     let js = build_set_element_text_js(text, target_element_id);
@@ -109,6 +129,13 @@ pub fn set_browser_cursor_position(
     line: usize,
     column: usize,
 ) -> Result<(), String> {
+    if let BrowserTarget::Adapter(adapter) = target {
+        adapter.call(
+            "cursor",
+            serde_json::json!({"line": line, "column": column}),
+        )?;
+        return Ok(());
+    }
     let js = build_set_cursor_position_js(line, column);
     let stdout = execute_javascript(target, &js)?;
 
@@ -123,10 +150,13 @@ pub fn set_browser_cursor_position(
 /// Get text AND cursor position in a single JS call
 /// This is more reliable than separate calls as cursor position won't be lost
 pub fn get_browser_text_and_cursor(target: &BrowserTarget) -> Option<TextAndCursor> {
+    if let BrowserTarget::Adapter(adapter) = target {
+        return Some(adapter.capture.clone());
+    }
     let stdout = match execute_javascript(target, &GET_TEXT_AND_CURSOR_JS) {
         Ok(s) => s,
         Err(e) => {
-            log::debug!("get_browser_text_and_cursor AppleScript failed: {}", e);
+            log::warn!("Browser text capture failed: {}", e);
             return None;
         }
     };
@@ -147,6 +177,9 @@ pub fn get_browser_text_and_cursor(target: &BrowserTarget) -> Option<TextAndCurs
 
 /// Get the hostname from the current browser tab
 pub fn get_browser_hostname(target: &BrowserTarget) -> Option<String> {
+    if let BrowserTarget::Adapter(adapter) = target {
+        return adapter.hostname.clone();
+    }
     let js = "window.location.hostname";
     let stdout = match execute_javascript(target, js) {
         Ok(s) => s,
@@ -173,17 +206,8 @@ pub fn get_browser_hostname(target: &BrowserTarget) -> Option<String> {
 pub fn get_browser_element_frame(target: &BrowserTarget) -> Option<ElementFrame> {
     log::info!("Attempting to get element frame from browser: {:?}", target);
 
-    if let BrowserTarget::Bmux { pane_id } = target {
-        // Bmux's Chromium view exposes screen coordinates even when its
-        // native window does not expose AXFocusedWindow.
-        let result = match bmux::execute_javascript(pane_id, &javascript::GET_ELEMENT_RECT_JS) {
-            Ok(result) => result,
-            Err(error) => {
-                log::warn!("Could not read bmux element coordinates: {error}");
-                return None;
-            }
-        };
-        return parsing::parse_bmux_element_frame(&result);
+    if let BrowserTarget::Adapter(adapter) = target {
+        return adapter.frame.clone();
     }
 
     let BrowserTarget::AppleScript(browser_type) = target else {

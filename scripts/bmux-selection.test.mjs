@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 
-const template = readFileSync(new URL('../src-tauri/src/nvim_edit/browser_scripting/js/prepare_bmux_input.js', import.meta.url), 'utf8').replace('{{TARGET_ELEMENT_ID}}', 'test-editor');
+const template = readFileSync(new URL('../adapters/bmux/prepare_input.js', import.meta.url), 'utf8').replace('{{TARGET_ELEMENT_ID}}', 'test-editor');
 
 function prepare(tagName = 'DIV', shadowDepth = 0, text = 'new') {
   let timeout;

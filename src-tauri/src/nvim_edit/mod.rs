@@ -127,6 +127,7 @@ pub fn trigger_nvim_edit(
             Arc::clone(&live_sync_worked),
             browser_target.clone(),
             initial_cursor,
+            capture_result.allow_ax_sync,
         )
     };
 
@@ -179,9 +180,16 @@ fn spawn_rpc_handler(
     live_sync_worked: Arc<AtomicBool>,
     browser_target: Option<browser_scripting::BrowserTarget>,
     initial_cursor: Option<browser_scripting::CursorPosition>,
+    allow_ax_sync: bool,
 ) -> thread::JoinHandle<Option<RpcResult>> {
     let socket_path = session.socket_path.clone();
-    let focus_element = session.focus_context.focused_element.clone();
+    // Browser AXValue writes can change rendered text without updating editor state.
+    // If scripting fails, leave the field intact and paste the saved file on exit.
+    let focus_element = if allow_ax_sync {
+        session.focus_context.focused_element.clone()
+    } else {
+        None
+    };
     let live_sync_enabled = settings.live_sync_enabled;
     let process_id = session.process_id;
 
@@ -346,7 +354,6 @@ fn handle_live_sync_update(
     );
 
     // For browsers, use browser scripting (JS) which works with code editors
-    let mut skip_ax_fallback = false;
     if let Some(target) = browser_target {
         // Get cached element ID if any
         let target_id = cached_element_id.lock().ok().and_then(|g| g.clone());
@@ -367,32 +374,20 @@ fn handle_live_sync_update(
             }
             Err(e) => {
                 log::info!("Browser live sync failed: {}", e);
-                // Lexical and Monaco editors don't respond to AX value changes,
-                // so skip the AX fallback and rely on clipboard mode
-                if e.contains("unsupported_lexical")
-                    || e.contains("unsupported_draftjs")
-                    || e.contains("monaco_dom")
-                {
-                    log::info!("Lexical/Monaco editor detected - will use clipboard mode on exit");
-                    skip_ax_fallback = true;
-                }
+                sync_flag.store(false, Ordering::SeqCst);
+                return;
             }
         }
     }
 
-    // For non-browsers (or browsers where JS didn't work), use accessibility API
-    // Skip for Lexical editors since they ignore AX value changes
-    if !skip_ax_fallback {
-        if let Some(element) = focus_element {
-            match accessibility::set_element_text(element, &text) {
-                Ok(()) => {
-                    sync_flag.store(true, Ordering::SeqCst);
-                    log::info!("Live sync (AX): updated text field ({} chars)", text.len());
-                }
-                Err(e) => {
-                    log::debug!("Accessibility live sync failed: {}", e);
-                }
+    // Native applications can synchronize through accessibility.
+    if let Some(element) = focus_element {
+        match accessibility::set_element_text(element, &text) {
+            Ok(()) => {
+                sync_flag.store(true, Ordering::SeqCst);
+                log::info!("Live sync (AX): updated text field ({} chars)", text.len());
             }
+            Err(e) => log::debug!("Accessibility live sync failed: {}", e),
         }
     }
 }

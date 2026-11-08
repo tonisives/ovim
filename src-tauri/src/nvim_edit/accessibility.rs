@@ -24,6 +24,7 @@ extern "C" {
         attribute: CFTypeRef,
         value: CFTypeRef,
     ) -> i32;
+    fn AXValueCreate(the_type: i32, value: *const std::ffi::c_void) -> CFTypeRef;
     fn AXValueGetValue(
         value: CFTypeRef,
         the_type: i32,
@@ -1071,4 +1072,93 @@ mod tests {
             "Message\n"
         );
     }
+}
+
+/// Position the exact popup using Accessibility, without System Events automation.
+pub fn set_window_frame_by_title(
+    process_names: &[&str],
+    title: &str,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> bool {
+    unsafe {
+        use objc::{class, msg_send, sel, sel_impl};
+        let workspace: *mut objc::runtime::Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let apps: *mut objc::runtime::Object = msg_send![workspace, runningApplications];
+        let count: usize = msg_send![apps, count];
+        for index in 0..count {
+            let app: *mut objc::runtime::Object = msg_send![apps, objectAtIndex: index];
+            let name: *mut objc::runtime::Object = msg_send![app, localizedName];
+            if name.is_null() {
+                continue;
+            }
+            let utf8: *const std::os::raw::c_char = msg_send![name, UTF8String];
+            if utf8.is_null() {
+                continue;
+            }
+            let name = std::ffi::CStr::from_ptr(utf8).to_string_lossy();
+            if !process_names
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            {
+                continue;
+            }
+            let pid: i32 = msg_send![app, processIdentifier];
+            let Some(element) = CFHandle::new(AXUIElementCreateApplication(pid)) else {
+                continue;
+            };
+            let Some(windows) = element.get_attribute("AXWindows") else {
+                continue;
+            };
+            let count = core_foundation::array::CFArrayGetCount(windows.0 as _);
+            for index in 0..count {
+                let window = core_foundation::array::CFArrayGetValueAtIndex(windows.0 as _, index);
+                let Some(window) = AXElementHandle::new(window) else {
+                    continue;
+                };
+                let window_ref = CFHandle(CFRetain(window.as_ptr()));
+                if window_ref
+                    .get_attribute("AXTitle")
+                    .and_then(CFHandle::into_string)
+                    .as_deref()
+                    != Some(title)
+                {
+                    continue;
+                }
+                let point = core_graphics::geometry::CGPoint::new(x as f64, y as f64);
+                let size = core_graphics::geometry::CGSize::new(width as f64, height as f64);
+                let Some(position) =
+                    CFHandle::new(AXValueCreate(kAXValueCGPointType, &point as *const _ as _))
+                else {
+                    return false;
+                };
+                let Some(size) =
+                    CFHandle::new(AXValueCreate(kAXValueCGSizeType, &size as *const _ as _))
+                else {
+                    return false;
+                };
+                let size_result = AXUIElementSetAttributeValue(
+                    window.as_ptr(),
+                    CFString::new("AXSize").as_CFTypeRef(),
+                    size.0,
+                );
+                let position_result = AXUIElementSetAttributeValue(
+                    window.as_ptr(),
+                    CFString::new("AXPosition").as_CFTypeRef(),
+                    position.0,
+                );
+                if size_result != 0 || position_result != 0 {
+                    log::warn!(
+                        "AX popup placement failed: size={}, position={}",
+                        size_result,
+                        position_result
+                    );
+                }
+                return size_result == 0 && position_result == 0;
+            }
+        }
+    }
+    false
 }
