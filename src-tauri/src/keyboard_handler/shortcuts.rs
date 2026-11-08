@@ -152,6 +152,8 @@ pub fn check_click_mode_shortcut(
         mgr.set_activating();
     }
 
+    let style = HintStyle::from(click_settings);
+
     // Activate click mode on a separate thread
     let manager = Arc::clone(&click_mode_manager);
     thread::spawn(move || {
@@ -160,7 +162,6 @@ pub fn check_click_mode_shortcut(
             match mgr.activate() {
                 Ok(elements) => {
                     log::info!("Click mode activated with {} elements", elements.len());
-                    let style = HintStyle::default();
                     native_hints::show_hints(&elements, &style);
                     if let Some(app) = get_app_handle() {
                         let _ = app.emit("click-mode-activated", ());

@@ -12,6 +12,7 @@ use objc::{class, msg_send, sel, sel_impl};
 use std::sync::Mutex;
 
 use super::element::ClickableElement;
+use crate::config::click_mode::ClickModeSettings;
 
 // ============================================================================
 // Types
@@ -52,12 +53,40 @@ pub struct HintStyle {
 
 impl Default for HintStyle {
     fn default() -> Self {
+        Self::from(&ClickModeSettings::default())
+    }
+}
+
+impl From<&ClickModeSettings> for HintStyle {
+    fn from(settings: &ClickModeSettings) -> Self {
         Self {
-            font_size: 11.0,
-            bg_color: (1.0, 0.8, 0.0),
-            text_color: (0.0, 0.0, 0.0),
-            opacity: 0.95,
+            font_size: f64::from(settings.hint_font_size),
+            bg_color: parse_hex_color(&settings.hint_bg_color).unwrap_or((1.0, 0.8, 0.0)),
+            text_color: parse_hex_color(&settings.hint_text_color).unwrap_or((0.0, 0.0, 0.0)),
+            opacity: f64::from(settings.hint_opacity),
         }
+    }
+}
+
+fn parse_hex_color(color: &str) -> Option<(f64, f64, f64)> {
+    let hex = color.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let rgb = u32::from_str_radix(hex, 16).ok()?;
+    Some((
+        f64::from((rgb >> 16) & 0xff) / 255.0,
+        f64::from((rgb >> 8) & 0xff) / 255.0,
+        f64::from(rgb & 0xff) / 255.0,
+    ))
+}
+
+impl HintStyle {
+    fn hint_size(&self, hint: &str) -> core_graphics::geometry::CGSize {
+        core_graphics::geometry::CGSize::new(
+            (hint.len() as f64 * self.font_size * 0.75).max(20.0) + 8.0,
+            self.font_size + 4.0,
+        )
     }
 }
 
@@ -205,16 +234,18 @@ unsafe fn create_pooled_window(style: &HintStyle) -> Option<PooledWindow> {
 // ============================================================================
 
 /// Show native hint windows for the given elements using the pre-created pool
-pub fn show_hints(elements: &[ClickableElement], _style: &HintStyle) {
+pub fn show_hints(elements: &[ClickableElement], style: &HintStyle) {
     let start = std::time::Instant::now();
 
+    let style = style.clone();
     let elements = elements.to_vec();
     let element_count = elements.len();
 
     log::info!(
-        "[TIMING] show_hints prep took {}ms for {} elements",
+        "[TIMING] show_hints prep took {}ms for {} elements (font_size={})",
         start.elapsed().as_millis(),
-        element_count
+        element_count,
+        style.font_size
     );
 
     let queued_at = std::time::Instant::now();
@@ -246,9 +277,18 @@ pub fn show_hints(elements: &[ClickableElement], _style: &HintStyle) {
                 // Show new hints by repositioning pool windows
                 let show_start = std::time::Instant::now();
                 let count = elements.len().min(pool.windows.len());
-                let font_size = 11.0f64;
-                let hint_height = font_size + 4.0;
-                let char_width = font_size * 0.75;
+                // Refresh appearance even when reusing windows created at startup.
+                let font: *mut objc::runtime::Object = unsafe {
+                    msg_send![class!(NSFont), boldSystemFontOfSize: style.font_size]
+                };
+                let text_color: *mut objc::runtime::Object = unsafe {
+                    msg_send![class!(NSColor), colorWithRed: style.text_color.0
+                        green: style.text_color.1 blue: style.text_color.2 alpha: 1.0f64]
+                };
+                let bg_color: *mut objc::runtime::Object = unsafe {
+                    msg_send![class!(NSColor), colorWithRed: style.bg_color.0
+                        green: style.bg_color.1 blue: style.bg_color.2 alpha: style.opacity]
+                };
 
                 for (i, element) in elements.iter().take(count).enumerate() {
                     let pw = &pool.windows[i];
@@ -258,8 +298,8 @@ pub fn show_hints(elements: &[ClickableElement], _style: &HintStyle) {
                         continue;
                     }
 
-                    let width = (element.hint.len() as f64 * char_width).max(20.0) + 8.0;
-                    let cocoa_y = screen_height - element.y - hint_height;
+                    let size = style.hint_size(&element.hint);
+                    let cocoa_y = screen_height - element.y - size.height;
 
                     if i < 3 {
                         log::info!(
@@ -273,6 +313,13 @@ pub fn show_hints(elements: &[ClickableElement], _style: &HintStyle) {
                     }
 
                     unsafe {
+                        let _: () = msg_send![tf, setFont: font];
+                        let _: () = msg_send![tf, setTextColor: text_color];
+                        let content_view: *mut objc::runtime::Object = msg_send![w, contentView];
+                        let layer: *mut objc::runtime::Object = msg_send![content_view, layer];
+                        let cg_color: CFTypeRef = msg_send![bg_color, CGColor];
+                        let _: () = msg_send![layer, setBackgroundColor: cg_color];
+
                         // Update text
                         let nsstring = create_nsstring(&element.hint);
                         let _: () = msg_send![tf, setStringValue: nsstring];
@@ -280,14 +327,14 @@ pub fn show_hints(elements: &[ClickableElement], _style: &HintStyle) {
                         // Resize text field
                         let tf_frame = core_graphics::geometry::CGRect::new(
                             &core_graphics::geometry::CGPoint::new(0.0, 0.0),
-                            &core_graphics::geometry::CGSize::new(width, hint_height),
+                            &size,
                         );
                         let _: () = msg_send![tf, setFrame: tf_frame];
 
                         // Reposition and resize window
                         let frame = core_graphics::geometry::CGRect::new(
                             &core_graphics::geometry::CGPoint::new(element.x, cocoa_y),
-                            &core_graphics::geometry::CGSize::new(width, hint_height),
+                            &size,
                         );
                         let _: () = msg_send![w, setFrame: frame display: false];
 
@@ -489,4 +536,50 @@ unsafe fn create_nsstring(s: &str) -> *mut objc::runtime::Object {
     let bytes = s.as_ptr();
     let len = s.len();
     msg_send![nsstring, initWithBytes: bytes length: len encoding: 4u64]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_appearance_controls_native_hint_style_and_size() {
+        let mut settings = ClickModeSettings {
+            hint_font_size: 8,
+            hint_bg_color: "#336699".to_string(),
+            hint_text_color: "#FFFFFF".to_string(),
+            hint_opacity: 0.5,
+            ..ClickModeSettings::default()
+        };
+        let small = HintStyle::from(&settings);
+        assert_eq!(small.font_size, 8.0);
+        assert_eq!(small.bg_color, (0.2, 0.4, 0.6));
+        assert_eq!(small.text_color, (1.0, 1.0, 1.0));
+        assert_eq!(small.opacity, 0.5);
+
+        settings.hint_font_size = 24;
+        let large = HintStyle::from(&settings);
+        assert_eq!(large.font_size, 24.0);
+        for hint in ["A", "AS", "ASF"] {
+            let small_size = small.hint_size(hint);
+            let large_size = large.hint_size(hint);
+            assert!(large_size.width >= small_size.width);
+            assert_eq!(small_size.height, 12.0);
+            assert_eq!(large_size.height, 28.0);
+        }
+        assert!(large.hint_size("AS").width > small.hint_size("AS").width);
+    }
+
+    #[test]
+    fn invalid_colors_use_default_hint_colors() {
+        let settings = ClickModeSettings {
+            hint_bg_color: "invalid".to_string(),
+            hint_text_color: "#fff".to_string(),
+            ..ClickModeSettings::default()
+        };
+        let style = HintStyle::from(&settings);
+        let default_style = HintStyle::default();
+        assert_eq!(style.bg_color, default_style.bg_color);
+        assert_eq!(style.text_color, default_style.text_color);
+    }
 }

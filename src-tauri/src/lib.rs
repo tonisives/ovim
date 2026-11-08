@@ -148,12 +148,15 @@ fn handle_ipc_command(
             IpcResponse::Ok
         }
         IpcCommand::ClickMode => {
-            let is_disabled_for_app = {
+            let (is_disabled_for_app, style) = {
                 let s = settings.lock().unwrap();
                 if !s.click_mode.enabled {
                     return IpcResponse::Error("Click Mode is disabled".to_string());
                 }
-                click_mode::is_disabled_for_frontmost_app(&s.click_mode)
+                (
+                    click_mode::is_disabled_for_frontmost_app(&s.click_mode),
+                    click_mode::native_hints::HintStyle::from(&s.click_mode),
+                )
             };
             if is_disabled_for_app {
                 return IpcResponse::Error(
@@ -177,7 +180,6 @@ fn handle_ipc_command(
                     match mgr.activate() {
                         Ok(elements) => {
                             log::info!("Click mode activated via IPC with {} elements", elements.len());
-                            let style = click_mode::native_hints::HintStyle::default();
                             click_mode::native_hints::show_hints(&elements, &style);
                             if let Some(app) = get_app_handle() {
                                 let _ = app.emit("click-mode-activated", ());
@@ -289,6 +291,7 @@ fn handle_double_tap_activation(
 
     if click_mode_enabled {
         log::info!("Double-tap {:?} detected - activating click mode", double_tap_key);
+        let style = click_mode::native_hints::HintStyle::from(&settings_guard.click_mode);
         drop(settings_guard);
 
         // Activate click mode
@@ -309,7 +312,6 @@ fn handle_double_tap_activation(
                 match mgr.activate() {
                     Ok(elements) => {
                         log::info!("[TIMING] activate() done at {}ms with {} elements", dt_start.elapsed().as_millis(), elements.len());
-                        let style = click_mode::native_hints::HintStyle::default();
                         click_mode::native_hints::show_hints(&elements, &style);
                         log::info!("[TIMING] show_hints() returned at {}ms", dt_start.elapsed().as_millis());
                         if let Some(app) = get_app_handle() {
