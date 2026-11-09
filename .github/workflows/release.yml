@@ -5,10 +5,23 @@ on:
     types:
       - published
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag
+        required: true
+        type: string
+      finalize_only:
+        description: Reuse uploaded builds and finish updater and Homebrew metadata
+        default: false
+        type: boolean
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
 
 jobs:
   # Update version in repo before building
   update-version:
+    if: ${{ !inputs.finalize_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -32,7 +45,7 @@ jobs:
       - name: Update version if release starts with 'v'
         shell: bash
         run: |
-          TAG_NAME="${{ github.ref_name }}"
+          TAG_NAME="${{ env.RELEASE_TAG }}"
           echo "Release tag: $TAG_NAME"
 
           if [[ "$TAG_NAME" =~ ^v ]]; then
@@ -168,12 +181,12 @@ jobs:
 
           if [ -n "$TAR_GZ" ]; then
             cp "$TAR_GZ" "ovim_${{ matrix.arch }}.app.tar.gz"
-            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz" --clobber --repo "${{ github.repository }}"
+            gh release upload "${{ env.RELEASE_TAG }}" "ovim_${{ matrix.arch }}.app.tar.gz" --clobber --repo "${{ github.repository }}"
           fi
 
           if [ -n "$SIG" ]; then
             cp "$SIG" "ovim_${{ matrix.arch }}.app.tar.gz.sig"
-            gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.app.tar.gz.sig" --clobber --repo "${{ github.repository }}"
+            gh release upload "${{ env.RELEASE_TAG }}" "ovim_${{ matrix.arch }}.app.tar.gz.sig" --clobber --repo "${{ github.repository }}"
           fi
 
   # Sign and notarize the app
@@ -282,61 +295,68 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" "ovim_${{ matrix.arch }}.dmg" --clobber --repo "${{ github.repository }}"
+          gh release upload "${{ env.RELEASE_TAG }}" "ovim_${{ matrix.arch }}.dmg" --clobber --repo "${{ github.repository }}"
 
   # Generate latest.json for updater
   generate-latest-json:
     needs: [sign, sign-updater]
+    if: ${{ !cancelled() && (inputs.finalize_only || (needs.sign.result == 'success' && needs.sign-updater.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Download signatures
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Download signature files
-          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_aarch64.app.tar.gz.sig" -o sig-arm.txt
-          curl -sL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_x64.app.tar.gz.sig" -o sig-intel.txt
-
-          echo "SIG_ARM=$(cat sig-arm.txt)" >> $GITHUB_ENV
-          echo "SIG_INTEL=$(cat sig-intel.txt)" >> $GITHUB_ENV
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'ovim_*.app.tar.gz.sig' --dir signatures
+          test -s signatures/ovim_aarch64.app.tar.gz.sig
+          test -s signatures/ovim_x64.app.tar.gz.sig
 
       - name: Create latest.json
         run: |
-          VERSION="${{ github.ref_name }}"
-          # Remove 'v' prefix if present for version field
-          VERSION_NUM="${VERSION#v}"
+          python3 - <<'PYTHON'
+          import base64
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
 
-          cat > latest.json << EOF
-          {
-            "version": "${VERSION_NUM}",
-            "notes": "See release notes at https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "${SIG_ARM}",
-                "url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_aarch64.app.tar.gz"
-              },
-              "darwin-x86_64": {
-                "signature": "${SIG_INTEL}",
-                "url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ovim_x64.app.tar.gz"
+          tag = os.environ['RELEASE_TAG']
+          repository = os.environ['GITHUB_REPOSITORY']
+          if not tag.startswith('v'):
+              raise ValueError('Expected a version tag beginning with v')
+          release_url = f'https://github.com/{repository}/releases'
+          platforms = {}
+          for arch, platform in [('aarch64', 'darwin-aarch64'), ('x64', 'darwin-x86_64')]:
+              signature = Path(f'signatures/ovim_{arch}.app.tar.gz.sig').read_text().strip()
+              decoded = base64.b64decode(signature, validate=True)
+              if not decoded.startswith(b'untrusted comment:'):
+                  raise ValueError(f'Invalid updater signature for {arch}')
+              platforms[platform] = {
+                  'signature': signature,
+                  'url': f'{release_url}/download/{tag}/ovim_{arch}.app.tar.gz',
               }
-            }
+          manifest = {
+              'version': tag[1:],
+              'notes': f'See release notes at {release_url}/tag/{tag}',
+              'pub_date': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'platforms': platforms,
           }
-          EOF
-
-          cat latest.json
+          Path('latest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PYTHON
 
       - name: Upload latest.json to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" latest.json --clobber --repo "${{ github.repository }}"
+          gh release upload "${{ env.RELEASE_TAG }}" latest.json --clobber --repo "${{ github.repository }}"
 
   # Update Homebrew tap with new SHA256 checksums
   update-homebrew:
     needs: [sign, generate-latest-json]
+    if: ${{ !cancelled() && needs.generate-latest-json.result == 'success' && (inputs.finalize_only || needs.sign.result == 'success') }}
     runs-on: macos-15
     timeout-minutes: 30
     permissions:
