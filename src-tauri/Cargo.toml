@@ -1,6 +1,6 @@
 [package]
 name = "ovim-rust"
-version = "0.1.0"
+version = "0.1.1"
 description = "System-wide Vim mode for macOS"
 authors = ["tonis"]
 edition = "2021"
