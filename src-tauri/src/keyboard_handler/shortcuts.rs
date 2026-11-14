@@ -238,7 +238,7 @@ pub fn process_vim_input(
     // Check if vim mode is disabled
     {
         let settings_guard = settings.lock().unwrap();
-        if !settings_guard.enabled {
+        if !settings_guard.enabled || is_frontmost_app_ignored(&settings_guard.ignored_apps) {
             return Some(event);
         }
     }
