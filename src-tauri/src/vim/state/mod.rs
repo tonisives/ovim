@@ -160,6 +160,13 @@ impl VimState {
             None => return ProcessResult::PassThrough,
         };
 
+        // Cmd/Option combos are app and window-manager shortcuts (Cmd+L,
+        // AeroSpace's Alt bindings), never vim commands
+        if self.mode != VimMode::Insert && (event.modifiers.option || event.modifiers.command) {
+            self.reset_pending();
+            return ProcessResult::PassThrough;
+        }
+
         match self.mode {
             VimMode::Insert => ProcessResult::PassThrough,
             VimMode::Normal => self.process_normal_mode(keycode, &event.modifiers),
@@ -178,6 +185,10 @@ impl VimState {
             Some(k) => k,
             None => return ProcessResult::PassThrough,
         };
+
+        if event.modifiers.option || event.modifiers.command {
+            return ProcessResult::PassThrough;
+        }
 
         // Check if this is a key we would handle (suppress its key up too)
         let should_suppress = matches!(
